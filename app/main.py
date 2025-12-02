@@ -8,7 +8,8 @@ from fastapi import FastAPI  # The FastAPI framework
 from fastapi.middleware.cors import CORSMiddleware  # Cross-Origin Resource Sharing
 
 from app.core.config import settings  # Application settings
-from app.routers import auth, users  # Route handlers (endpoints)
+from app.routers import auth, users, devices, commands  # Route handlers (endpoints)
+from app.routers import websocket as ws_router  # WebSocket router
 
 # ---------------------------------------------------------------------------
 # CREATE FASTAPI APPLICATION
@@ -60,8 +61,14 @@ app.add_middleware(
 # 
 # auth.router: /auth/register, /auth/login
 # users.router: /users/me
+# devices.router: /devices CRUD + pairing
+# commands.router: /commands for sending commands to devices
+# ws_router.router: /ws/devices WebSocket for Pi agents
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(devices.router)
+app.include_router(commands.router)
+app.include_router(ws_router.router)
 
 
 # ---------------------------------------------------------------------------

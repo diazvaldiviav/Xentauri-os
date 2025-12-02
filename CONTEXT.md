@@ -1,8 +1,8 @@
 # Jarvis Project Context
 
 > **Last Updated:** December 2, 2025  
-> **Current Sprint:** Sprint 1 - Backend Foundations  
-> **Status:** ✅ API running locally with auth endpoints
+> **Current Sprint:** Sprint 2 - WebSocket Hub + Device Management  
+> **Status:** ✅ Device CRUD, pairing, WebSocket hub, and command routing implemented
 
 Jarvis is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
 
@@ -14,7 +14,7 @@ Jarvis is an intelligent screen control system that lets users operate multiple 
 
 ## 📊 Project Progress
 
-### Sprint 1: Backend Foundations ✅ IN PROGRESS
+### Sprint 1: Backend Foundations ✅ COMPLETE
 | Task | Status |
 |------|--------|
 | FastAPI project structure | ✅ Done |
@@ -29,18 +29,25 @@ Jarvis is an intelligent screen control system that lets users operate multiple 
 | Database migrations | ✅ Done |
 | Deploy to Fly.io | ⏳ Pending |
 
-### Sprint 2: Device Management (Next)
-- POST /devices - Register a new device
-- GET /devices - List user's devices
-- GET /devices/{id} - Get device details
-- PATCH /devices/{id} - Update device
-- DELETE /devices/{id} - Remove device
-- Device pairing flow with agent_id
+### Sprint 2: WebSocket Hub + Device Management ✅ COMPLETE
+| Task | Status |
+|------|--------|
+| Device CRUD endpoints | ✅ Done |
+| Device schemas (Pydantic) | ✅ Done |
+| Pairing code service (generate, validate, consume) | ✅ Done |
+| WebSocket connection manager | ✅ Done |
+| WebSocket endpoint (ws/devices) | ✅ Done |
+| Command routing service | ✅ Done |
+| Command endpoints (send, power, status) | ✅ Done |
+| Pytest test suite | ✅ Done |
 
-### Sprint 3: Commands & WebSocket (Future)
-- Command model and endpoints
-- WebSocket connection for real-time
-- Command lifecycle (pending → executing → completed/failed)
+### Sprint 3: Raspberry Pi Agent (Next)
+- Agent project structure (Python)
+- WebSocket client to connect to cloud
+- Pairing flow implementation
+- HDMI-CEC command execution (cec-client)
+- Command acknowledgment and status reporting
+- Local configuration and persistence
 
 ---
 
@@ -63,10 +70,23 @@ Jarvis_Cloud/
 │   │   └── device.py        # Device ORM model
 │   ├── routers/
 │   │   ├── auth.py          # /auth/register, /auth/login
-│   │   └── users.py         # /users/me
+│   │   ├── users.py         # /users/me
+│   │   ├── devices.py       # Device CRUD + pairing
+│   │   ├── commands.py      # Send commands to devices
+│   │   └── websocket.py     # WebSocket for Pi agents
+│   ├── services/
+│   │   ├── pairing.py       # Pairing code generation/validation
+│   │   ├── websocket_manager.py  # Connection manager
+│   │   └── commands.py      # Command routing service
 │   └── schemas/
 │       ├── auth.py          # Request/response schemas for auth
-│       └── user.py          # UserOut schema
+│       ├── user.py          # UserOut schema
+│       └── device.py        # Device schemas
+├── tests/
+│   ├── conftest.py          # Pytest fixtures
+│   ├── test_devices.py      # Device CRUD tests
+│   ├── test_pairing.py      # Pairing service tests
+│   └── test_websocket_manager.py  # WebSocket manager tests
 ├── alembic/                  # Database migrations
 ├── venv/                     # Python virtual environment
 ├── .env                      # Environment variables (not in git)
@@ -82,12 +102,45 @@ Jarvis_Cloud/
 
 ## 🔌 API Endpoints (Current)
 
+### Authentication
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | /auth/register | No | Create new user account |
+| POST | /auth/login | No | Login, returns JWT token |
+
+### Users
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | /users/me | Yes | Get current user profile |
+
+### Devices
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | /devices | Yes | Create a new device |
+| GET | /devices | Yes | List user's devices |
+| GET | /devices/{id} | Yes | Get device details |
+| PATCH | /devices/{id} | Yes | Update device |
+| DELETE | /devices/{id} | Yes | Delete device |
+| POST | /devices/{id}/pairing-code | Yes | Generate pairing code |
+| POST | /devices/pair | No | Pair agent with device (uses pairing code) |
+
+### Commands
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | /commands/{device_id} | Yes | Send custom command |
+| POST | /commands/{device_id}/power/on | Yes | Turn device on |
+| POST | /commands/{device_id}/power/off | Yes | Turn device off |
+| GET | /commands/{device_id}/status | Yes | Check if device is online |
+
+### WebSocket
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| ws://.../ws/devices?agent_id=xxx | No | Agent connection (Pi connects here) |
+
+### System
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | /health | No | Health check |
-| POST | /auth/register | No | Create new user account |
-| POST | /auth/login | No | Login, returns JWT token |
-| GET | /users/me | Yes | Get current user profile |
 
 **API Docs:** http://localhost:8000/docs
 
@@ -105,6 +158,7 @@ Jarvis_Cloud/
 | Auth | JWT (python-jose) | 3.3.0 |
 | Password | bcrypt (passlib) | 1.7.4 |
 | Validation | Pydantic | 2.9.2 |
+| Testing | Pytest | 8.3.3 |
 | Deployment | Fly.io | - |
 
 ---
@@ -222,7 +276,15 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440  # 24 hours
 
 ## 📝 Session Notes
 
-### December 2, 2025
+### December 2, 2025 - Sprint 2 Complete
+- **Device CRUD:** Full REST endpoints for managing devices
+- **Pairing Service:** 6-character codes, 15-min TTL, one-time use
+- **WebSocket Hub:** Connection manager for Pi agents (device_id → connection)
+- **Command Routing:** Send commands through WebSocket to connected devices
+- **Test Suite:** Pytest tests for devices, pairing, and WebSocket manager
+- All code has detailed comments for learning
+
+### December 2, 2025 - Sprint 1 Complete
 - Created project structure with FastAPI
 - Implemented User and Device models with SQLAlchemy
 - Added auth endpoints: register and login with JWT
@@ -232,10 +294,10 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440  # 24 hours
 - API running locally on port 8000
 
 ### Next Session Tasks
-1. Start PostgreSQL and run Alembic migrations
-2. Test register/login endpoints with curl or Swagger UI
+1. Install test dependencies: `pip install pytest pytest-asyncio`
+2. Run tests: `python -m pytest tests/ -v`
 3. Deploy to Fly.io
-4. Start Sprint 2: Device CRUD endpoints
+4. Start Sprint 3: Raspberry Pi Agent
 
 ---
 
