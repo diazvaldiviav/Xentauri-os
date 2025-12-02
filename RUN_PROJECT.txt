@@ -1,0 +1,93 @@
+================================================================================
+                    JARVIS CLOUD - HOW TO RUN THE PROJECT
+================================================================================
+
+STEP 1: Open Terminal and navigate to the project
+--------------------------------------------------------------------------------
+cd /Users/victordiaz/Jarvis/Jarvis_Cloud
+
+
+STEP 2: Activate the virtual environment
+--------------------------------------------------------------------------------
+source venv/bin/activate
+
+# You should see (venv) at the beginning of your terminal prompt:
+# (venv) victordiaz@Victors-iMac Jarvis_Cloud %
+
+
+STEP 3: Start PostgreSQL (if not already running)
+--------------------------------------------------------------------------------
+# Check if container is running:
+docker ps | grep jarvis-postgres
+
+# If NOT running, start it:
+docker start jarvis-postgres
+
+# If container doesn't exist yet, create it:
+docker run -d \
+  --name jarvis-postgres \
+  -e POSTGRES_USER=jarvis \
+  -e POSTGRES_PASSWORD=jarvis123 \
+  -e POSTGRES_DB=jarvis_db \
+  -p 5432:5432 \
+  postgres:16
+
+
+STEP 4: Run the API server
+--------------------------------------------------------------------------------
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+
+STEP 5: Test the API
+--------------------------------------------------------------------------------
+# Health check:
+curl http://localhost:8000/health
+
+# Interactive API docs (open in browser):
+http://localhost:8000/docs
+
+
+================================================================================
+                              QUICK REFERENCE
+================================================================================
+
+| Task                      | Command                                         |
+|---------------------------|------------------------------------------------|
+| Activate venv             | source venv/bin/activate                       |
+| Deactivate venv           | deactivate                                     |
+| Start server              | python -m uvicorn app.main:app --reload        |
+| Stop server               | Ctrl + C                                       |
+| Start PostgreSQL          | docker start jarvis-postgres                   |
+| Stop PostgreSQL           | docker stop jarvis-postgres                    |
+| View DB logs              | docker logs jarvis-postgres                    |
+| Run migrations            | python -m alembic upgrade head                 |
+| Create new migration      | python -m alembic revision --autogenerate -m "message" |
+| Install new dependency    | pip install <package> && pip freeze > requirements.txt |
+
+
+================================================================================
+                              TROUBLESHOOTING
+================================================================================
+
+Problem: ModuleNotFoundError: No module named 'xxx'
+Solution: Make sure venv is activated (you should see (venv) in prompt)
+          Then run: pip install -r requirements.txt
+
+Problem: uvicorn uses wrong Python
+Solution: Always use: python -m uvicorn (not just uvicorn)
+
+Problem: Database connection error
+Solution: Make sure PostgreSQL is running: docker start jarvis-postgres
+
+Problem: Port 8000 already in use
+Solution: Kill the process: lsof -ti:8000 | xargs kill -9
+          Or use a different port: --port 8001
+
+
+================================================================================
+                            ONE-LINER TO START
+================================================================================
+
+# Copy and paste this to start everything at once:
+cd /Users/victordiaz/Jarvis/Jarvis_Cloud && source venv/bin/activate && docker start jarvis-postgres && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
