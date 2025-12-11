@@ -10,3 +10,9 @@ venv/
 dist/
 build/
 .DS_Store
+
+# Sensitive files - NEVER commit API keys!
+apykays.txt
+*.keys
+*secrets*
+credentials.json

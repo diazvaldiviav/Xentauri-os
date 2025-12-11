@@ -69,6 +69,58 @@ class Settings(BaseSettings):
     # - Balance security (shorter) vs UX (longer)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
+    # ---------------------------------------------------------------------------
+    # AI/LLM PROVIDER SETTINGS (Sprint 3)
+    # ---------------------------------------------------------------------------
+    # GEMINI_API_KEY: Google's Gemini API for the orchestrator (fast, cheap)
+    # - Gemini Flash is used as the router/orchestrator
+    # - Handles simple tasks directly, routes complex ones to other models
+    GEMINI_API_KEY: str = ""
+    
+    # OPENAI_API_KEY: OpenAI's GPT API for code generation and tool usage
+    # - Used for tasks requiring code, API calls, or structured execution
+    OPENAI_API_KEY: str = ""
+    
+    # ANTHROPIC_API_KEY: Anthropic's Claude API for deep reasoning
+    # - Used for complex planning, critical decisions, and nuanced analysis
+    ANTHROPIC_API_KEY: str = ""
+    
+    # ---------------------------------------------------------------------------
+    # AI MODEL CONFIGURATION
+    # ---------------------------------------------------------------------------
+    # Default models for each provider (can be overridden per-request)
+    GEMINI_MODEL: str = "gemini-2.5-flash-lite"  # Fast, cheap orchestrator
+    OPENAI_MODEL: str = "gpt-4o"  # Capable model for complex tasks
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"  # Deep reasoning model
+    
+    # AI Request timeout in seconds
+    AI_REQUEST_TIMEOUT: int = 30
+
+    # ---------------------------------------------------------------------------
+    # GOOGLE OAUTH SETTINGS (Sprint 3.5)
+    # ---------------------------------------------------------------------------
+    # Google Cloud Console: https://console.cloud.google.com/apis/credentials
+    # 
+    # Setup Instructions:
+    # 1. Create a new project in Google Cloud Console
+    # 2. Enable the Google Calendar API
+    # 3. Configure OAuth consent screen (External, add test users)
+    # 4. Create OAuth 2.0 Client ID (Web application)
+    # 5. Add authorized redirect URI: http://localhost:8000/auth/google/callback
+    # 6. Copy Client ID and Client Secret to .env file
+    
+    # GOOGLE_CLIENT_ID: OAuth 2.0 Client ID from Google Cloud Console
+    GOOGLE_CLIENT_ID: str = ""
+    
+    # GOOGLE_CLIENT_SECRET: OAuth 2.0 Client Secret from Google Cloud Console
+    GOOGLE_CLIENT_SECRET: str = ""
+    
+    # GOOGLE_REDIRECT_URI: Where Google sends users after authorization
+    # - Must match exactly what's configured in Google Cloud Console
+    # - For local dev: http://localhost:8000/auth/google/callback
+    # - For production: https://your-domain.com/auth/google/callback
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/auth/google/callback"
+
 
 # ---------------------------------------------------------------------------
 # GLOBAL SETTINGS INSTANCE

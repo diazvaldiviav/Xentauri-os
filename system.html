@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis System Architecture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 40px;
+            font-size: 1.1rem;
+        }
+
+        .status-badge {
+            display: inline-block;
+            background: #10b981;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            margin-left: 10px;
+        }
+
+        /* Main Architecture Diagram */
+        .architecture {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 30px;
+            margin-bottom: 50px;
+            flex-wrap: wrap;
+        }
+
+        .component {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 25px;
+            min-width: 280px;
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .component:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .component.ios {
+            border-color: #007AFF;
+            box-shadow: 0 0 30px rgba(0, 122, 255, 0.2);
+        }
+
+        .component.cloud {
+            border-color: #7b2cbf;
+            box-shadow: 0 0 30px rgba(123, 44, 191, 0.2);
+            min-width: 400px;
+        }
+
+        .component.pi {
+            border-color: #10b981;
+            box-shadow: 0 0 30px rgba(16, 185, 129, 0.2);
+        }
+
+        .component-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+
+        .component-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .component-subtitle {
+            color: #888;
+            font-size: 0.9rem;
+            margin-bottom: 15px;
+        }
+
+        .component-features {
+            list-style: none;
+            font-size: 0.85rem;
+        }
+
+        .component-features li {
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .component-features li:last-child {
+            border-bottom: none;
+        }
+
+        .check {
+            color: #10b981;
+        }
+
+        .pending {
+            color: #f59e0b;
+        }
+
+        /* Connection Arrows */
+        .arrow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: #666;
+        }
+
+        .arrow-line {
+            width: 80px;
+            height: 3px;
+            background: linear-gradient(90deg, #007AFF, #7b2cbf);
+            position: relative;
+        }
+
+        .arrow-line::after {
+            content: '▶';
+            position: absolute;
+            right: -10px;
+            top: -8px;
+            color: #7b2cbf;
+        }
+
+        .arrow-label {
+            font-size: 0.75rem;
+            margin-top: 5px;
+            text-align: center;
+        }
+
+        .arrow.bidirectional .arrow-line::before {
+            content: '◀';
+            position: absolute;
+            left: -10px;
+            top: -8px;
+            color: #007AFF;
+        }
+
+        /* Flow Diagrams */
+        .section {
+            margin-bottom: 50px;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Flow Chart */
+        .flow-container {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 16px;
+            padding: 30px;
+            overflow-x: auto;
+        }
+
+        .flow {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            min-width: max-content;
+            padding: 10px 0;
+        }
+
+        .flow-step {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 15px 20px;
+            min-width: 150px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .flow-step.start {
+            background: linear-gradient(135deg, #007AFF, #0056b3);
+            border: none;
+        }
+
+        .flow-step.end {
+            background: linear-gradient(135deg, #10b981, #059669);
+            border: none;
+        }
+
+        .flow-step.process {
+            border-color: #7b2cbf;
+        }
+
+        .flow-step.decision {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            border: none;
+            transform: rotate(0deg);
+        }
+
+        .flow-step-title {
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .flow-step-desc {
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .flow-arrow {
+            color: #666;
+            font-size: 1.5rem;
+        }
+
+        /* API Endpoints Table */
+        .endpoints-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .endpoint-group {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .endpoint-group-title {
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            color: #00d4ff;
+        }
+
+        .endpoint {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+        }
+
+        .method {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            min-width: 55px;
+            text-align: center;
+        }
+
+        .method.get { background: #10b981; }
+        .method.post { background: #3b82f6; }
+        .method.patch { background: #f59e0b; }
+        .method.delete { background: #ef4444; }
+        .method.ws { background: #8b5cf6; }
+
+        .endpoint-path {
+            flex: 1;
+        }
+
+        .endpoint-auth {
+            font-size: 0.7rem;
+            color: #888;
+        }
+
+        /* Data Models */
+        .models-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .model-card {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            padding: 20px;
+            border-left: 4px solid #7b2cbf;
+        }
+
+        .model-name {
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+            color: #7b2cbf;
+        }
+
+        .model-fields {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.8rem;
+        }
+
+        .model-field {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .field-name {
+            color: #00d4ff;
+        }
+
+        .field-type {
+            color: #888;
+        }
+
+        /* Services */
+        .services-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .service-card {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .service-name {
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .service-icon {
+            font-size: 1.5rem;
+        }
+
+        .service-desc {
+            color: #888;
+            font-size: 0.9rem;
+            margin-bottom: 15px;
+        }
+
+        .service-methods {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.8rem;
+        }
+
+        .service-method {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 8px 12px;
+            margin-bottom: 5px;
+            border-radius: 6px;
+            border-left: 3px solid #10b981;
+        }
+
+        /* WebSocket Flow */
+        .ws-flow {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            border-radius: 12px;
+            padding: 25px;
+        }
+
+        .ws-participants {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+
+        .ws-participant {
+            text-align: center;
+            padding: 15px 30px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+        }
+
+        .ws-messages {
+            position: relative;
+            padding: 20px 0;
+        }
+
+        .ws-message {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            font-size: 0.85rem;
+        }
+
+        .ws-message.to-right {
+            justify-content: flex-start;
+        }
+
+        .ws-message.to-left {
+            justify-content: flex-end;
+        }
+
+        .ws-message-content {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 10px 15px;
+            border-radius: 8px;
+            max-width: 60%;
+        }
+
+        .ws-message-arrow {
+            margin: 0 15px;
+            color: #8b5cf6;
+        }
+
+        /* Stats */
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 40px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stat-label {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: #666;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .architecture {
+                flex-direction: column;
+            }
+            
+            .arrow {
+                transform: rotate(90deg);
+            }
+
+            .component {
+                min-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>🤖 Jarvis System Architecture</h1>
+    <p class="subtitle">Intelligent Screen Control System <span class="status-badge">Sprint 3.6 Complete</span></p>
+
+    <!-- Main Architecture -->
+    <div class="architecture">
+        <div class="component ios">
+            <div class="component-icon">📱</div>
+            <div class="component-title">Jarvis Remote</div>
+            <div class="component-subtitle">iOS App (Swift/SwiftUI)</div>
+            <ul class="component-features">
+                <li><span class="pending">⏳</span> Voice command capture</li>
+                <li><span class="pending">⏳</span> Text command input</li>
+                <li><span class="pending">⏳</span> Device list & selection</li>
+                <li><span class="pending">⏳</span> Real-time status display</li>
+                <li><span class="pending">⏳</span> User authentication</li>
+            </ul>
+        </div>
+
+        <div class="arrow bidirectional">
+            <div class="arrow-line"></div>
+            <div class="arrow-label">REST API<br>HTTPS/JSON</div>
+        </div>
+
+        <div class="component cloud">
+            <div class="component-icon">☁️</div>
+            <div class="component-title">Jarvis Cloud Core</div>
+            <div class="component-subtitle">FastAPI Backend (Python)</div>
+            <ul class="component-features">
+                <li><span class="check">✓</span> User authentication (JWT)</li>
+                <li><span class="check">✓</span> Device management (CRUD)</li>
+                <li><span class="check">✓</span> Pairing code service</li>
+                <li><span class="check">✓</span> WebSocket connection hub</li>
+                <li><span class="check">✓</span> Command routing</li>
+                <li><span class="check">✓</span> PostgreSQL database</li>
+                <li><span class="check">✓</span> AI Router (Gemini orchestrator)</li>
+                <li><span class="check">✓</span> Intent Parser (NLU)</li>
+                <li><span class="check">✓</span> Multi-model routing (GPT/Claude)</li>
+                <li><span class="check">✓</span> Google OAuth + Calendar</li>
+                <li><span class="check">✓</span> UnifiedContext system</li>
+                <li><span class="check">✓</span> Structured GPT-4o responses</li>
+                <li><span class="check">✓</span> Bug fixes (schema mismatch)</li>
+                <li><span class="pending">⏳</span> Fly.io deployment</li>
+            </ul>
+        </div>
+
+        <div class="arrow bidirectional">
+            <div class="arrow-line"></div>
+            <div class="arrow-label">WebSocket<br>Real-time</div>
+        </div>
+
+        <div class="component pi">
+            <div class="component-icon">🍓</div>
+            <div class="component-title">Jarvis Stick</div>
+            <div class="component-subtitle">Raspberry Pi Agent (Python)</div>
+            <ul class="component-features">
+                <li><span class="pending">⏳</span> WebSocket client</li>
+                <li><span class="pending">⏳</span> Pairing flow</li>
+                <li><span class="pending">⏳</span> HDMI-CEC control</li>
+                <li><span class="pending">⏳</span> IR blaster fallback</li>
+                <li><span class="pending">⏳</span> Status reporting</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Authentication Flow -->
+    <div class="section">
+        <h2 class="section-title">🔐 Authentication Flow</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">User</div>
+                    <div class="flow-step-desc">Opens app</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">POST /auth/register</div>
+                    <div class="flow-step-desc">or /auth/login</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Validate</div>
+                    <div class="flow-step-desc">Check credentials</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Generate JWT</div>
+                    <div class="flow-step-desc">24h expiration</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">Token Returned</div>
+                    <div class="flow-step-desc">User authenticated</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Device Pairing Flow -->
+    <div class="section">
+        <h2 class="section-title">🔗 Device Pairing Flow</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">iOS App</div>
+                    <div class="flow-step-desc">Create device</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">POST /devices</div>
+                    <div class="flow-step-desc">name: "Living Room TV"</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Generate Code</div>
+                    <div class="flow-step-desc">e.g., "A1B2C3"</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">Display Code</div>
+                    <div class="flow-step-desc">15 min TTL</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Pi Enters Code</div>
+                    <div class="flow-step-desc">User input</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">POST /devices/pair</div>
+                    <div class="flow-step-desc">code + agent_id</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">Paired!</div>
+                    <div class="flow-step-desc">Device linked</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Router Flow (Sprint 3) -->
+    <div class="section">
+        <h2 class="section-title">🧠 AI Router - Intelligent Request Processing</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">User Request</div>
+                    <div class="flow-step-desc">Natural language</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">POST /intent</div>
+                    <div class="flow-step-desc">REST API</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">AI Router</div>
+                    <div class="flow-step-desc">Gemini analyzes</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Route Decision</div>
+                    <div class="flow-step-desc">Simple/Execution/Reasoning</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Three routing paths -->
+        <div style="display: flex; justify-content: space-around; margin-top: 30px; flex-wrap: wrap; gap: 20px;">
+            <div class="endpoint-group" style="flex: 1; min-width: 280px; border-left: 4px solid #10b981;">
+                <div class="endpoint-group-title">✓ SIMPLE → Gemini</div>
+                <div style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">Device commands, simple Q&A</div>
+                <div class="endpoint">
+                    <span style="color: #10b981;">Example:</span>
+                    <span>"Turn on the living room TV"</span>
+                </div>
+                <div style="font-size: 0.8rem; color: #666; margin-top: 10px;">
+                    → Intent Parser → Device Mapper → WebSocket → Execute
+                </div>
+            </div>
+            
+            <div class="endpoint-group" style="flex: 1; min-width: 280px; border-left: 4px solid #3b82f6;">
+                <div class="endpoint-group-title">⚡ EXECUTION → GPT-4o</div>
+                <div style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">Code generation, tool usage</div>
+                <div class="endpoint">
+                    <span style="color: #3b82f6;">Example:</span>
+                    <span>"Write a Python script to schedule my TV"</span>
+                </div>
+                <div style="font-size: 0.8rem; color: #666; margin-top: 10px;">
+                    → GPT-4o generates code → Returns response
+                </div>
+            </div>
+            
+            <div class="endpoint-group" style="flex: 1; min-width: 280px; border-left: 4px solid #8b5cf6;">
+                <div class="endpoint-group-title">🧠 REASONING → Claude</div>
+                <div style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">Analysis, planning, decisions</div>
+                <div class="endpoint">
+                    <span style="color: #8b5cf6;">Example:</span>
+                    <span>"Analyze my device setup for efficiency"</span>
+                </div>
+                <div style="font-size: 0.8rem; color: #666; margin-top: 10px;">
+                    → Claude analyzes → Returns insights
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Command Flow -->
+    <div class="section">
+        <h2 class="section-title">⚡ Command Execution Flow</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">User Command</div>
+                    <div class="flow-step-desc">"Turn on TV"</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">POST /commands/{id}/power/on</div>
+                    <div class="flow-step-desc">REST API</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">Device Online?</div>
+                    <div class="flow-step-desc">Check WebSocket</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Send via WebSocket</div>
+                    <div class="flow-step-desc">{type: "command"}</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Pi Receives</div>
+                    <div class="flow-step-desc">Parse command</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Execute CEC</div>
+                    <div class="flow-step-desc">cec-client</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">TV Turns On</div>
+                    <div class="flow-step-desc">Success!</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- WebSocket Communication -->
+    <div class="section">
+        <h2 class="section-title">🔌 WebSocket Communication</h2>
+        <div class="ws-flow">
+            <div class="ws-participants">
+                <div class="ws-participant">
+                    <div style="font-size: 2rem;">🍓</div>
+                    <div>Raspberry Pi Agent</div>
+                </div>
+                <div class="ws-participant">
+                    <div style="font-size: 2rem;">☁️</div>
+                    <div>Cloud Server</div>
+                </div>
+            </div>
+            <div class="ws-messages">
+                <div class="ws-message to-right">
+                    <div class="ws-message-content">
+                        <strong>1. Connect</strong><br>
+                        ws://server/ws/devices?agent_id=pi-living-room
+                    </div>
+                    <div class="ws-message-arrow">→→→</div>
+                </div>
+                <div class="ws-message to-left">
+                    <div class="ws-message-arrow">←←←</div>
+                    <div class="ws-message-content">
+                        <strong>2. Accept</strong><br>
+                        Connection established, device marked online
+                    </div>
+                </div>
+                <div class="ws-message to-left">
+                    <div class="ws-message-arrow">←←←</div>
+                    <div class="ws-message-content">
+                        <strong>3. Command</strong><br>
+                        {"type": "command", "command_type": "power_on", ...}
+                    </div>
+                </div>
+                <div class="ws-message to-right">
+                    <div class="ws-message-content">
+                        <strong>4. Acknowledgment</strong><br>
+                        {"type": "ack", "status": "success"}
+                    </div>
+                    <div class="ws-message-arrow">→→→</div>
+                </div>
+                <div class="ws-message to-right">
+                    <div class="ws-message-content">
+                        <strong>5. Heartbeat</strong><br>
+                        {"type": "ping"} every 30s
+                    </div>
+                    <div class="ws-message-arrow">→→→</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API Endpoints -->
+    <div class="section">
+        <h2 class="section-title">📡 API Endpoints</h2>
+        <div class="endpoints-grid">
+            <div class="endpoint-group">
+                <div class="endpoint-group-title">🔐 Authentication</div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/auth/register</span>
+                    <span class="endpoint-auth">public</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/auth/login</span>
+                    <span class="endpoint-auth">public</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group">
+                <div class="endpoint-group-title">👤 Users</div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/users/me</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group">
+                <div class="endpoint-group-title">📺 Devices</div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/devices</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/devices</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/devices/{id}</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method patch">PATCH</span>
+                    <span class="endpoint-path">/devices/{id}</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method delete">DEL</span>
+                    <span class="endpoint-path">/devices/{id}</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/devices/{id}/pairing-code</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/devices/pair</span>
+                    <span class="endpoint-auth">public</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group">
+                <div class="endpoint-group-title">⚡ Commands</div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/commands/{device_id}</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/commands/{id}/power/on</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/commands/{id}/power/off</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/commands/{id}/status</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method ws">WS</span>
+                    <span class="endpoint-path">/ws/devices?agent_id=xxx</span>
+                    <span class="endpoint-auth">public</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group">
+                <div class="endpoint-group-title">🧠 Intent (AI)</div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/intent</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/intent/stats</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group">
+                <div class="endpoint-group-title">🔗 Google OAuth</div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/auth/google/login</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/auth/google/callback</span>
+                    <span class="endpoint-auth"></span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/auth/google/status</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method delete">DELETE</span>
+                    <span class="endpoint-path">/auth/google</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group">
+                <div class="endpoint-group-title">☁️ Cloud Content</div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/cloud/calendar</span>
+                    <span class="endpoint-auth">🔒 token</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/cloud/calendar/preview</span>
+                    <span class="endpoint-auth"></span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/cloud/calendar/status</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group">
+                <div class="endpoint-group-title">🖥️ Display Simulator</div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/simulator</span>
+                    <span class="endpoint-auth"></span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="endpoint-path">/simulator/{device_id}</span>
+                    <span class="endpoint-auth"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Models -->
+    <div class="section">
+        <h2 class="section-title">🗃️ Data Models</h2>
+        <div class="models-grid">
+            <div class="model-card">
+                <div class="model-name">User</div>
+                <div class="model-fields">
+                    <div class="model-field">
+                        <span class="field-name">id</span>
+                        <span class="field-type">UUID (PK)</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">email</span>
+                        <span class="field-type">String (unique)</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">hashed_password</span>
+                        <span class="field-type">String</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">display_name</span>
+                        <span class="field-type">String (optional)</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">is_active</span>
+                        <span class="field-type">Boolean</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">created_at</span>
+                        <span class="field-type">DateTime</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="model-card">
+                <div class="model-name">Device</div>
+                <div class="model-fields">
+                    <div class="model-field">
+                        <span class="field-name">id</span>
+                        <span class="field-type">UUID (PK)</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">user_id</span>
+                        <span class="field-type">UUID (FK → User)</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">name</span>
+                        <span class="field-type">String</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">agent_id</span>
+                        <span class="field-type">String (optional)</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">capabilities</span>
+                        <span class="field-type">JSON (optional)</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">is_online</span>
+                        <span class="field-type">Boolean</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">last_seen</span>
+                        <span class="field-type">DateTime (optional)</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="model-card">
+                <div class="model-name">Pairing Code (In-Memory)</div>
+                <div class="model-fields">
+                    <div class="model-field">
+                        <span class="field-name">code</span>
+                        <span class="field-type">String (6 chars)</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">device_id</span>
+                        <span class="field-type">UUID</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">expires_at</span>
+                        <span class="field-type">DateTime (+15 min)</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="model-card">
+                <div class="model-name">WebSocket Connection (In-Memory)</div>
+                <div class="model-fields">
+                    <div class="model-field">
+                        <span class="field-name">device_id</span>
+                        <span class="field-type">UUID</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">websocket</span>
+                        <span class="field-type">WebSocket</span>
+                    </div>
+                    <div class="model-field">
+                        <span class="field-name">last_seen</span>
+                        <span class="field-type">DateTime</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Services -->
+    <div class="section">
+        <h2 class="section-title">⚙️ Services</h2>
+        <div class="services-grid">
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">🔑</span>
+                    PairingService
+                </div>
+                <div class="service-desc">Manages device pairing codes with 15-minute TTL</div>
+                <div class="service-methods">
+                    <div class="service-method">generate_code(device_id) → (code, expires_at)</div>
+                    <div class="service-method">validate_code(code) → device_id | None</div>
+                    <div class="service-method">consume_code(code) → device_id | None</div>
+                    <div class="service-method">cleanup_expired() → count</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">🔌</span>
+                    ConnectionManager
+                </div>
+                <div class="service-desc">Manages WebSocket connections for Pi agents</div>
+                <div class="service-methods">
+                    <div class="service-method">connect(device_id, websocket)</div>
+                    <div class="service-method">disconnect(device_id)</div>
+                    <div class="service-method">is_connected(device_id) → bool</div>
+                    <div class="service-method">send_to_device(device_id, message) → bool</div>
+                    <div class="service-method">send_command(device_id, type, params) → bool</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">⚡</span>
+                    CommandService
+                </div>
+                <div class="service-desc">High-level command API for common TV operations</div>
+                <div class="service-methods">
+                    <div class="service-method">power_on(device_id) → bool</div>
+                    <div class="service-method">power_off(device_id) → bool</div>
+                    <div class="service-method">set_input(device_id, input) → bool</div>
+                    <div class="service-method">volume_up/down/set(device_id) → bool</div>
+                    <div class="service-method">mute/unmute(device_id) → bool</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">🧠</span>
+                    AIRouter
+                </div>
+                <div class="service-desc">Intelligent routing to appropriate AI model</div>
+                <div class="service-methods">
+                    <div class="service-method">analyze_request(text) → RoutingDecision</div>
+                    <div class="service-method">process(text, context) → AIResponse</div>
+                    <div class="service-method">→ SIMPLE: Gemini Intent Parser</div>
+                    <div class="service-method">→ EXECUTION: GPT-4o</div>
+                    <div class="service-method">→ REASONING: Claude</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">📊</span>
+                    AIMonitor (DRY)
+                </div>
+                <div class="service-desc">Unified logging + metrics in one call</div>
+                <div class="service-methods">
+                    <div class="service-method">track_request(id, prompt, provider)</div>
+                    <div class="service-method">track_response(id, tokens, latency)</div>
+                    <div class="service-method">track_routing(id, complexity, target)</div>
+                    <div class="service-method">track_error(id, error, stage)</div>
+                    <div class="service-method">get_stats() → AggregatedMetrics</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">🖥️</span>
+                    Display Simulator
+                </div>
+                <div class="service-desc">Browser-based Raspberry Pi display emulator</div>
+                <div class="service-methods">
+                    <div class="service-method">WebSocket connection (same as real Pi)</div>
+                    <div class="service-method">Content display in iframe</div>
+                    <div class="service-method">localStorage persistence (survives refresh)</div>
+                    <div class="service-method">Keyboard: L=logs, ESC=clear, F=fullscreen</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">🔑</span>
+                    ContentTokenService
+                </div>
+                <div class="service-desc">Signed URL tokens for iframe authentication</div>
+                <div class="service-methods">
+                    <div class="service-method">generate_token(user_id) → JWT (5 min)</div>
+                    <div class="service-method">validate_token(token) → user_id</div>
+                    <div class="service-method">Solves iframe header auth problem</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-value">3.6</div>
+            <div class="stat-label">Sprints (3.6 In Progress)</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">24</div>
+            <div class="stat-label">API Endpoints</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">3</div>
+            <div class="stat-label">AI Models</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">8</div>
+            <div class="stat-label">Core Services</div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Jarvis System Architecture • Sprint 3.6 Complete • December 10, 2025</p>
+        <p style="margin-top: 10px; font-size: 0.9rem;">
+            Current: Sprint 4 - Raspberry Pi Agent 🍓<br>
+            Completed: AI Router, Google Calendar, UnifiedContext ✅
+        </p>
+    </footer>
+</body>
+</html>

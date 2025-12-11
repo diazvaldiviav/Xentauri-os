@@ -106,3 +106,24 @@ def create_access_token(subject: str, expires_delta: timedelta | None = None) ->
     # - jwt.encode creates the final "xxxxx.yyyyy.zzzzz" string
     # - Uses SECRET_KEY and ALGORITHM from settings
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def decode_access_token(token: str) -> dict | None:
+    """
+    Decode and validate a JWT access token.
+    
+    Args:
+        token: The JWT token string to decode
+    
+    Returns:
+        The payload dict if valid, None if invalid or expired
+    
+    This is a simpler version for internal use (e.g., cloud router).
+    The deps.py get_current_user uses a more complete version with
+    database lookup.
+    """
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return payload
+    except jwt.JWTError:
+        return None

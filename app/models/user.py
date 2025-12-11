@@ -3,14 +3,21 @@ User model - represents a registered user in the Jarvis system.
 Users can own multiple devices (screens) and authenticate via email/password.
 """
 
+from __future__ import annotations
+
 import uuid  # Python's built-in module for generating unique identifiers
 from datetime import datetime, timezone  # For timestamps with timezone awareness
+from typing import TYPE_CHECKING
 
 from sqlalchemy import String, DateTime  # Column types for database
 from sqlalchemy.dialects.postgresql import UUID  # PostgreSQL-specific UUID type
 from sqlalchemy.orm import Mapped, mapped_column, relationship  # SQLAlchemy 2.0 ORM tools
 
 from app.db.base import Base  # Our declarative base class that all models inherit from
+
+if TYPE_CHECKING:
+    from app.models.device import Device
+    from app.models.oauth_credential import OAuthCredential
 
 
 class User(Base):
@@ -104,3 +111,11 @@ class User(Base):
     # - back_populates="owner": The Device model has an 'owner' attribute pointing back here
     # - This enables: user.devices to get all devices, and device.owner to get the user
     devices: Mapped[list["Device"]] = relationship("Device", back_populates="owner")
+
+    # oauth_credentials: One-to-many relationship with OAuthCredential model
+    # - A user can connect multiple external services (Google, Microsoft, etc.)
+    # - Used for Sprint 3.5+ environment integrations (Calendar, Drive, etc.)
+    # - back_populates="owner": OAuthCredential has an 'owner' attribute pointing back
+    oauth_credentials: Mapped[list["OAuthCredential"]] = relationship(
+        "OAuthCredential", back_populates="owner"
+    )

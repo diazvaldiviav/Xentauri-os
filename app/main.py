@@ -10,6 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware  # Cross-Origin Resource Shar
 from app.core.config import settings  # Application settings
 from app.routers import auth, users, devices, commands  # Route handlers (endpoints)
 from app.routers import websocket as ws_router  # WebSocket router
+from app.routers import intent  # AI Intent processing router (Sprint 3)
+from app.routers import google_auth  # Google OAuth router (Sprint 3.5)
+from app.routers import cloud  # Cloud content router (Sprint 3.5)
+from app.routers import simulator  # Display Simulator for development (Sprint 3.5)
 
 # ---------------------------------------------------------------------------
 # CREATE FASTAPI APPLICATION
@@ -64,11 +68,19 @@ app.add_middleware(
 # devices.router: /devices CRUD + pairing
 # commands.router: /commands for sending commands to devices
 # ws_router.router: /ws/devices WebSocket for Pi agents
+# intent.router: /intent for natural language command processing (AI)
+# google_auth.router: /auth/google for Google OAuth (Sprint 3.5)
+# cloud.router: /cloud for rendered content for Raspberry Pi (Sprint 3.5)
+# simulator.router: /simulator for browser-based display testing (Sprint 3.5)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(devices.router)
 app.include_router(commands.router)
 app.include_router(ws_router.router)
+app.include_router(intent.router)
+app.include_router(google_auth.router)
+app.include_router(cloud.router)
+app.include_router(simulator.router)
 
 
 # ---------------------------------------------------------------------------

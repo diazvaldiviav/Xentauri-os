@@ -36,6 +36,10 @@ class CommandType:
     VOLUME_SET = "volume_set"
     MUTE = "mute"
     UNMUTE = "unmute"
+    
+    # Content display commands (Sprint 3.5)
+    SHOW_CONTENT = "show_content"  # Display a URL on screen
+    CLEAR_CONTENT = "clear_content"  # Clear displayed content
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +179,25 @@ class CommandService:
     async def unmute(self, device_id: UUID) -> CommandResult:
         """Unmute the device."""
         return await self.send_command(device_id, CommandType.UNMUTE)
+    
+    async def show_content(self, device_id: UUID, url: str, content_type: str = "url") -> CommandResult:
+        """
+        Display content on the device screen.
+        
+        Args:
+            device_id: Target device
+            url: URL to display (e.g., "/cloud/calendar")
+            content_type: Type of content ("url", "calendar", "dashboard")
+        """
+        return await self.send_command(
+            device_id,
+            CommandType.SHOW_CONTENT,
+            {"url": url, "content_type": content_type}
+        )
+    
+    async def clear_content(self, device_id: UUID) -> CommandResult:
+        """Clear the currently displayed content."""
+        return await self.send_command(device_id, CommandType.CLEAR_CONTENT)
 
 
 # ---------------------------------------------------------------------------
