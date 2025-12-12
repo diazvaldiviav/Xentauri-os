@@ -339,6 +339,450 @@ class GoogleCalendarClient(EnvironmentService):
         )
     
     # -------------------------------------------------------------------------
+    # CALENDAR SEARCH (Sprint 3.7)
+    # -------------------------------------------------------------------------
+    
+    async def search_events(
+        self,
+        query: str,
+        calendar_id: str = "primary",
+        max_results: int = 50,
+        time_min: Optional[datetime] = None,
+        time_max: Optional[datetime] = None,
+    ) -> List[CalendarEvent]:
+        """
+        Search calendar events by text query.
+        
+        Sprint 3.7: Search events using Google Calendar API 'q' parameter.
+        Searches event title, description, location, and attendees.
+        
+        Args:
+            query: Search text (searches title, description, location)
+            calendar_id: Calendar identifier ("primary" for main calendar)
+            max_results: Maximum number of events to return (1-2500)
+            time_min: Start of time range (defaults to now)
+            time_max: End of time range (optional, defaults to 1 year ahead)
+        
+        Returns:
+            List of CalendarEvent objects matching the query, sorted by start time
+        
+        Example:
+            # Find birthday events
+            events = await client.search_events("birthday")
+            
+            # Find dentist appointments this month
+            events = await client.search_events(
+                "dentist",
+                time_max=datetime.now(timezone.utc) + timedelta(days=30),
+            )
+        """
+        # Return empty list for empty query (don't error)
+        if not query or not query.strip():
+            logger.info("Search called with empty query, returning empty list")
+            return []
+        
+        query = query.strip()
+        
+        # Default time_min to now if not specified
+        if time_min is None:
+            time_min = datetime.now(timezone.utc)
+        
+        # Default time_max to 1 year ahead if not specified
+        if time_max is None:
+            time_max = time_min + timedelta(days=365)
+        
+        params = {
+            "q": query,
+            "maxResults": min(max_results, 2500),
+            "timeMin": time_min.isoformat(),
+            "timeMax": time_max.isoformat(),
+            "singleEvents": "true",
+            "orderBy": "startTime",
+        }
+        
+        logger.info(
+            f"Searching calendar events",
+            extra={
+                "calendar_id": calendar_id,
+                "query": query,
+                "max_results": max_results,
+            }
+        )
+        
+        try:
+            response_data = await self._make_request(
+                method="GET",
+                endpoint=f"/calendars/{calendar_id}/events",
+                params=params,
+            )
+            
+            events_response = CalendarEventsResponse(**response_data)
+            
+            logger.info(
+                f"Search found {len(events_response.items)} events for query '{query}'"
+            )
+            
+            return events_response.items
+            
+        except APIError as e:
+            logger.error(f"Calendar search failed for query '{query}': {e}")
+            raise
+    
+    async def find_event_by_name(
+        self,
+        name: str,
+        calendar_id: str = "primary",
+        time_min: Optional[datetime] = None,
+        time_max: Optional[datetime] = None,
+    ) -> Optional[CalendarEvent]:
+        """
+        Find the nearest upcoming event matching a name.
+        
+        Sprint 3.7: Convenience method for finding a specific event.
+        Returns the first (nearest) matching event.
+        
+        Args:
+            name: Event name to search for (partial match)
+            calendar_id: Calendar identifier
+            time_min: Start of time range (defaults to now)
+            time_max: End of time range (optional)
+        
+        Returns:
+            The nearest matching CalendarEvent, or None if not found
+        
+        Example:
+            # Find next dentist appointment
+            event = await client.find_event_by_name("dentist")
+            if event:
+                print(f"Found: {event.get_display_title()} at {event.get_time_display()}")
+        """
+        events = await self.search_events(
+            query=name,
+            calendar_id=calendar_id,
+            max_results=1,
+            time_min=time_min,
+            time_max=time_max,
+        )
+        
+        return events[0] if events else None
+    
+    # -------------------------------------------------------------------------
+    # CALENDAR QUERY METHODS (Sprint 3.8)
+    # -------------------------------------------------------------------------
+    # These methods return text responses for calendar questions
+    
+    async def get_event_count_text(
+        self,
+        date_range: Optional[str] = None,
+        search_term: Optional[str] = None,
+        calendar_id: str = "primary",
+    ) -> str:
+        """
+        Get a text response for "How many events?" queries.
+        
+        Sprint 3.8: Returns human-readable count of events.
+        
+        Args:
+            date_range: "today", "tomorrow", "this_week", or YYYY-MM-DD
+            search_term: Optional filter (e.g., "meeting")
+            calendar_id: Calendar identifier
+        
+        Returns:
+            Human-readable text response
+        
+        Example:
+            # "How many events do I have today?"
+            text = await client.get_event_count_text(date_range="today")
+            # Returns: "You have 3 events scheduled for today."
+        """
+        time_min, time_max = self._parse_date_range(date_range)
+        
+        try:
+            if search_term:
+                events = await self.search_events(
+                    query=search_term,
+                    calendar_id=calendar_id,
+                    time_min=time_min,
+                    time_max=time_max,
+                )
+            else:
+                events = await self.list_upcoming_events(
+                    calendar_id=calendar_id,
+                    time_min=time_min,
+                    time_max=time_max,
+                    max_results=100,
+                )
+            
+            count = len(events)
+            period = self._get_period_text(date_range)
+            
+            if count == 0:
+                if search_term:
+                    return f"You don't have any {search_term} events scheduled{period}."
+                return f"You don't have any events scheduled{period}."
+            elif count == 1:
+                event = events[0]
+                if search_term:
+                    return f"You have 1 {search_term} event{period}: {event.get_display_title()} at {event.get_time_display()}."
+                return f"You have 1 event{period}: {event.get_display_title()} at {event.get_time_display()}."
+            else:
+                if search_term:
+                    return f"You have {count} {search_term} events scheduled{period}."
+                return f"You have {count} events scheduled{period}."
+                
+        except APIError as e:
+            logger.error(f"Failed to count events: {e}")
+            return "I couldn't access your calendar. Please check your connection."
+    
+    async def get_next_event_text(
+        self,
+        search_term: Optional[str] = None,
+        calendar_id: str = "primary",
+    ) -> str:
+        """
+        Get a text response for "What's my next event?" queries.
+        
+        Sprint 3.8: Returns details about the next upcoming event.
+        
+        Args:
+            search_term: Optional filter (e.g., "meeting")
+            calendar_id: Calendar identifier
+        
+        Returns:
+            Human-readable text response
+        
+        Example:
+            # "What's my next meeting?"
+            text = await client.get_next_event_text(search_term="meeting")
+            # Returns: "Your next meeting is 'Team Standup' at 9:00 AM today."
+        """
+        try:
+            if search_term:
+                events = await self.search_events(
+                    query=search_term,
+                    calendar_id=calendar_id,
+                    max_results=1,
+                )
+            else:
+                events = await self.list_upcoming_events(
+                    calendar_id=calendar_id,
+                    max_results=1,
+                )
+            
+            if not events:
+                if search_term:
+                    return f"You don't have any upcoming {search_term} events."
+                return "You don't have any upcoming events."
+            
+            event = events[0]
+            title = event.get_display_title()
+            time_str = event.get_time_display()
+            
+            # Format relative time
+            if event.start_datetime:
+                now = datetime.now(timezone.utc)
+                delta = event.start_datetime - now
+                
+                if delta.days == 0:
+                    relative = "today"
+                elif delta.days == 1:
+                    relative = "tomorrow"
+                elif delta.days < 7:
+                    relative = f"on {event.start_datetime.strftime('%A')}"
+                else:
+                    relative = f"on {event.start_datetime.strftime('%B %d')}"
+                
+                if search_term:
+                    return f"Your next {search_term} is '{title}' at {time_str} {relative}."
+                return f"Your next event is '{title}' at {time_str} {relative}."
+            
+            if search_term:
+                return f"Your next {search_term} is '{title}' at {time_str}."
+            return f"Your next event is '{title}' at {time_str}."
+            
+        except APIError as e:
+            logger.error(f"Failed to get next event: {e}")
+            return "I couldn't access your calendar. Please check your connection."
+    
+    async def get_events_list_text(
+        self,
+        date_range: Optional[str] = None,
+        search_term: Optional[str] = None,
+        calendar_id: str = "primary",
+        max_results: int = 10,
+    ) -> str:
+        """
+        Get a text list of events for "List my events" queries.
+        
+        Sprint 3.8: Returns formatted list of events.
+        
+        Args:
+            date_range: "today", "tomorrow", "this_week", or YYYY-MM-DD
+            search_term: Optional filter (e.g., "meeting")
+            calendar_id: Calendar identifier
+            max_results: Maximum events to list
+        
+        Returns:
+            Human-readable list of events
+        
+        Example:
+            # "List my events for tomorrow"
+            text = await client.get_events_list_text(date_range="tomorrow")
+            # Returns: "Your events for tomorrow:\n• 9:00 AM - Team standup\n• 2:00 PM - Design review"
+        """
+        time_min, time_max = self._parse_date_range(date_range)
+        
+        try:
+            if search_term:
+                events = await self.search_events(
+                    query=search_term,
+                    calendar_id=calendar_id,
+                    max_results=max_results,
+                    time_min=time_min,
+                    time_max=time_max,
+                )
+            else:
+                events = await self.list_upcoming_events(
+                    calendar_id=calendar_id,
+                    max_results=max_results,
+                    time_min=time_min,
+                    time_max=time_max,
+                )
+            
+            period = self._get_period_text(date_range)
+            
+            if not events:
+                if search_term:
+                    return f"You don't have any {search_term} events scheduled{period}."
+                return f"You don't have any events scheduled{period}."
+            
+            # Build header
+            if search_term:
+                header = f"Your {search_term} events{period}:"
+            else:
+                header = f"Your events{period}:"
+            
+            # Build event list
+            event_lines = []
+            for event in events:
+                time_str = event.get_time_display()
+                title = event.get_display_title()
+                event_lines.append(f"• {time_str} - {title}")
+            
+            result = header + "\n" + "\n".join(event_lines)
+            
+            if len(events) == max_results:
+                result += f"\n\n(Showing first {max_results} events)"
+            
+            return result
+            
+        except APIError as e:
+            logger.error(f"Failed to list events: {e}")
+            return "I couldn't access your calendar. Please check your connection."
+    
+    async def find_event_text(
+        self,
+        search_term: str,
+        calendar_id: str = "primary",
+    ) -> str:
+        """
+        Get a text response for "When is my X?" queries.
+        
+        Sprint 3.8: Finds and describes a specific event.
+        
+        Args:
+            search_term: Event name to search (e.g., "birthday", "dentist")
+            calendar_id: Calendar identifier
+        
+        Returns:
+            Human-readable description of the event
+        
+        Example:
+            # "When is my birthday?"
+            text = await client.find_event_text(search_term="birthday")
+            # Returns: "Your 'Birthday Party' is on December 15 at 3:00 PM."
+        """
+        try:
+            event = await self.find_event_by_name(
+                name=search_term,
+                calendar_id=calendar_id,
+            )
+            
+            if not event:
+                return f"I couldn't find any '{search_term}' events on your calendar."
+            
+            title = event.get_display_title()
+            time_str = event.get_time_display()
+            
+            # Get date info
+            if event.start_datetime:
+                date_str = event.start_datetime.strftime("%B %d")
+                return f"Your '{title}' is on {date_str} at {time_str}."
+            elif event.start_date:
+                return f"Your '{title}' is on {event.start_date}."
+            
+            return f"Your '{title}' is scheduled at {time_str}."
+            
+        except APIError as e:
+            logger.error(f"Failed to find event: {e}")
+            return "I couldn't access your calendar. Please check your connection."
+    
+    def _parse_date_range(
+        self,
+        date_range: Optional[str],
+    ) -> tuple[datetime, Optional[datetime]]:
+        """Parse date_range string into time_min and time_max datetimes."""
+        now = datetime.now(timezone.utc)
+        
+        if not date_range:
+            return now, None
+        
+        date_range = date_range.lower().strip()
+        
+        if date_range == "today":
+            time_min = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            time_max = time_min + timedelta(days=1)
+        elif date_range == "tomorrow":
+            time_min = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            time_max = time_min + timedelta(days=1)
+        elif date_range == "this_week":
+            time_min = now
+            time_max = now + timedelta(days=7)
+        else:
+            # Try to parse as YYYY-MM-DD
+            try:
+                date_obj = datetime.strptime(date_range, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                time_min = date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+                time_max = time_min + timedelta(days=1)
+            except ValueError:
+                # Default to now if can't parse
+                time_min = now
+                time_max = None
+        
+        return time_min, time_max
+    
+    def _get_period_text(self, date_range: Optional[str]) -> str:
+        """Get human-readable period description for messages."""
+        if not date_range:
+            return ""
+        
+        date_range = date_range.lower().strip()
+        
+        if date_range == "today":
+            return " for today"
+        elif date_range == "tomorrow":
+            return " for tomorrow"
+        elif date_range == "this_week":
+            return " for this week"
+        else:
+            # Try to format as a date
+            try:
+                date_obj = datetime.strptime(date_range, "%Y-%m-%d")
+                return f" for {date_obj.strftime('%B %d')}"
+            except ValueError:
+                return ""
+    
+    # -------------------------------------------------------------------------
     # CALENDAR LIST
     # -------------------------------------------------------------------------
     

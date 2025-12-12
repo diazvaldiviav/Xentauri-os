@@ -74,6 +74,7 @@ from app.ai.intent.schemas import (
     DeviceCommand,
     DeviceQuery,
     SystemQuery,
+    CalendarQueryIntent,
     ConversationIntent,
 )
 from app.ai.router.orchestrator import ai_router, TaskComplexity
@@ -93,6 +94,7 @@ class IntentResultType(str, Enum):
     DEVICE_COMMAND = "device_command"
     DEVICE_QUERY = "device_query"
     SYSTEM_QUERY = "system_query"
+    CALENDAR_QUERY = "calendar_query"
     CONVERSATION = "conversation"
     COMPLEX_EXECUTION = "complex_execution"
     COMPLEX_REASONING = "complex_reasoning"
@@ -274,6 +276,7 @@ class IntentService:
                 device_id=device_id,
                 start_time=start_time,
                 user_id=user_id,
+                db=db,
             )
         
         except Exception as e:
@@ -306,6 +309,7 @@ class IntentService:
         device_id: Optional[UUID],
         start_time: float,
         user_id: UUID,
+        db: Session = None,
     ) -> IntentResult:
         """Handle simple tasks using Gemini Intent Parser."""
         
@@ -354,6 +358,15 @@ class IntentService:
                 intent=intent,
                 devices=devices,
                 start_time=start_time,
+            )
+        
+        elif isinstance(intent, CalendarQueryIntent):
+            return await self._handle_calendar_query(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
             )
         
         elif isinstance(intent, ConversationIntent):
@@ -551,6 +564,394 @@ class IntentService:
             processing_time_ms=processing_time,
             request_id=request_id,
         )
+    
+    # -----------------------------------------------------------------------
+    # CALENDAR QUERY HANDLER (Sprint 3.8 + 3.9)
+    # -----------------------------------------------------------------------
+    
+    async def _handle_calendar_query(
+        self,
+        request_id: str,
+        intent: CalendarQueryIntent,
+        user_id: UUID,
+        start_time: float,
+        db: Session = None,
+    ) -> IntentResult:
+        """
+        Handle calendar query intents - questions about calendar events.
+        
+        Sprint 3.8: Returns text answers to calendar questions like:
+        - "How many events today?" → count_events
+        - "What's my next meeting?" → next_event
+        - "List my events for tomorrow" → list_events
+        - "When is my birthday?" → find_event
+        
+        Sprint 3.9: Uses smart semantic search for typos/translations/synonyms.
+        """
+        from app.services.calendar_search_service import calendar_search_service
+        from app.models.oauth_credential import OAuthCredential
+        from app.db.session import SessionLocal
+        from datetime import datetime, timezone, timedelta
+        
+        action = self._get_action_value(intent.action) or "count_events"
+        date_range = intent.date_range
+        search_term = intent.search_term
+        
+        # Get or create DB session
+        owns_db = db is None
+        if owns_db:
+            db = SessionLocal()
+        
+        try:
+            # Check for credentials first
+            credentials = db.query(OAuthCredential).filter(
+                OAuthCredential.user_id == user_id,
+                OAuthCredential.provider == "google",
+            ).first()
+            
+            if not credentials or not credentials.access_token:
+                processing_time = (time.time() - start_time) * 1000
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.CALENDAR_QUERY,
+                    confidence=intent.confidence,
+                    action=action,
+                    message="Please connect your Google Calendar first to use calendar features.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            # Route to appropriate query method using SMART SEARCH
+            if action == "find_event":
+                # Find a specific event (e.g., "when is my birthday?")
+                message = await self._smart_find_event(
+                    search_term=search_term,
+                    user_id=user_id,
+                    db=db,
+                )
+            elif action == "next_event":
+                # Find the next event matching a term (e.g., "what's my next meeting?")
+                message = await self._smart_next_event(
+                    search_term=search_term,
+                    user_id=user_id,
+                    db=db,
+                )
+            elif action == "count_events":
+                # Count events (e.g., "how many events today?")
+                message = await self._smart_count_events(
+                    date_range=date_range,
+                    search_term=search_term,
+                    user_id=user_id,
+                    db=db,
+                )
+            elif action == "list_events":
+                # List events (e.g., "list my events for tomorrow")
+                message = await self._smart_list_events(
+                    date_range=date_range,
+                    search_term=search_term,
+                    user_id=user_id,
+                    db=db,
+                )
+            else:
+                # Fallback to count
+                message = await self._smart_count_events(
+                    date_range=date_range,
+                    search_term=search_term,
+                    user_id=user_id,
+                    db=db,
+                )
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            return IntentResult(
+                success=True,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                confidence=intent.confidence,
+                action=action,
+                parameters={
+                    "date_range": date_range,
+                    "search_term": search_term,
+                },
+                message=message,
+                response=message,  # Also set as AI response for conversational UI
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+            
+        except Exception as e:
+            processing_time = (time.time() - start_time) * 1000
+            logger.error(f"Calendar query failed: {e}", exc_info=True)
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                confidence=intent.confidence,
+                action=action,
+                message=f"I couldn't access your calendar: {str(e)}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        finally:
+            if owns_db:
+                db.close()
+    
+    # -----------------------------------------------------------------------
+    # SMART CALENDAR QUERY HELPERS (Sprint 3.9)
+    # -----------------------------------------------------------------------
+    
+    async def _smart_find_event(
+        self,
+        search_term: str,
+        user_id: UUID,
+        db: Session,
+    ) -> str:
+        """
+        Find a specific event using smart semantic search.
+        
+        Handles typos, translations, and synonyms:
+        - "birthday" matches "Cumpleaños de Victor"
+        - "birday" matches "Birthday party"
+        - "cumpleanos" matches "Cumpleaños"
+        """
+        from app.services.calendar_search_service import calendar_search_service
+        
+        if not search_term:
+            return "What event are you looking for? Try 'When is my [event name]?'"
+        
+        # Use smart search for semantic matching
+        result = await calendar_search_service.smart_search(
+            user_query=search_term,
+            user_id=user_id,
+            db=db,
+        )
+        
+        if result.error:
+            return result.error
+        
+        if result.no_match_found or not result.events:
+            corrected = result.corrected_query or search_term
+            return f"I couldn't find any '{corrected}' events on your calendar."
+        
+        # Return the first (nearest) matching event
+        event = result.events[0]
+        title = event.get_display_title()
+        
+        # Format the date nicely
+        start_dt = event.start.get_datetime() if event.start else None
+        if start_dt:
+            date_str = start_dt.strftime("%B %d, %Y")
+            time_str = event.get_time_display()
+            
+            # Add relative context
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            
+            # Ensure start_dt is timezone-aware for comparison
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            
+            delta = start_dt - now
+            
+            if delta.days == 0:
+                relative = " (today)"
+            elif delta.days == 1:
+                relative = " (tomorrow)"
+            elif delta.days < 7:
+                relative = f" ({start_dt.strftime('%A')})"
+            elif delta.days < 30:
+                relative = f" (in {delta.days} days)"
+            else:
+                relative = ""
+            
+            return f"Your '{title}' is on {date_str} at {time_str}{relative}."
+        elif event.start and event.start.date:
+            return f"Your '{title}' is on {event.start.date}."
+        
+        return f"Found '{title}' on your calendar."
+    
+    async def _smart_next_event(
+        self,
+        search_term: str,
+        user_id: UUID,
+        db: Session,
+    ) -> str:
+        """Find the next event matching a term using smart search."""
+        from app.services.calendar_search_service import calendar_search_service
+        
+        # Use smart search - it already returns events sorted by time
+        result = await calendar_search_service.smart_search(
+            user_query=search_term or "event",
+            user_id=user_id,
+            db=db,
+            max_events=50,  # Fewer events for "next" query
+        )
+        
+        if result.error:
+            return result.error
+        
+        if result.no_match_found or not result.events:
+            if search_term:
+                return f"You don't have any upcoming {search_term} events."
+            return "You don't have any upcoming events."
+        
+        event = result.events[0]
+        title = event.get_display_title()
+        time_str = event.get_time_display()
+        
+        # Format relative time
+        start_dt = event.start.get_datetime() if event.start else None
+        if start_dt:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            
+            # Ensure start_dt is timezone-aware for comparison
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            
+            delta = start_dt - now
+            
+            if delta.days == 0:
+                relative = "today"
+            elif delta.days == 1:
+                relative = "tomorrow"
+            elif delta.days < 7:
+                relative = f"on {start_dt.strftime('%A')}"
+            else:
+                relative = f"on {start_dt.strftime('%B %d')}"
+            
+            if search_term:
+                return f"Your next {search_term} is '{title}' at {time_str} {relative}."
+            return f"Your next event is '{title}' at {time_str} {relative}."
+        
+        if search_term:
+            return f"Your next {search_term} is '{title}' at {time_str}."
+        return f"Your next event is '{title}' at {time_str}."
+    
+    async def _smart_count_events(
+        self,
+        date_range: str,
+        search_term: str,
+        user_id: UUID,
+        db: Session,
+    ) -> str:
+        """Count events using smart search for semantic matching."""
+        from app.services.calendar_search_service import calendar_search_service
+        from app.environments.google.calendar.client import GoogleCalendarClient
+        from app.models.oauth_credential import OAuthCredential
+        
+        # If there's a search term, use smart search
+        if search_term:
+            result = await calendar_search_service.smart_search(
+                user_query=search_term,
+                user_id=user_id,
+                db=db,
+            )
+            
+            if result.error:
+                return result.error
+            
+            count = len(result.events)
+            period = self._get_period_text(date_range)
+            corrected = result.corrected_query or search_term
+            
+            if count == 0:
+                return f"You don't have any {corrected} events scheduled{period}."
+            elif count == 1:
+                event = result.events[0]
+                return f"You have 1 {corrected} event{period}: {event.get_display_title()} at {event.get_time_display()}."
+            else:
+                return f"You have {count} {corrected} events scheduled{period}."
+        
+        # No search term - just count all events for the period
+        credentials = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == "google",
+        ).first()
+        
+        if not credentials:
+            return "Please connect your Google Calendar first."
+        
+        calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
+        return await calendar_client.get_event_count_text(date_range=date_range)
+    
+    async def _smart_list_events(
+        self,
+        date_range: str,
+        search_term: str,
+        user_id: UUID,
+        db: Session,
+    ) -> str:
+        """List events using smart search for semantic matching."""
+        from app.services.calendar_search_service import calendar_search_service
+        from app.environments.google.calendar.client import GoogleCalendarClient
+        from app.models.oauth_credential import OAuthCredential
+        
+        # If there's a search term, use smart search
+        if search_term:
+            result = await calendar_search_service.smart_search(
+                user_query=search_term,
+                user_id=user_id,
+                db=db,
+            )
+            
+            if result.error:
+                return result.error
+            
+            period = self._get_period_text(date_range)
+            corrected = result.corrected_query or search_term
+            
+            if not result.events:
+                return f"You don't have any {corrected} events scheduled{period}."
+            
+            # Build header
+            header = f"Your {corrected} events{period}:"
+            
+            # Build event list
+            event_lines = []
+            for event in result.events[:10]:  # Limit to 10 for text response
+                time_str = event.get_time_display()
+                title = event.get_display_title()
+                event_lines.append(f"• {time_str} - {title}")
+            
+            text = header + "\n" + "\n".join(event_lines)
+            
+            if len(result.events) > 10:
+                text += f"\n\n(Showing first 10 of {len(result.events)} events)"
+            
+            return text
+        
+        # No search term - list all events for the period
+        credentials = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == "google",
+        ).first()
+        
+        if not credentials:
+            return "Please connect your Google Calendar first."
+        
+        calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
+        return await calendar_client.get_events_list_text(date_range=date_range)
+    
+    def _get_period_text(self, date_range: str) -> str:
+        """Get human-readable period description for messages."""
+        if not date_range:
+            return ""
+        
+        date_range = date_range.lower().strip()
+        
+        if date_range == "today":
+            return " for today"
+        elif date_range == "tomorrow":
+            return " for tomorrow"
+        elif date_range == "this_week":
+            return " for this week"
+        else:
+            # Try to format as a date
+            try:
+                from datetime import datetime
+                date_obj = datetime.strptime(date_range, "%Y-%m-%d")
+                return f" for {date_obj.strftime('%B %d')}"
+            except ValueError:
+                return ""
     
     # -----------------------------------------------------------------------
     # CONVERSATION HANDLER
@@ -872,6 +1273,7 @@ class IntentService:
     ) -> IntentResult:
         """Execute content display actions."""
         from app.services.content_token import content_token_service
+        from urllib.parse import quote
         
         if action == "clear_content":
             result = await command_service.clear_content(device.id)
@@ -882,6 +1284,10 @@ class IntentService:
                 url = f"/cloud/calendar?token={content_token}"
                 if parameters and "date" in parameters:
                     url += f"&date={parameters['date']}"
+                # Sprint 3.7: Add search parameter with URL encoding
+                if parameters and "search" in parameters:
+                    search_encoded = quote(str(parameters['search']), safe='')
+                    url += f"&search={search_encoded}"
                 content_type = "calendar"
             elif action == "show_content":
                 base_url = (parameters or {}).get("url", "/cloud/calendar")
@@ -890,6 +1296,10 @@ class IntentService:
                     url = f"{base_url}{separator}token={content_token}"
                     if parameters and "date" in parameters:
                         url += f"&date={parameters['date']}"
+                    # Sprint 3.7: Add search parameter with URL encoding
+                    if parameters and "search" in parameters:
+                        search_encoded = quote(str(parameters['search']), safe='')
+                        url += f"&search={search_encoded}"
                 else:
                     url = base_url
                 content_type = (parameters or {}).get("content_type", "url")
@@ -917,7 +1327,8 @@ class IntentService:
         
         if result.success:
             date = parameters.get("date") if parameters else None
-            message = self._build_content_message(action, device.name, date)
+            search = parameters.get("search") if parameters else None
+            message = self._build_content_message(action, device.name, date, search)
         else:
             message = f"Failed: {result.error}"
         
@@ -1034,14 +1445,28 @@ class IntentService:
         return f"Command sent to {device_name}"
     
     @staticmethod
-    def _build_content_message(action: str, device_name: str, date: Optional[str] = None) -> str:
+    def _build_content_message(
+        action: str,
+        device_name: str,
+        date: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> str:
         """Build success message for content actions."""
         if action == "show_calendar":
-            if date:
+            # Sprint 3.7: Include search context in message
+            if search and date:
+                return f"Displaying '{search}' events for {date} on {device_name}"
+            elif search:
+                return f"Displaying '{search}' events on {device_name}"
+            elif date:
                 return f"Displaying calendar for {date} on {device_name}"
             return f"Displaying calendar on {device_name}"
         elif action == "show_content":
-            if date:
+            if search and date:
+                return f"Displaying '{search}' content for {date} on {device_name}"
+            elif search:
+                return f"Displaying '{search}' content on {device_name}"
+            elif date:
                 return f"Displaying content for {date} on {device_name}"
             return f"Displaying content on {device_name}"
         elif action == "clear_content":

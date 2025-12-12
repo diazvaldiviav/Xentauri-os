@@ -29,10 +29,20 @@ COMPLEXITY LEVELS:
 
 SIMPLE (handle yourself):
 - Direct device commands: "Turn on the TV", "Switch to HDMI 2", "Mute the sound"
+- Calendar display commands: "Show my calendar", "Show my birthday", "Show my anniversary",
+  "Display meetings", "Show events for tomorrow" (these DISPLAY content, not create it)
+- Calendar text queries: "How many events today?", "What's my next meeting?", 
+  "When is my birthday?", "List my events" (these return TEXT answers)
 - Status queries: "Is the TV on?", "What input is active?"
 - Basic Q&A: "What devices do I have?", "How do I pair a device?"
 - Greetings/casual: "Hello", "Thanks", "Help me"
 - Simple explanations: "What does HDMI-CEC do?"
+
+IMPORTANT: "Show my birthday/anniversary/meeting" = DISPLAY calendar with search filter.
+This is SIMPLE, NOT complex. No data creation, just displaying existing events.
+
+IMPORTANT: "How many events?", "What's my next meeting?", "When is X?" = Calendar QUERY.
+This is SIMPLE - just querying calendar data and returning a text response.
 
 COMPLEX_EXECUTION (route to GPT):
 - Code generation: "Write a script to turn on all TVs at 8am"
@@ -70,6 +80,27 @@ Output: {"complexity": "complex_reasoning", "is_device_command": false, "should_
 
 Input: "Hello, how are you?"
 Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Casual greeting, can respond directly"}
+
+Input: "Show my birthday on the living room TV"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar display with search filter - this is a SIMPLE device command, not data creation"}
+
+Input: "Show my anniversary on the bedroom monitor"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar display with search filter - displaying existing events is SIMPLE"}
+
+Input: "Show meetings for tomorrow on the TV"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar display with date and search - still a SIMPLE display command"}
+
+Input: "How many events do I have today?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar query for event count - SIMPLE query returns text answer"}
+
+Input: "What's my next meeting?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar query for next event - SIMPLE query"}
+
+Input: "When is my birthday?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.92, "reasoning": "Calendar query to find event - SIMPLE lookup"}
+
+Input: "Do I have anything tomorrow?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.90, "reasoning": "Calendar query about tomorrow's events - SIMPLE query"}
 """
 
 

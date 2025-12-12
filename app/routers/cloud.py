@@ -123,6 +123,7 @@ async def get_calendar_html(
     max_events: int = Query(10, description="Maximum events to show", ge=1, le=50),
     view: str = Query("upcoming", description="View type: upcoming, today, week, date"),
     date: Optional[str] = Query(None, description="Specific date (YYYY-MM-DD) for date view"),
+    search: Optional[str] = Query(None, description="Search term to filter events by title/description"),
     token: Optional[str] = Query(None, description="Content access token for iframe display"),
 ):
     """
@@ -132,6 +133,7 @@ async def get_calendar_html(
     optimized for display on Raspberry Pi screens.
     
     Sprint 3.6: Added date parameter for showing calendar on specific dates.
+    Sprint 3.7: Added search parameter for filtering events by title/description.
     
     Authentication:
         - JWT token in Authorization header (for API calls)
@@ -143,6 +145,7 @@ async def get_calendar_html(
         theme: "dark" or "light" color scheme
         max_events: Maximum number of events to display
         view: "upcoming", "today", "week", or "date"
+        search: Optional search term to filter events
         date: Specific date in YYYY-MM-DD format (required if view="date")
         token: Optional content access token
     
@@ -153,6 +156,8 @@ async def get_calendar_html(
         1. Via API: GET /cloud/calendar with Authorization header
         2. Via iframe: GET /cloud/calendar?token=<signed_token>
         3. Specific date: GET /cloud/calendar?date=2025-12-06&token=<token>
+        4. Search: GET /cloud/calendar?search=birthday&token=<token>
+        5. Date + Search: GET /cloud/calendar?date=2025-12-15&search=meeting&token=<token>
     """
     renderer = CalendarRenderer(theme=theme)
     user_id = None
@@ -204,6 +209,108 @@ async def get_calendar_html(
     # Fetch calendar events
     try:
         calendar_client = GoogleCalendarClient(access_token=access_token)
+        
+        # ---------------------------------------------------------------------------
+        # SPRINT 3.9: Smart Semantic Search with LLM Matching
+        # ---------------------------------------------------------------------------
+        # Instead of passing search term to Google API (literal matching),
+        # we fetch all events and use LLM for semantic matching.
+        # This handles typos, translations, and synonyms.
+        if search:
+            from app.services.calendar_search_service import calendar_search_service
+            
+            search_term = search.strip()
+            
+            # If date is also provided, scope the search to that date
+            if date:
+                from datetime import datetime
+                
+                date_obj = None
+                parsed_date = None
+                
+                # Try YYYY-MM-DD format first
+                try:
+                    date_obj = datetime.strptime(date, "%Y-%m-%d")
+                    parsed_date = date
+                except ValueError:
+                    pass
+                
+                # Try natural language formats
+                if not date_obj:
+                    date_lower = date.lower().strip()
+                    natural_formats = [
+                        "%B %d", "%B %d, %Y", "%b %d", "%b %d, %Y",
+                        "%m/%d/%Y", "%m/%d", "%d %B", "%d %B %Y",
+                    ]
+                    for fmt in natural_formats:
+                        try:
+                            date_obj = datetime.strptime(date_lower, fmt.lower())
+                            if "%Y" not in fmt:
+                                date_obj = date_obj.replace(year=datetime.now().year)
+                            parsed_date = date_obj.strftime("%Y-%m-%d")
+                            break
+                        except ValueError:
+                            continue
+                
+                if not date_obj:
+                    html = renderer.render_error(
+                        error_message=f"Could not parse date '{date}'. Use YYYY-MM-DD format.",
+                        title="Invalid Date",
+                    )
+                    return HTMLResponse(content=html, status_code=400)
+                
+                # Smart search within the specific date
+                search_result = await calendar_search_service.smart_search_with_date(
+                    user_query=search_term,
+                    user_id=user_id,
+                    db=db,
+                    date=parsed_date,
+                )
+            else:
+                # Smart search across all future events
+                search_result = await calendar_search_service.smart_search(
+                    user_query=search_term,
+                    user_id=user_id,
+                    db=db,
+                )
+            
+            # Handle errors from smart search
+            if search_result.error:
+                html = renderer.render_error(
+                    error_message=search_result.error,
+                    title="Search Failed",
+                )
+                return HTMLResponse(content=html, status_code=200)
+            
+            events = search_result.events
+            
+            # Build title with corrected query if different
+            if search_result.corrected_query and search_result.corrected_query.lower() != search_term.lower():
+                title = f"Events matching '{search_result.corrected_query}' (searched: '{search_term}')"
+            else:
+                title = f"Events matching '{search_term}'"
+            
+            # Render with search context
+            html = renderer.render_events(
+                events=events,
+                title=title,
+                user_name=display_name,
+                show_date=True,
+                show_footer=True,
+                search_term=search_term,
+            )
+            
+            logger.info(
+                f"Smart search for user {user_id}: '{search_term}' -> {len(events)} events",
+                extra={
+                    "event_count": len(events),
+                    "search": search_term,
+                    "corrected": search_result.corrected_query,
+                    "date": date,
+                }
+            )
+            
+            return HTMLResponse(content=html, status_code=200)
         
         # ---------------------------------------------------------------------------
         # SPRINT 3.6: Support date parameter with smart parsing

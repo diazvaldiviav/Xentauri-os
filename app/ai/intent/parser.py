@@ -36,6 +36,7 @@ from app.ai.intent.schemas import (
     DeviceCommand,
     DeviceQuery,
     SystemQuery,
+    CalendarQueryIntent,
     ConversationIntent,
     ParsedCommand,
 )
@@ -143,6 +144,9 @@ class IntentParser:
         elif intent_type == "system_query":
             return self._create_system_query(data, original_text, confidence, reasoning)
         
+        elif intent_type == "calendar_query":
+            return self._create_calendar_query(data, original_text, confidence, reasoning)
+        
         elif intent_type == "conversation":
             return self._create_conversation_intent(data, original_text, confidence, reasoning)
         
@@ -159,10 +163,14 @@ class IntentParser:
         """Create a DeviceCommand intent."""
         device_name = data.get("device_name", "unknown device")
         action_str = data.get("action", "").lower()
-        parameters = data.get("parameters")
+        parameters = data.get("parameters") or {}
         
         # Map action string to ActionType
         action = self._map_action(action_str)
+        
+        # Resolve relative dates in parameters for calendar commands
+        if action_str in ("show_calendar", "show_content") and parameters:
+            parameters = self._resolve_parameters_dates(parameters, original_text)
         
         return DeviceCommand(
             confidence=confidence,
@@ -170,8 +178,37 @@ class IntentParser:
             reasoning=reasoning,
             device_name=device_name,
             action=action,
-            parameters=parameters,
+            parameters=parameters if parameters else None,
         )
+    
+    def _resolve_parameters_dates(self, parameters: Dict, original_text: str) -> Dict:
+        """
+        Resolve relative date references in command parameters.
+        
+        AI models don't know the current date, so "today" might be returned as
+        an incorrect date. We extract it from the text and resolve it properly.
+        """
+        from datetime import datetime, timedelta
+        
+        text_lower = original_text.lower()
+        today = datetime.now()
+        
+        # If user said "today", use actual today's date
+        if "today" in text_lower:
+            parameters["date"] = today.strftime("%Y-%m-%d")
+        elif "tomorrow" in text_lower:
+            tomorrow = today + timedelta(days=1)
+            parameters["date"] = tomorrow.strftime("%Y-%m-%d")
+        elif "date" in parameters:
+            # Resolve if the AI returned relative terms
+            date_value = str(parameters.get("date", "")).lower()
+            if date_value == "today":
+                parameters["date"] = today.strftime("%Y-%m-%d")
+            elif date_value == "tomorrow":
+                tomorrow = today + timedelta(days=1)
+                parameters["date"] = tomorrow.strftime("%Y-%m-%d")
+        
+        return parameters
     
     def _create_device_query(
         self,
@@ -231,6 +268,109 @@ class IntentParser:
             action=action,
         )
     
+    def _create_calendar_query(
+        self,
+        data: Dict[str, Any],
+        original_text: str,
+        confidence: float,
+        reasoning: Optional[str],
+    ) -> CalendarQueryIntent:
+        """Create a CalendarQueryIntent for calendar data questions."""
+        action_str = data.get("action", "count_events").lower()
+        action = self._map_action(action_str)
+        
+        # Extract date_range and search_term
+        date_range = data.get("date_range")
+        search_term = data.get("search_term")
+        
+        # Resolve relative dates to actual dates
+        date_range = self._resolve_date_range(date_range, original_text)
+        
+        # Fallback: extract search_term from original text for find_event
+        if not search_term and action_str == "find_event":
+            search_term = self._extract_search_term_from_text(original_text)
+        
+        return CalendarQueryIntent(
+            confidence=confidence,
+            original_text=original_text,
+            reasoning=reasoning,
+            action=action,
+            date_range=date_range,
+            search_term=search_term,
+        )
+    
+    def _resolve_date_range(self, date_range: Optional[str], original_text: str) -> Optional[str]:
+        """
+        Resolve relative date references to actual ISO dates.
+        
+        - "today" → "2025-12-12" (today's date)
+        - "tomorrow" → "2025-12-13"
+        - "this_week" kept as-is for week range
+        - Already ISO date passed through
+        """
+        from datetime import datetime, timedelta
+        
+        text_lower = original_text.lower()
+        today = datetime.now()
+        
+        # If date_range is already set, use it but resolve relative terms
+        if date_range:
+            if date_range.lower() == "today":
+                return today.strftime("%Y-%m-%d")
+            elif date_range.lower() == "tomorrow":
+                tomorrow = today + timedelta(days=1)
+                return tomorrow.strftime("%Y-%m-%d")
+            # Keep "this_week" as-is for range queries
+            return date_range
+        
+        # Try to extract from original text if not set
+        if "today" in text_lower:
+            return today.strftime("%Y-%m-%d")
+        elif "tomorrow" in text_lower:
+            tomorrow = today + timedelta(days=1)
+            return tomorrow.strftime("%Y-%m-%d")
+        elif "this week" in text_lower:
+            return "this_week"
+        
+        return None
+    
+    def _extract_search_term_from_text(self, original_text: str) -> Optional[str]:
+        """
+        Extract search term from questions like "when is my birthday?"
+        
+        Patterns:
+        - "when is my X?" → X
+        - "when is the X?" → X
+        - "what's my next X?" → X
+        - "do I have any X?" → X
+        """
+        import re
+        
+        text_lower = original_text.lower().strip()
+        
+        # Remove question mark for easier matching
+        text_lower = text_lower.rstrip("?").strip()
+        
+        # Pattern: "when is my X" or "when is the X"
+        patterns = [
+            r"when is (?:my|the) (.+)",
+            r"when'?s (?:my|the) (.+)",
+            r"what(?:'s| is) (?:my|the) next (.+)",
+            r"do i have (?:any|a) (.+)",
+            r"find (?:my|the) (.+)",
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                term = match.group(1).strip()
+                # Clean up time/date suffixes using word boundaries
+                term = re.sub(r"\s+(?:today|tomorrow|this week|next week|on|in|at|for)\b.*$", "", term)
+                if term:
+                    return term
+        
+        return None
+    
     def _create_unknown_intent(
         self,
         original_text: str,
@@ -273,6 +413,11 @@ class IntentParser:
             "greeting": ActionType.GREETING,
             "thanks": ActionType.THANKS,
             "question": ActionType.QUESTION,
+            # Calendar query actions (Sprint 3.8)
+            "count_events": ActionType.COUNT_EVENTS,
+            "next_event": ActionType.NEXT_EVENT,
+            "list_events": ActionType.LIST_EVENTS,
+            "find_event": ActionType.FIND_EVENT,
         }
         return action_map.get(action_str, ActionType.STATUS)
     
@@ -328,6 +473,14 @@ class IntentParser:
             parsed.action = intent.action.value if intent.action else None
             parsed.parameters = intent.parameters
             parsed.can_execute = True  # System queries don't need device
+        
+        elif isinstance(intent, CalendarQueryIntent):
+            parsed.action = intent.action.value if intent.action else None
+            parsed.parameters = {
+                "date_range": intent.date_range,
+                "search_term": intent.search_term,
+            }
+            parsed.can_execute = True  # Calendar queries are always executable
         
         elif isinstance(intent, ConversationIntent):
             parsed.can_execute = True  # Conversations are always "executable"

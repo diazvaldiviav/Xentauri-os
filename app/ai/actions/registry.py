@@ -164,14 +164,17 @@ class ActionRegistry:
         self.register(ActionDefinition(
             name="show_calendar",
             category=ActionCategory.CONTENT,
-            description="Display calendar on a device",
+            description="Display calendar on a device, optionally filtered by date or search term",
             required_params={"target_device"},
-            optional_params={"date"},
+            optional_params={"date", "search"},
             aliases={"display_calendar", "calendar", "show_schedule"},
             examples=[
                 "Show the calendar on living room TV",
                 "Display my schedule on the bedroom monitor",
                 "Show tomorrow's calendar on kitchen display",
+                "Show my birthday on the living room TV",
+                "When is my dentist appointment",
+                "Show meetings tomorrow on office display",
             ],
         ))
         

@@ -27,12 +27,14 @@ class IntentType(str, Enum):
     DEVICE_COMMAND: User wants to control a device (turn on, change input)
     DEVICE_QUERY: User wants info about a specific device
     SYSTEM_QUERY: User wants info about the system (list devices, help)
+    CALENDAR_QUERY: User wants info about calendar events (Sprint 3.8)
     CONVERSATION: General chat, greetings, questions not about devices
     UNKNOWN: Could not determine intent
     """
     DEVICE_COMMAND = "device_command"
     DEVICE_QUERY = "device_query"
     SYSTEM_QUERY = "system_query"
+    CALENDAR_QUERY = "calendar_query"
     CONVERSATION = "conversation"
     UNKNOWN = "unknown"
 
@@ -75,6 +77,12 @@ class ActionType(str, Enum):
     GREETING = "greeting"
     THANKS = "thanks"
     QUESTION = "question"
+    
+    # Calendar Query actions (Sprint 3.8)
+    COUNT_EVENTS = "count_events"
+    NEXT_EVENT = "next_event"
+    LIST_EVENTS = "list_events"
+    FIND_EVENT = "find_event"
 
 
 class Intent(BaseModel):
@@ -136,6 +144,25 @@ class SystemQuery(Intent):
     intent_type: IntentType = IntentType.SYSTEM_QUERY
     action: ActionType = Field(description="Query type")
     parameters: Optional[Dict[str, Any]] = Field(default=None)
+
+
+class CalendarQueryIntent(Intent):
+    """
+    Intent for calendar data queries (Sprint 3.8).
+    
+    These are QUESTIONS about calendar events that return TEXT responses,
+    not display commands that show content on a screen.
+    
+    Examples:
+    - "How many events today?" → action=count_events
+    - "What's my next meeting?" → action=next_event
+    - "List my events for tomorrow" → action=list_events
+    - "When is my birthday?" → action=find_event, search_term="birthday"
+    """
+    intent_type: IntentType = IntentType.CALENDAR_QUERY
+    action: ActionType = Field(description="Query type: count_events, next_event, list_events, find_event")
+    date_range: Optional[str] = Field(default=None, description="Date context: today, tomorrow, this_week, or YYYY-MM-DD")
+    search_term: Optional[str] = Field(default=None, description="Event search term (birthday, meeting, etc.)")
 
 
 class ConversationIntent(Intent):

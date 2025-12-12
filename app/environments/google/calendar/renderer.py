@@ -213,6 +213,19 @@ class CalendarRenderer:
             font-weight: 500;
         }}
         
+        .search-context {{
+            background: {time_bg};
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            font-size: 0.95rem;
+            color: {muted_color};
+        }}
+        
+        .search-context strong {{
+            color: {accent_color};
+        }}
+        
         .no-events {{
             text-align: center;
             padding: 4rem 2rem;
@@ -317,6 +330,7 @@ class CalendarRenderer:
         show_date: bool = True,
         show_footer: bool = True,
         display_date: Optional[datetime] = None,
+        search_term: Optional[str] = None,
     ) -> str:
         """
         Render a list of events as a complete HTML page.
@@ -328,6 +342,7 @@ class CalendarRenderer:
             show_date: Show current date in header
             show_footer: Show footer with last updated time
             display_date: Optional specific date to show in header (defaults to today)
+            search_term: Optional search term for context display (Sprint 3.7)
         
         Returns:
             Complete HTML page as a string
@@ -349,12 +364,28 @@ class CalendarRenderer:
             date_str = date_to_show.strftime("%A, %B %d, %Y")
             date_display = f'<div class="date-display">{date_str}</div>'
         
+        # Sprint 3.7: Build search context header
+        search_context = ""
+        if search_term:
+            safe_search = html_escape.escape(search_term)
+            search_context = f'<div class="search-context">Showing events matching: <strong>"{safe_search}"</strong></div>'
+        
         # Build events list
         if events:
             events_html = "\n".join(self._render_event(event) for event in events)
             events_section = f'<div class="events-list">{events_html}</div>'
         else:
-            events_section = """
+            # Sprint 3.7: Show search-aware no results message
+            if search_term:
+                safe_search = html_escape.escape(search_term)
+                events_section = f"""
+            <div class="no-events">
+                <h2>No Events Found</h2>
+                <p>No events matching "{safe_search}" were found.</p>
+            </div>
+            """
+            else:
+                events_section = """
             <div class="no-events">
                 <h2>No Upcoming Events</h2>
                 <p>Your calendar is clear! Enjoy your free time.</p>
@@ -390,6 +421,8 @@ class CalendarRenderer:
             <h1>{html_escape.escape(display_title)}</h1>
             {date_display}
         </header>
+        
+        {search_context}
         
         {events_section}
         

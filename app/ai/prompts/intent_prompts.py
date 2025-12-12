@@ -39,6 +39,11 @@ CRITICAL RULES:
    - "tomorrow" → calculate actual date
    - "next monday" → calculate actual date
    - Current year is 2025 if not specified
+5. SEARCH PARAMETER: Extract search terms from event-specific queries!
+   - "show my birthday" → parameters: {"search": "birthday"}
+   - "when is my dentist appointment" → parameters: {"search": "dentist"}
+   - "show meetings for tomorrow" → parameters: {"date": "YYYY-MM-DD", "search": "meeting"}
+   - Search terms filter events by title/description
 
 SUPPORTED INTENT TYPES:
 
@@ -54,17 +59,35 @@ SUPPORTED INTENT TYPES:
 3. SYSTEM_QUERY - Ask about the system
    Queries: list_devices, help, capabilities
 
-4. CONVERSATION - General chat/questions
+4. CALENDAR_QUERY - Ask QUESTIONS about calendar events (returns text answer)
+   Queries: count_events, next_event, list_events, find_event
+   IMPORTANT: These are QUESTIONS wanting TEXT ANSWERS, not display commands!
+   - "How many events today?" → calendar_query, count_events
+   - "What's my next meeting?" → calendar_query, next_event
+   - "List my events" → calendar_query, list_events
+   - "When is my birthday?" → calendar_query, find_event, search_term="birthday"
+
+5. CONVERSATION - General chat/questions
    Types: greeting, thanks, question, unknown
+
+CALENDAR QUERY vs DEVICE COMMAND (CRITICAL):
+- "Show my calendar on the TV" → DEVICE_COMMAND (display on screen)
+- "How many events do I have?" → CALENDAR_QUERY (text answer)
+- "Show my birthday on the screen" → DEVICE_COMMAND (display events)
+- "When is my birthday?" → CALENDAR_QUERY (text answer)
+- "Put meetings on the TV" → DEVICE_COMMAND (display on device)
+- "What meetings do I have tomorrow?" → CALENDAR_QUERY (text list)
 
 RESPONSE FORMAT (JSON only):
 
 {
-  "intent_type": "device_command" | "device_query" | "system_query" | "conversation",
+  "intent_type": "device_command" | "device_query" | "system_query" | "calendar_query" | "conversation",
   "confidence": 0.0-1.0,
   "device_name": "living room tv" | null,
-  "action": "show_calendar" | "power_on" | "set_input" | etc. | null,
+  "action": "show_calendar" | "power_on" | "count_events" | "next_event" | etc.,
   "parameters": {} | null,
+  "date_range": "today" | "tomorrow" | "this_week" | "YYYY-MM-DD" | null,
+  "search_term": "birthday" | "meeting" | null,
   "original_text": "the original request",
   "reasoning": "brief explanation"
 }
@@ -85,6 +108,16 @@ ACTION MAPPING FOR CONTENT (IMPORTANT!):
 - "show content" → show_content
 - "clear screen" → clear_content
 - "hide display" → clear_content
+
+CALENDAR SEARCH EXTRACTION (IMPORTANT!):
+When user mentions specific events, extract search terms:
+- "show my birthday" → action: show_calendar, parameters: {"search": "birthday"}
+- "when is my dentist" → action: show_calendar, parameters: {"search": "dentist"}
+- "show team meetings" → action: show_calendar, parameters: {"search": "meeting"}
+- "find my doctor appointment" → action: show_calendar, parameters: {"search": "doctor"}
+Combined date + search:
+- "show meetings tomorrow" → parameters: {"date": "YYYY-MM-DD", "search": "meeting"}
+- "birthday events next week" → parameters: {"search": "birthday"}
 
 ACTION MAPPING FOR POWER:
 - "turn on", "switch on", "power on", "start" → power_on
@@ -160,6 +193,39 @@ Output: {
   "reasoning": "Schedule/calendar display request"
 }
 
+Input: "Show my birthday on the living room TV"
+Output: {
+  "intent_type": "device_command",
+  "confidence": 0.95,
+  "device_name": "living room TV",
+  "action": "show_calendar",
+  "parameters": {"search": "birthday"},
+  "original_text": "Show my birthday on the living room TV",
+  "reasoning": "Calendar search for birthday events"
+}
+
+Input: "When is my dentist appointment"
+Output: {
+  "intent_type": "device_command",
+  "confidence": 0.92,
+  "device_name": null,
+  "action": "show_calendar",
+  "parameters": {"search": "dentist"},
+  "original_text": "When is my dentist appointment",
+  "reasoning": "Calendar search query - extract 'dentist' as search term"
+}
+
+Input: "Show meetings tomorrow on the office display"
+Output: {
+  "intent_type": "device_command",
+  "confidence": 0.95,
+  "device_name": "office display",
+  "action": "show_calendar",
+  "parameters": {"date": "2025-12-13", "search": "meeting"},
+  "original_text": "Show meetings tomorrow on the office display",
+  "reasoning": "Combined date and search query for meetings"
+}
+
 Input: "Turn on the living room TV"
 Output: {
   "intent_type": "device_command",
@@ -224,6 +290,78 @@ Output: {
   "parameters": null,
   "original_text": "Hello!",
   "reasoning": "Greeting, not a device command"
+}
+
+Input: "How many events do I have today?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "count_events",
+  "date_range": "today",
+  "search_term": null,
+  "original_text": "How many events do I have today?",
+  "reasoning": "Calendar question asking for event count - returns text answer"
+}
+
+Input: "What's my next meeting?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "next_event",
+  "date_range": null,
+  "search_term": "meeting",
+  "original_text": "What's my next meeting?",
+  "reasoning": "Calendar question about next event - returns text answer"
+}
+
+Input: "When is my birthday?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.92,
+  "device_name": null,
+  "action": "find_event",
+  "date_range": null,
+  "search_term": "birthday",
+  "original_text": "When is my birthday?",
+  "reasoning": "Calendar query to find specific event - returns text answer"
+}
+
+Input: "List my events for tomorrow"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "list_events",
+  "date_range": "tomorrow",
+  "search_term": null,
+  "original_text": "List my events for tomorrow",
+  "reasoning": "Calendar question asking for event list - returns text answer"
+}
+
+Input: "What meetings do I have this week?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "list_events",
+  "date_range": "this_week",
+  "search_term": "meeting",
+  "original_text": "What meetings do I have this week?",
+  "reasoning": "Calendar question with date range and search filter"
+}
+
+Input: "Do I have anything tomorrow?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.90,
+  "device_name": null,
+  "action": "count_events",
+  "date_range": "tomorrow",
+  "search_term": null,
+  "original_text": "Do I have anything tomorrow?",
+  "reasoning": "Asking about events for tomorrow - returns text answer"
 }
 """
 

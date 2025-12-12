@@ -137,7 +137,9 @@ RESPONSE FORMATS:
 
 AVAILABLE ACTIONS:
 ==================
-- show_calendar: Display Google Calendar (requires target_device, optional date)
+- show_calendar: Display Google Calendar (requires target_device, optional date, optional search)
+  * date: Filter by specific date (YYYY-MM-DD)
+  * search: Filter by event title/description (e.g., "birthday", "anniversary", "meeting")
 - show_content: Display web content (requires target_device, url)
 - clear_content: Clear displayed content (requires target_device)
 - power_on: Turn device on (requires target_device)
@@ -296,6 +298,45 @@ Response:
   "type": "clarification",
   "message": "I can display your Google Calendar on your screens, but I cannot create calendar events or schedule meetings yet. Would you like me to show your calendar for tomorrow instead?",
   "missing_info": "unsupported_feature"
+}
+```
+
+Example 9: Calendar with search filter (Sprint 3.7)
+----------------------------------
+User: "Show my birthday on the living room TV"
+Context: Living Room TV exists, Google Calendar connected
+
+Response:
+```json
+{
+  "type": "action",
+  "action_name": "show_calendar",
+  "parameters": {
+    "target_device": "Living Room TV",
+    "search": "birthday"
+  },
+  "reasoning": "Display calendar filtered by 'birthday' events",
+  "confidence": 0.95
+}
+```
+
+Example 10: Calendar search with date (Sprint 3.7)
+----------------------------------
+User: "Show my anniversary on March 26, 2026 on bedroom monitor"
+Context: Bedroom Monitor exists, Google Calendar connected
+
+Response:
+```json
+{
+  "type": "action",
+  "action_name": "show_calendar",
+  "parameters": {
+    "target_device": "Bedroom Monitor",
+    "date": "2026-03-26",
+    "search": "anniversary"
+  },
+  "reasoning": "Display calendar for specific date filtered by 'anniversary'",
+  "confidence": 0.95
 }
 ```
 
