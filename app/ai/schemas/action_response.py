@@ -250,6 +250,49 @@ ActionResponseUnion = Union[ActionResponse, ClarificationResponse, ActionSequenc
 
 
 # ---------------------------------------------------------------------------
+# HELPER FUNCTIONS
+# ---------------------------------------------------------------------------
+
+def _strip_markdown_code_blocks(text: str) -> str:
+    """
+    Strip markdown code blocks from GPT response.
+    
+    GPT-4o sometimes wraps JSON responses in markdown code blocks like:
+    ```json
+    {"type": "action", ...}
+    ```
+    
+    This function removes these wrappers to get the raw JSON.
+    
+    Args:
+        text: Raw text from GPT (may or may not have code blocks)
+        
+    Returns:
+        Clean text with code blocks removed
+    """
+    if not text:
+        return text
+    
+    text = text.strip()
+    
+    # Check for markdown code blocks (```json ... ``` or ``` ... ```)
+    if text.startswith("```"):
+        # Find the end of the first line (which may contain the language hint)
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            # Remove the opening ```json or ``` line
+            text = text[first_newline + 1:]
+        
+        # Remove the closing ```
+        if text.endswith("```"):
+            text = text[:-3]
+        
+        text = text.strip()
+    
+    return text
+
+
+# ---------------------------------------------------------------------------
 # RESPONSE PARSER
 # ---------------------------------------------------------------------------
 
@@ -266,10 +309,11 @@ def parse_action_response(
     Parse GPT-4o's JSON response into a typed response object.
     
     This function:
-    1. Parses JSON string
-    2. Validates structure
-    3. Returns appropriate typed object
-    4. Handles errors gracefully
+    1. Strips markdown code blocks if present
+    2. Parses JSON string
+    3. Validates structure
+    4. Returns appropriate typed object
+    5. Handles errors gracefully
     
     Args:
         json_str: JSON string from GPT-4o
@@ -291,10 +335,13 @@ def parse_action_response(
             ask_user(response.message)
         ```
     """
+    # Strip markdown code blocks if present (GPT sometimes wraps JSON in ```json ... ```)
+    cleaned_str = _strip_markdown_code_blocks(json_str)
+    
     try:
         # Parse JSON
         try:
-            data = json.loads(json_str)
+            data = json.loads(cleaned_str)
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON from GPT: {e}")
             # Sprint 3.6 fix: Log the actual GPT response for debugging

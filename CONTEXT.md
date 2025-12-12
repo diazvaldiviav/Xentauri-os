@@ -1,8 +1,9 @@
 # Jarvis Project Context
 
-> **Last Updated:** December 10, 2025
+> **Last Updated:** December 12, 2025
 > **Current Sprint:** Sprint 4 - Raspberry Pi Agent
-> **Status:** ✅ Sprint 3.6 Complete - Ready for Pi Agent development
+> **Tech Debt Cleanup:** ✅ Complete (301 tests, 84% router reduction)
+> **Status:** ✅ Ready for Pi Agent development
 
 Jarvis is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
 
@@ -124,9 +125,11 @@ Jarvis_Cloud/
 │   │   ├── cloud.py         # Cloud content for displays (Sprint 3.5)
 │   │   └── simulator.py     # Display simulator for dev testing (Sprint 3.5)
 │   ├── services/
-│   │   ├── pairing.py       # Pairing code generation/validation
-│   │   ├── websocket_manager.py  # Connection manager
-│   │   └── commands.py      # Command routing service
+│   │   ├── pairing.py           # Pairing code generation/validation
+│   │   ├── websocket_manager.py # Connection manager
+│   │   ├── commands.py          # Command routing service
+│   │   ├── intent_service.py    # Intent processing business logic (NEW)
+│   │   └── content_token.py     # Signed content tokens for iframes
 │   ├── schemas/
 │   │   ├── auth.py          # Request/response schemas for auth
 │   │   ├── user.py          # UserOut schema
@@ -134,6 +137,9 @@ Jarvis_Cloud/
 │   ├── ai/                   # AI Module (Sprint 3) - The Brain
 │   │   ├── __init__.py      # Module exports
 │   │   ├── context.py       # UnifiedContext system (Sprint 3.6)
+│   │   ├── actions/         # Action Registry (Tech Debt Cleanup)
+│   │   │   ├── __init__.py  # Module exports
+│   │   │   └── registry.py  # ActionDefinition, ActionRegistry (11 actions)
 │   │   ├── providers/       # LLM Provider Clients
 │   │   │   ├── base.py      # Abstract provider interface
 │   │   │   ├── gemini.py    # Google Gemini (orchestrator)
@@ -173,10 +179,17 @@ Jarvis_Cloud/
 │               └── renderer.py  # HTML rendering for Raspberry Pi
 ├── tests/
 │   ├── conftest.py          # Pytest fixtures
-│   ├── test_devices.py      # Device CRUD tests
-│   ├── test_pairing.py      # Pairing service tests
-│   ├── test_websocket_manager.py  # WebSocket manager tests
-│   └── test_intent.py       # Intent parsing tests (Sprint 3)
+│   ├── test_action_registry.py   # Action registry tests (37 tests)
+│   ├── test_action_response.py   # AI response schema tests (47 tests)
+│   ├── test_ai_providers.py      # AI provider base tests (23 tests)
+│   ├── test_ai_router.py         # AI orchestrator tests (29 tests)
+│   ├── test_device_mapper.py     # Device matching tests (42 tests)
+│   ├── test_devices.py           # Device CRUD tests
+│   ├── test_intent.py            # Intent parsing tests
+│   ├── test_intent_parser.py     # Parser edge cases (33 tests)
+│   ├── test_intent_service.py    # Service layer tests (32 tests)
+│   ├── test_pairing.py           # Pairing service tests
+│   └── test_websocket_manager.py # WebSocket manager tests
 ├── alembic/                  # Database migrations
 ├── venv/                     # Python virtual environment
 ├── .env                      # Environment variables (not in git)
@@ -362,6 +375,53 @@ Example Flows:
 3. Analysis Request: "Analyze my device setup for efficiency"
    → Router: COMPLEX_REASONING → Claude → Returns analysis
 ```
+
+### Intent Processing Architecture (Refactored)
+
+After the technical debt cleanup, the intent processing follows a clean separation:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     Clean Architecture                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Before (1319 lines):                After (205 + 1056 lines):
+┌───────────────────┐               ┌───────────────────┐
+│   intent.py       │               │   intent.py       │  ← HTTP only (205 lines)
+│   (ROUTER)        │               │   (ROUTER)        │
+│                   │               └─────────┬─────────┘
+│ - HTTP handling   │                         │
+│ - Intent parsing  │                         ▼
+│ - Device matching │               ┌───────────────────┐
+│ - Command exec    │               │ intent_service.py │  ← Business logic (1056 lines)
+│ - Content display │               │   (SERVICE)       │
+│ - Complex tasks   │               └─────────┬─────────┘
+│ - Message build   │                         │
+│ - Error handling  │               ┌─────────┴─────────┐
+└───────────────────┘               │                   │
+                                    ▼                   ▼
+                          ┌──────────────┐    ┌──────────────┐
+                          │ ActionRegistry│    │   AI/Cmds    │
+                          │ (11 actions) │    │   Providers  │
+                          └──────────────┘    └──────────────┘
+```
+
+**IntentService** (Single Responsibility):
+- `process()` - Main entry point
+- `_handle_simple_task()` - Gemini intent parsing
+- `_handle_complex_task()` - GPT/Claude routing
+- `_handle_device_command()` - Device commands
+- `_handle_device_query()` - Status queries
+- `_handle_system_query()` - System info
+- `_handle_conversation()` - Greetings, thanks
+- `_execute_content_action()` - Calendar display
+- `_execute_device_command()` - Power, volume, etc.
+
+**ActionRegistry** (Centralized Definitions):
+- 11 built-in actions: power_on, power_off, volume_up, volume_down, mute, unmute, set_input, volume_set, show_calendar, show_content, clear_content
+- Parameter validation with custom validators
+- Action aliases (e.g., "turn_on" → "power_on")
+- Category-based queries
 
 ### Unified AI Monitoring (DRY Principle)
 
@@ -552,6 +612,44 @@ environments/
 ---
 
 ## 📝 Session Notes
+
+### December 12, 2025 - Technical Debt Cleanup Complete
+- **Phase 1: Tests First** (89 tests)
+  - `test_action_response.py` - 47 tests for AI response schemas
+  - `test_device_mapper.py` - 42 tests for device fuzzy matching
+  - Established baseline before refactoring
+- **Phase 2: Extract Service Layer** (69 tests added → 158 total)
+  - Created `app/ai/actions/registry.py` with ActionRegistry
+    - ActionDefinition dataclass for action metadata
+    - 11 built-in actions with parameter validation
+    - Custom validators (e.g., volume range 0-100)
+    - Aliases ("turn_on" → "power_on")
+  - Created `app/services/intent_service.py` with IntentService
+    - IntentResult dataclass for standardized responses
+    - IntentResultType enum for classification
+    - All business logic extracted from router
+  - `test_action_registry.py` - 37 tests
+  - `test_intent_service.py` - 32 tests
+- **Phase 3: Slim Down Router** (refactoring, no new tests)
+  - Refactored `intent.py` from 1319 lines to 205 lines (84% reduction)
+  - Router now delegates all business logic to IntentService
+  - Clean separation: HTTP handling vs business logic
+- **Phase 4: AI Module Tests** (85 tests added → 301 total)
+  - `test_ai_providers.py` - 23 tests for base classes, mock patterns
+  - `test_ai_router.py` - 29 tests for orchestrator, routing logic
+  - `test_intent_parser.py` - 33 tests for parsing edge cases
+  - All LLM calls mocked for fast, reliable tests
+- **Phase 5: Documentation**
+  - Updated CONTEXT.md with new architecture
+  - Added Intent Processing Architecture diagram
+  - Documented IntentService and ActionRegistry
+  - Updated test file inventory
+
+**Final Stats:**
+- 301 tests passing ✅
+- Router reduced 84% (1319 → 205 lines)
+- Service layer: 1056 lines of business logic
+- Action registry: 11 built-in actions with validation
 
 ### December 10, 2025 - Sprint 3.6 Complete
 - **All Bugs Fixed:**
