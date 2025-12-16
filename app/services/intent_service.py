@@ -71,10 +71,13 @@ from app.ai.intent.parser import intent_parser
 from app.ai.intent.device_mapper import device_mapper
 from app.ai.intent.schemas import (
     IntentType,
+    ActionType,
     DeviceCommand,
     DeviceQuery,
     SystemQuery,
     CalendarQueryIntent,
+    CalendarCreateIntent,
+    CalendarEditIntent,
     ConversationIntent,
 )
 from app.ai.router.orchestrator import ai_router, TaskComplexity
@@ -95,6 +98,7 @@ class IntentResultType(str, Enum):
     DEVICE_QUERY = "device_query"
     SYSTEM_QUERY = "system_query"
     CALENDAR_QUERY = "calendar_query"
+    CALENDAR_EDIT = "calendar_edit"  # Sprint 3.9
     CONVERSATION = "conversation"
     COMPLEX_EXECUTION = "complex_execution"
     COMPLEX_REASONING = "complex_reasoning"
@@ -362,6 +366,24 @@ class IntentService:
         
         elif isinstance(intent, CalendarQueryIntent):
             return await self._handle_calendar_query(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        
+        elif isinstance(intent, CalendarCreateIntent):
+            return await self._handle_calendar_create(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        
+        elif isinstance(intent, CalendarEditIntent):
+            return await self._handle_calendar_edit(
                 request_id=request_id,
                 intent=intent,
                 user_id=user_id,
@@ -1443,6 +1465,1406 @@ class IntentService:
             return f"Setting volume to {level}% on {device_name}"
         
         return f"Command sent to {device_name}"
+    
+    # -----------------------------------------------------------------------
+    # CALENDAR CREATE HANDLER (Sprint 3.8)
+    # -----------------------------------------------------------------------
+    
+    async def _handle_calendar_create(
+        self,
+        request_id: str,
+        intent: CalendarCreateIntent,
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Handle calendar event creation with confirmation flow.
+        
+        Sprint 3.8: Implements the confirmation flow:
+        1. CREATE_EVENT: Extract details → Store pending → Return confirmation prompt
+        2. CONFIRM_CREATE: Get pending → Create via API → Return success
+        3. CANCEL_CREATE: Clear pending → Return cancellation message
+        4. EDIT_PENDING_EVENT: Update pending → Return updated confirmation
+        """
+        from app.services.pending_event_service import pending_event_service
+        from app.models.oauth_credential import OAuthCredential
+        
+        action = intent.action
+        
+        # Route based on action type
+        if action == ActionType.CREATE_EVENT:
+            return await self._handle_create_event(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.CONFIRM_CREATE:
+            return await self._handle_confirm_create(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.CANCEL_CREATE:
+            return await self._handle_cancel_create(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+            )
+        elif action == ActionType.EDIT_PENDING_EVENT:
+            return await self._handle_edit_pending(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+            )
+        else:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=f"Unknown calendar create action: {action}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+    
+    async def _handle_create_event(
+        self,
+        request_id: str,
+        intent: CalendarCreateIntent,
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Extract event details and store pending event.
+        
+        Returns confirmation prompt for user.
+        """
+        from app.services.pending_event_service import pending_event_service
+        from app.models.oauth_credential import OAuthCredential
+        from app.environments.google.calendar.client import GoogleCalendarClient
+        from datetime import datetime, date as date_type
+        
+        processing_time_start = time.time()
+        
+        # Check for Google OAuth credentials
+        credentials = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == "google",
+        ).first()
+        
+        if not credentials or not credentials.access_token:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,  # Reuse for calendar errors
+                confidence=intent.confidence,
+                message="Please connect your Google Calendar first. Visit /auth/google/login",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Get user's timezone from calendar
+        try:
+            calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
+            user_timezone = await calendar_client.get_user_timezone()
+        except Exception as e:
+            logger.warning(f"Could not get user timezone: {e}")
+            user_timezone = "UTC"
+        
+        # Resolve event_date if it's a string
+        event_date = None
+        if intent.event_date:
+            event_date = self._resolve_date_string(intent.event_date)
+        
+        # Store pending event
+        pending = await pending_event_service.store_pending(
+            user_id=str(user_id),
+            event_title=intent.event_title or "Event",
+            event_date=event_date,
+            event_time=intent.event_time,
+            duration_minutes=intent.duration_minutes or 60,
+            is_all_day=intent.is_all_day,
+            location=intent.location,
+            recurrence=intent.recurrence,
+            timezone=user_timezone,
+            original_text=intent.original_text,
+        )
+        
+        # Build confirmation message
+        confirmation_message = self._build_confirmation_message(pending)
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        return IntentResult(
+            success=True,
+            intent_type=IntentResultType.CALENDAR_QUERY,
+            confidence=intent.confidence,
+            action="create_event",
+            parameters={
+                "event_title": pending.event_title,
+                "event_date": pending.event_date.isoformat() if pending.event_date else None,
+                "event_time": pending.event_time,
+                "duration_minutes": pending.duration_minutes,
+                "is_all_day": pending.is_all_day,
+                "location": pending.location,
+                "recurrence": pending.recurrence,
+                "pending": True,
+            },
+            message=confirmation_message,
+            response=confirmation_message,
+            processing_time_ms=processing_time,
+            request_id=request_id,
+        )
+    
+    async def _handle_confirm_create(
+        self,
+        request_id: str,
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Confirm and create the pending event.
+        
+        Context-aware: If no pending CREATE but pending EDIT exists,
+        delegates to edit confirmation flow.
+        """
+        from app.services.pending_event_service import pending_event_service
+        from app.services.pending_edit_service import pending_edit_service
+        from app.models.oauth_credential import OAuthCredential
+        from app.environments.google.calendar.client import GoogleCalendarClient
+        from app.environments.google.calendar.schemas import EventCreateRequest
+        from datetime import datetime, timedelta
+        
+        # First check if there's a pending CREATE
+        pending = pending_event_service.get_pending(str(user_id))
+        
+        if not pending:
+            # No pending CREATE - check for pending EDIT/DELETE
+            pending_edit = pending_edit_service.get_pending(str(user_id))
+            
+            if pending_edit:
+                # User said "yes" to confirm an edit/delete, not a create
+                logger.info(
+                    f"Confirmation redirected: no pending CREATE, found pending {pending_edit.operation.value}",
+                    extra={"user_id": str(user_id)[:8]}
+                )
+                
+                if pending_edit.operation.value == "delete":
+                    return await self._handle_confirm_delete(
+                        request_id=request_id,
+                        user_id=user_id,
+                        start_time=start_time,
+                        db=db,
+                    )
+                else:
+                    return await self._handle_confirm_edit(
+                        request_id=request_id,
+                        user_id=user_id,
+                        start_time=start_time,
+                        db=db,
+                    )
+            
+            # Neither pending CREATE nor EDIT found
+            processing_time = (time.time() - start_time) * 1000
+            
+            # Check if it expired or just doesn't exist
+            if pending_event_service.is_expired(str(user_id)):
+                message = "Event creation timed out. Please try again: 'schedule a meeting tomorrow at 6 pm'"
+            else:
+                message = "No pending operation to confirm. Try 'schedule a meeting tomorrow at 6 pm'"
+            
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message=message,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Get credentials
+        credentials = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == "google",
+        ).first()
+        
+        if not credentials or not credentials.access_token:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message="Please connect your Google Calendar first. Visit /auth/google/login",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Build event request
+        try:
+            calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
+            
+            if pending.is_all_day:
+                # All-day event
+                request = EventCreateRequest(
+                    summary=pending.event_title,
+                    start_date=pending.event_date,
+                    end_date=pending.event_date + timedelta(days=1) if pending.event_date else None,
+                    location=pending.location,
+                    recurrence=[pending.recurrence] if pending.recurrence else None,
+                    timezone=pending.timezone,
+                )
+                response = await calendar_client.create_all_day_event(request)
+            else:
+                # Timed event
+                start_dt = pending.get_start_datetime()
+                end_dt = pending.get_end_datetime()
+                
+                request = EventCreateRequest(
+                    summary=pending.event_title,
+                    start_datetime=start_dt,
+                    end_datetime=end_dt,
+                    location=pending.location,
+                    recurrence=[pending.recurrence] if pending.recurrence else None,
+                    timezone=pending.timezone,
+                )
+                response = await calendar_client.create_event(request)
+            
+            # Remove from pending after successful creation
+            await pending_event_service.confirm_pending(str(user_id))
+            
+            # Build success message
+            success_message = self._build_calendar_success_message(pending, response)
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            return IntentResult(
+                success=True,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                action="confirm_create",
+                parameters={
+                    "event_id": response.event_id,
+                    "summary": response.summary,
+                    "html_link": response.html_link,
+                },
+                message=success_message,
+                response=success_message,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to create calendar event: {e}", exc_info=True)
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message=f"Failed to create event: {str(e)}. Please try again.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+    
+    async def _handle_cancel_create(
+        self,
+        request_id: str,
+        user_id: UUID,
+        start_time: float,
+    ) -> IntentResult:
+        """
+        Cancel the pending event creation.
+        """
+        from app.services.pending_event_service import pending_event_service
+        
+        cancelled = pending_event_service.cancel_pending(str(user_id))
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        if cancelled:
+            message = "Event creation cancelled. Let me know if you'd like to schedule something else."
+        else:
+            message = "No pending event to cancel."
+        
+        return IntentResult(
+            success=True,
+            intent_type=IntentResultType.CALENDAR_QUERY,
+            action="cancel_create",
+            message=message,
+            response=message,
+            processing_time_ms=processing_time,
+            request_id=request_id,
+        )
+    
+    async def _handle_edit_pending(
+        self,
+        request_id: str,
+        intent: CalendarCreateIntent,
+        user_id: UUID,
+        start_time: float,
+    ) -> IntentResult:
+        """
+        Edit a field on the pending event.
+        """
+        from app.services.pending_event_service import pending_event_service
+        
+        # Get pending event
+        pending = pending_event_service.get_pending(str(user_id))
+        
+        if not pending:
+            processing_time = (time.time() - start_time) * 1000
+            
+            if pending_event_service.is_expired(str(user_id)):
+                message = "Event creation timed out. Please try again: 'schedule a meeting tomorrow at 6 pm'"
+            else:
+                message = "No pending event to edit. Try 'schedule a meeting tomorrow at 6 pm'"
+            
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message=message,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        edit_field = intent.edit_field
+        edit_value = intent.edit_value
+        
+        if not edit_field or not edit_value:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message="I couldn't understand that edit. Try 'change time to 7 pm' or 'make it 2 hours'",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Parse the value based on field type
+        try:
+            parsed_value = self._parse_edit_value(edit_field, edit_value)
+        except ValueError as e:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message=f"Invalid edit: {str(e)}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Update the field
+        try:
+            updated = pending_event_service.update_pending(str(user_id), edit_field, parsed_value)
+        except ValueError as e:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message=str(e),
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        if not updated:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message="Failed to update event. Please try again.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Build updated confirmation message
+        confirmation_message = self._build_confirmation_message(updated, highlight_field=edit_field)
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        return IntentResult(
+            success=True,
+            intent_type=IntentResultType.CALENDAR_QUERY,
+            action="edit_pending_event",
+            parameters={
+                "edit_field": edit_field,
+                "edit_value": str(parsed_value),
+            },
+            message=confirmation_message,
+            response=confirmation_message,
+            processing_time_ms=processing_time,
+            request_id=request_id,
+        )
+    
+    # -----------------------------------------------------------------------
+    # CALENDAR EDIT HANDLERS (Sprint 3.9)
+    # -----------------------------------------------------------------------
+    
+    async def _handle_calendar_edit(
+        self,
+        request_id: str,
+        intent: CalendarEditIntent,
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Handle calendar event edit/delete with confirmation flow.
+        
+        Sprint 3.9: Implements the edit/delete flow:
+        1. EDIT_EXISTING_EVENT: Search → Disambiguate if needed → Store pending → Return confirmation
+        2. DELETE_EXISTING_EVENT: Search → Disambiguate if needed → Store pending → Return confirmation
+        3. SELECT_EVENT: Select from multiple matches → Update pending → Return confirmation
+        4. CONFIRM_EDIT: Get pending → Execute update via API → Return success
+        5. CONFIRM_DELETE: Get pending → Execute delete via API → Return success
+        6. CANCEL_EDIT: Clear pending → Return cancellation message
+        """
+        action = intent.action
+        
+        # Route based on action type
+        if action == ActionType.EDIT_EXISTING_EVENT:
+            return await self._handle_edit_existing_event(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.DELETE_EXISTING_EVENT:
+            return await self._handle_delete_existing_event(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.SELECT_EVENT:
+            return await self._handle_select_event(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+            )
+        elif action == ActionType.CONFIRM_EDIT:
+            return await self._handle_confirm_edit(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.CONFIRM_DELETE:
+            return await self._handle_confirm_delete(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.CANCEL_EDIT:
+            return await self._handle_cancel_edit(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+            )
+        else:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=f"Unknown calendar edit action: {action}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+    
+    async def _handle_edit_existing_event(
+        self,
+        request_id: str,
+        intent: CalendarEditIntent,
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Search for events matching criteria and initiate edit flow.
+        
+        Uses smart semantic search (LLM matching) to find events,
+        handling typos, translations, and synonyms.
+        """
+        from app.services.pending_edit_service import pending_edit_service
+        from app.services.calendar_search_service import calendar_search_service
+        
+        search_term = intent.search_term
+        date_filter = intent.date_filter
+        
+        if not search_term:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="What event would you like to edit? Try 'edit my meeting tomorrow' or 'reschedule my dentist appointment'.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Use smart semantic search (handles typos, translations, synonyms)
+        result = await calendar_search_service.smart_search(
+            user_query=search_term,
+            user_id=user_id,
+            db=db,
+        )
+        
+        if result.error:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message=result.error,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        if result.no_match_found or not result.events:
+            processing_time = (time.time() - start_time) * 1000
+            corrected = result.corrected_query or search_term
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message=f"No events found matching '{corrected}'. Try a different search term.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Limit to first 5 matches
+        matching_events = result.events[:5]
+        
+        # Store pending edit operation
+        # (pending_edit_service handles CalendarEvent -> MatchingEvent conversion)
+        pending = await pending_edit_service.store_pending_edit(
+            user_id=str(user_id),
+            operation="edit",
+            matching_events=matching_events,
+            search_term=search_term,
+            date_filter=date_filter,
+            changes=intent.changes,
+            original_text=intent.original_text,
+        )
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        # Build response based on state
+        if pending.needs_selection():
+            # Multiple matches - ask for selection
+            options_text = pending.get_event_options_text()
+            message = f"I found multiple events:\n\n{options_text}\n\nWhich one would you like to edit? Say 'the first one' or a number."
+        else:
+            # Single match - ask for confirmation
+            confirmation_text = pending.get_confirmation_text()
+            message = f"{confirmation_text}\n\nSay 'yes' to confirm or 'no' to cancel."
+        
+        return IntentResult(
+            success=True,
+            intent_type=IntentResultType.CALENDAR_EDIT,
+            action="edit_existing_event",
+            parameters={
+                "search_term": search_term,
+                "matching_count": len(matching_events),
+                "state": pending.state.value,
+            },
+            message=message,
+            response=message,
+            processing_time_ms=processing_time,
+            request_id=request_id,
+        )
+    
+    async def _handle_delete_existing_event(
+        self,
+        request_id: str,
+        intent: CalendarEditIntent,
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Search for events matching criteria and initiate delete flow.
+        
+        Uses smart semantic search (LLM matching) to find events,
+        handling typos, translations, and synonyms.
+        """
+        from app.services.pending_edit_service import pending_edit_service
+        from app.services.calendar_search_service import calendar_search_service
+        
+        search_term = intent.search_term
+        date_filter = intent.date_filter
+        
+        if not search_term:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="What event would you like to delete? Try 'delete my meeting tomorrow' or 'cancel my dentist appointment'.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Use smart semantic search (handles typos, translations, synonyms)
+        result = await calendar_search_service.smart_search(
+            user_query=search_term,
+            user_id=user_id,
+            db=db,
+        )
+        
+        if result.error:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message=result.error,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        if result.no_match_found or not result.events:
+            processing_time = (time.time() - start_time) * 1000
+            corrected = result.corrected_query or search_term
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message=f"No events found matching '{corrected}'. Try a different search term.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Limit to first 5 matches
+        matching_events = result.events[:5]
+        
+        # Store pending delete operation
+        # (pending_edit_service handles CalendarEvent -> MatchingEvent conversion)
+        pending = await pending_edit_service.store_pending_edit(
+            user_id=str(user_id),
+            operation="delete",
+            matching_events=matching_events,
+            search_term=search_term,
+            date_filter=date_filter,
+            original_text=intent.original_text,
+        )
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        # Build response based on state
+        if pending.needs_selection():
+            # Multiple matches - ask for selection
+            options_text = pending.get_event_options_text()
+            message = f"I found multiple events:\n\n{options_text}\n\nWhich one would you like to delete? Say 'the first one' or a number."
+        else:
+            # Single match - ask for confirmation
+            confirmation_text = pending.get_confirmation_text()
+            message = f"{confirmation_text}\n\nSay 'yes' to confirm or 'no' to cancel."
+        
+        return IntentResult(
+            success=True,
+            intent_type=IntentResultType.CALENDAR_EDIT,
+            action="delete_existing_event",
+            parameters={
+                "search_term": search_term,
+                "matching_count": len(matching_events),
+                "state": pending.state.value,
+            },
+            message=message,
+            response=message,
+            processing_time_ms=processing_time,
+            request_id=request_id,
+        )
+    
+    async def _handle_select_event(
+        self,
+        request_id: str,
+        intent: CalendarEditIntent,
+        user_id: UUID,
+        start_time: float,
+    ) -> IntentResult:
+        """
+        Handle event selection from multiple matches.
+        """
+        from app.services.pending_edit_service import pending_edit_service
+        
+        pending = pending_edit_service.get_pending(str(user_id))
+        
+        if not pending:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="No pending edit operation. Try 'reschedule my meeting' or 'delete my appointment'.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        selection_index = intent.selection_index
+        
+        if not selection_index:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="Please specify which event. Say 'the first one', 'number 2', etc.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Select the event
+        updated = pending_edit_service.select_event(str(user_id), selection_index)
+        
+        if not updated:
+            processing_time = (time.time() - start_time) * 1000
+            max_index = len(pending.matching_events)
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message=f"Invalid selection. Please choose a number between 1 and {max_index}.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Build confirmation message
+        confirmation_text = updated.get_confirmation_text()
+        processing_time = (time.time() - start_time) * 1000
+        
+        return IntentResult(
+            success=True,
+            intent_type=IntentResultType.CALENDAR_EDIT,
+            action="select_event",
+            parameters={
+                "selected_index": selection_index,
+                "selected_event": updated.selected_event.summary if updated.selected_event else None,
+            },
+            message=f"{confirmation_text}\n\nSay 'yes' to confirm or 'no' to cancel.",
+            response=f"{confirmation_text}\n\nSay 'yes' to confirm or 'no' to cancel.",
+            processing_time_ms=processing_time,
+            request_id=request_id,
+        )
+    
+    async def _handle_confirm_edit(
+        self,
+        request_id: str,
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Confirm and execute the pending edit.
+        
+        Context-aware: If no pending EDIT but pending CREATE exists,
+        delegates to create confirmation flow.
+        """
+        from app.services.pending_edit_service import pending_edit_service, PendingOperationType
+        from app.services.pending_event_service import pending_event_service
+        from app.models.oauth_credential import OAuthCredential
+        from app.environments.google.calendar.client import GoogleCalendarClient
+        from app.environments.google.calendar.schemas import EventUpdateRequest
+        
+        pending = pending_edit_service.get_pending(str(user_id))
+        
+        if not pending:
+            # No pending EDIT - check for pending CREATE
+            pending_create = pending_event_service.get_pending(str(user_id))
+            
+            if pending_create:
+                # User said "yes" to confirm a create, not an edit
+                logger.info(
+                    f"Confirmation redirected: no pending EDIT, found pending CREATE",
+                    extra={"user_id": str(user_id)[:8]}
+                )
+                return await self._handle_confirm_create(
+                    request_id=request_id,
+                    user_id=user_id,
+                    start_time=start_time,
+                    db=db,
+                )
+            
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="No pending operation to confirm. Try 'reschedule my meeting' or 'schedule a meeting'.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        if pending.operation != PendingOperationType.EDIT:
+            # Redirect to delete handler
+            return await self._handle_confirm_delete(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        
+        if not pending.selected_event:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="No event selected. Please select an event first.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Get credentials
+        credentials = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == "google",
+        ).first()
+        
+        if not credentials or not credentials.access_token:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="Please connect your Google Calendar first.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Execute the update
+        try:
+            client = GoogleCalendarClient(
+                access_token=credentials.access_token,
+            )
+            
+            event_id = pending.selected_event.event_id
+            changes = pending.changes or {}
+            
+            # Process time changes - combine original date with new time if needed
+            processed_changes = self._process_time_changes(
+                changes=changes,
+                original_start=pending.selected_event.start_time,
+                original_end=pending.selected_event.end_time,
+            )
+            
+            # Build update request
+            update_request = EventUpdateRequest(**processed_changes)
+            
+            response = await client.update_event(event_id, update_request)
+            
+            # Confirm and remove from pending
+            await pending_edit_service.confirm_pending(str(user_id))
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            event_name = pending.selected_event.summary
+            message = f"✓ '{event_name}' has been updated."
+            
+            return IntentResult(
+                success=True,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                action="confirm_edit",
+                parameters={
+                    "event_id": event_id,
+                    "changes": changes,
+                },
+                message=message,
+                response=message,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to update calendar event: {e}", exc_info=True)
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message=f"Failed to update event: {str(e)}. Please try again.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+    
+    async def _handle_confirm_delete(
+        self,
+        request_id: str,
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Confirm and execute the pending delete.
+        
+        Context-aware: If no pending DELETE but pending CREATE/EDIT exists,
+        delegates to the appropriate confirmation flow.
+        """
+        from app.services.pending_edit_service import pending_edit_service, PendingOperationType
+        from app.services.pending_event_service import pending_event_service
+        from app.models.oauth_credential import OAuthCredential
+        from app.environments.google.calendar.client import GoogleCalendarClient
+        
+        pending = pending_edit_service.get_pending(str(user_id))
+        
+        if not pending:
+            # No pending EDIT/DELETE - check for pending CREATE
+            pending_create = pending_event_service.get_pending(str(user_id))
+            
+            if pending_create:
+                logger.info(
+                    f"Confirmation redirected: no pending DELETE, found pending CREATE",
+                    extra={"user_id": str(user_id)[:8]}
+                )
+                return await self._handle_confirm_create(
+                    request_id=request_id,
+                    user_id=user_id,
+                    start_time=start_time,
+                    db=db,
+                )
+            
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="No pending operation to confirm. Try 'delete my meeting' or 'schedule a meeting'.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        if pending.operation != PendingOperationType.DELETE:
+            # Redirect to edit handler
+            return await self._handle_confirm_edit(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        
+        if not pending.selected_event:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="No event selected. Please select an event first.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Get credentials
+        credentials = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == "google",
+        ).first()
+        
+        if not credentials or not credentials.access_token:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message="Please connect your Google Calendar first.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Execute the delete
+        try:
+            client = GoogleCalendarClient(
+                access_token=credentials.access_token,
+            )
+            
+            event_id = pending.selected_event.event_id
+            event_name = pending.selected_event.summary
+            
+            response = await client.delete_event(event_id)
+            
+            # Confirm and remove from pending
+            await pending_edit_service.confirm_pending(str(user_id))
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            message = f"✓ '{event_name}' has been deleted."
+            
+            return IntentResult(
+                success=True,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                action="confirm_delete",
+                parameters={
+                    "event_id": event_id,
+                },
+                message=message,
+                response=message,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to delete calendar event: {e}", exc_info=True)
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_EDIT,
+                message=f"Failed to delete event: {str(e)}. Please try again.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+    
+    async def _handle_cancel_edit(
+        self,
+        request_id: str,
+        user_id: UUID,
+        start_time: float,
+    ) -> IntentResult:
+        """
+        Cancel the pending edit/delete operation.
+        """
+        from app.services.pending_edit_service import pending_edit_service
+        
+        cancelled = pending_edit_service.cancel_pending(str(user_id))
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        if cancelled:
+            message = "Edit cancelled. Let me know if you'd like to make other changes."
+        else:
+            message = "No pending edit to cancel."
+        
+        return IntentResult(
+            success=True,
+            intent_type=IntentResultType.CALENDAR_EDIT,
+            action="cancel_edit",
+            message=message,
+            response=message,
+            processing_time_ms=processing_time,
+            request_id=request_id,
+        )
+
+    def _resolve_date_string(self, date_str: str) -> Optional["date_type"]:
+        """
+        Convert date string to date object.
+        """
+        from datetime import datetime, timedelta, date as date_type
+        import re
+        
+        if not date_str:
+            return None
+        
+        date_str = date_str.lower().strip()
+        today = datetime.now()
+        
+        # Already ISO format
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+            return datetime.strptime(date_str, "%Y-%m-%d").date()
+        
+        # Relative dates
+        if date_str == "today":
+            return today.date()
+        if date_str == "tomorrow":
+            return (today + timedelta(days=1)).date()
+        
+        # Try to parse as date
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+        
+        return None
+    
+    def _parse_edit_value(self, field: str, value: str) -> Any:
+        """
+        Parse edit value based on field type.
+        """
+        from app.ai.intent.parser import intent_parser
+        
+        if field == "event_time":
+            return intent_parser._resolve_time(value)
+        elif field == "event_date":
+            date_obj = self._resolve_date_string(value)
+            if not date_obj:
+                # Try to resolve using parser
+                resolved = intent_parser._resolve_event_date(value, value)
+                if resolved:
+                    date_obj = self._resolve_date_string(resolved)
+            return date_obj
+        elif field == "event_title":
+            return value.strip()
+        elif field == "duration_minutes":
+            # Parse "2 hours" → 120, "90 minutes" → 90
+            value_lower = value.lower().strip()
+            import re
+            
+            # Try to extract number
+            num_match = re.search(r"(\d+)", value_lower)
+            if num_match:
+                num = int(num_match.group(1))
+                if "hour" in value_lower:
+                    return num * 60
+                return num
+            raise ValueError(f"Could not parse duration: {value}")
+        elif field == "location":
+            return value.strip()
+        elif field == "recurrence":
+            return intent_parser._parse_recurrence(value)
+        elif field == "is_all_day":
+            return value.lower() in ("true", "yes", "all day", "all-day")
+        else:
+            return value
+    
+    def _build_confirmation_message(
+        self,
+        pending: "PendingEvent",
+        highlight_field: Optional[str] = None,
+    ) -> str:
+        """
+        Build human-readable confirmation message.
+        
+        Example output:
+        "Create 'Meeting' for December 13, 2025 at 7:00 PM (America/New_York)?
+         Say 'yes' to confirm, 'no' to cancel, or edit like 'change time to 8 pm'"
+        """
+        from datetime import datetime
+        
+        title = pending.event_title
+        
+        # Format date
+        if pending.event_date:
+            date_str = pending.event_date.strftime("%B %d, %Y")
+        else:
+            date_str = "a date to be determined"
+        
+        # Format time
+        if pending.is_all_day:
+            time_str = "(all day)"
+        elif pending.event_time:
+            # Convert 24h to 12h format
+            try:
+                parts = pending.event_time.split(":")
+                hour = int(parts[0])
+                minute = int(parts[1]) if len(parts) > 1 else 0
+                am_pm = "AM" if hour < 12 else "PM"
+                display_hour = hour if hour <= 12 else hour - 12
+                if display_hour == 0:
+                    display_hour = 12
+                time_str = f"at {display_hour}:{minute:02d} {am_pm}"
+            except:
+                time_str = f"at {pending.event_time}"
+        else:
+            time_str = ""
+        
+        # Build base message
+        if pending.is_all_day:
+            base = f"Create all-day event '{title}' for {date_str}"
+        else:
+            base = f"Create '{title}' for {date_str} {time_str}"
+        
+        # Add timezone
+        if not pending.is_all_day and pending.timezone != "UTC":
+            base += f" ({pending.timezone})"
+        
+        # Add recurrence
+        if pending.recurrence:
+            recurrence_text = self._format_recurrence(pending.recurrence)
+            base += f", {recurrence_text}"
+        
+        # Add location
+        if pending.location:
+            base += f", at {pending.location}"
+        
+        # Add highlight for edits
+        if highlight_field:
+            field_display = {
+                "event_time": "time",
+                "event_date": "date",
+                "event_title": "title",
+                "duration_minutes": "duration",
+                "location": "location",
+                "recurrence": "recurrence",
+            }
+            field_name = field_display.get(highlight_field, highlight_field)
+            message = f"Updated {field_name}. {base}?\n\nSay 'yes' to confirm or 'no' to cancel."
+        else:
+            message = f"{base}?\n\nSay 'yes' to confirm, 'no' to cancel, or edit like 'change time to 8 pm'"
+        
+        return message
+    
+    def _format_recurrence(self, recurrence: str) -> str:
+        """Format RRULE to human-readable text."""
+        if not recurrence:
+            return ""
+        
+        recurrence = recurrence.upper()
+        
+        if "FREQ=DAILY" in recurrence:
+            return "repeating daily"
+        elif "FREQ=WEEKLY" in recurrence:
+            if "BYDAY=MO" in recurrence:
+                return "repeating every Monday"
+            elif "BYDAY=TU" in recurrence:
+                return "repeating every Tuesday"
+            elif "BYDAY=WE" in recurrence:
+                return "repeating every Wednesday"
+            elif "BYDAY=TH" in recurrence:
+                return "repeating every Thursday"
+            elif "BYDAY=FR" in recurrence:
+                return "repeating every Friday"
+            elif "BYDAY=SA" in recurrence:
+                return "repeating every Saturday"
+            elif "BYDAY=SU" in recurrence:
+                return "repeating every Sunday"
+            return "repeating weekly"
+        elif "FREQ=MONTHLY" in recurrence:
+            return "repeating monthly"
+        elif "FREQ=YEARLY" in recurrence:
+            return "repeating yearly"
+        
+        return "repeating"
+    
+    def _process_time_changes(
+        self,
+        changes: Dict[str, Any],
+        original_start: Optional[str],
+        original_end: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        Process time changes, combining original event date with new time if needed.
+        
+        When user says "reschedule for 7 am", we get new_time="07:00" but need
+        to combine it with the original event's date to create a full datetime.
+        
+        Args:
+            changes: Raw changes dict (may have time-only values)
+            original_start: Original event start time (ISO format)
+            original_end: Original event end time (ISO format)
+        
+        Returns:
+            Processed changes with full datetime values
+        """
+        from datetime import datetime, timedelta
+        
+        processed = {}
+        
+        for key, value in changes.items():
+            if key in ("start_datetime", "new_time") and value:
+                # Check if it's a time-only value (HH:MM format)
+                if isinstance(value, str) and len(value) <= 8 and ":" in value and "T" not in value:
+                    # Time-only value - need to combine with original date
+                    if original_start:
+                        try:
+                            # Parse original start to get the date
+                            original_dt = datetime.fromisoformat(original_start.replace("Z", "+00:00"))
+                            original_date = original_dt.date()
+                            
+                            # Parse new time
+                            time_parts = value.split(":")
+                            hour = int(time_parts[0])
+                            minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+                            
+                            # Combine date + time
+                            new_dt = datetime(
+                                year=original_date.year,
+                                month=original_date.month,
+                                day=original_date.day,
+                                hour=hour,
+                                minute=minute,
+                            )
+                            processed["start_datetime"] = new_dt
+                            
+                            # Also calculate end_datetime (1 hour after start by default)
+                            if "end_datetime" not in changes and "new_end_time" not in changes:
+                                processed["end_datetime"] = new_dt + timedelta(hours=1)
+                            
+                            logger.debug(
+                                f"Combined time: {value} + date from {original_start} = {new_dt.isoformat()}"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to parse time '{value}': {e}")
+                            processed[key] = value
+                    else:
+                        # No original start, use value as-is
+                        processed[key] = value
+                else:
+                    # Already a full datetime or datetime object
+                    processed[key] = value
+                    
+            elif key in ("end_datetime", "new_end_time") and value:
+                # Check if it's a time-only value
+                if isinstance(value, str) and len(value) <= 8 and ":" in value and "T" not in value:
+                    if original_start:  # Use original start date for end time too
+                        try:
+                            original_dt = datetime.fromisoformat(original_start.replace("Z", "+00:00"))
+                            original_date = original_dt.date()
+                            
+                            time_parts = value.split(":")
+                            hour = int(time_parts[0])
+                            minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+                            
+                            new_dt = datetime(
+                                year=original_date.year,
+                                month=original_date.month,
+                                day=original_date.day,
+                                hour=hour,
+                                minute=minute,
+                            )
+                            processed["end_datetime"] = new_dt
+                        except Exception as e:
+                            logger.warning(f"Failed to parse end time '{value}': {e}")
+                            processed[key] = value
+                    else:
+                        processed[key] = value
+                else:
+                    processed[key] = value
+            
+            elif key == "new_time":
+                # Skip - handled above as start_datetime
+                continue
+            elif key == "new_end_time":
+                # Skip - handled above as end_datetime
+                continue
+            else:
+                # Pass through other changes (summary, location, etc.)
+                processed[key] = value
+        
+        return processed
+    
+    def _build_calendar_success_message(
+        self,
+        pending: "PendingEvent",
+        response: "EventCreateResponse",
+    ) -> str:
+        """
+        Build success message after calendar event creation.
+        
+        Example: "✓ Meeting scheduled for December 13, 2025 at 7:00 PM"
+        """
+        title = response.summary
+        
+        # Format date/time
+        if pending.is_all_day:
+            if pending.event_date:
+                date_str = pending.event_date.strftime("%B %d, %Y")
+            else:
+                date_str = "the scheduled date"
+            message = f"✓ '{title}' scheduled for {date_str} (all day)"
+        else:
+            if pending.event_date:
+                date_str = pending.event_date.strftime("%B %d, %Y")
+            else:
+                date_str = ""
+            
+            if pending.event_time:
+                try:
+                    parts = pending.event_time.split(":")
+                    hour = int(parts[0])
+                    minute = int(parts[1]) if len(parts) > 1 else 0
+                    am_pm = "AM" if hour < 12 else "PM"
+                    display_hour = hour if hour <= 12 else hour - 12
+                    if display_hour == 0:
+                        display_hour = 12
+                    time_str = f"at {display_hour}:{minute:02d} {am_pm}"
+                except:
+                    time_str = f"at {pending.event_time}"
+            else:
+                time_str = ""
+            
+            message = f"✓ '{title}' scheduled for {date_str} {time_str}".strip()
+        
+        # Add recurrence info
+        if pending.recurrence:
+            recurrence_text = self._format_recurrence(pending.recurrence)
+            message += f", {recurrence_text}"
+        
+        return message
     
     @staticmethod
     def _build_content_message(

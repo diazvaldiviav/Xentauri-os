@@ -67,29 +67,84 @@ SUPPORTED INTENT TYPES:
    - "List my events" → calendar_query, list_events
    - "When is my birthday?" → calendar_query, find_event, search_term="birthday"
 
-5. CONVERSATION - General chat/questions
+5. CALENDAR_CREATE - Create a new calendar event (Sprint 3.8)
+   Actions: create_event, confirm_create, cancel_create, edit_pending_event
+   IMPORTANT: These are REQUESTS TO CREATE events, not questions!
+   Keywords: schedule, add event, create meeting, book, set up, add to calendar, remind me
+   - "schedule a meeting tomorrow at 6 pm" → calendar_create, create_event
+   - "add team standup every Monday at 9 am" → calendar_create, create_event (with recurrence)
+   - "schedule birthday on January 15" → calendar_create, create_event (all-day)
+   Confirmation responses (when user has a pending event):
+   - "yes" / "confirm" / "do it" → calendar_create, confirm_create
+   - "no" / "cancel" / "nevermind" → calendar_create, cancel_create
+   Edit commands (during confirmation):
+   - "change time to 7 pm" → calendar_create, edit_pending_event, edit_field="event_time"
+   - "make it 2 hours" → calendar_create, edit_pending_event, edit_field="duration_minutes"
+   - "change title to Team Standup" → calendar_create, edit_pending_event, edit_field="event_title"
+   - "make it weekly" → calendar_create, edit_pending_event, edit_field="recurrence"
+   - "add location Conference Room A" → calendar_create, edit_pending_event, edit_field="location"
+
+6. CALENDAR_EDIT - Edit or delete an existing calendar event (Sprint 3.9)
+   Actions: edit_existing_event, delete_existing_event, select_event, confirm_edit, confirm_delete, cancel_edit
+   IMPORTANT: These are REQUESTS TO MODIFY OR DELETE existing events!
+   Edit Keywords: reschedule, move, change, update, modify, push back, postpone
+   Delete Keywords: delete, remove, cancel (event), clear
+   - "reschedule my dentist appointment to 3pm" → calendar_edit, edit_existing_event
+   - "move my meeting to tomorrow" → calendar_edit, edit_existing_event
+   - "change the location of my standup to Room B" → calendar_edit, edit_existing_event
+   - "delete my meeting tomorrow" → calendar_edit, delete_existing_event
+   - "remove the team lunch" → calendar_edit, delete_existing_event
+   - "cancel my dentist appointment" → calendar_edit, delete_existing_event
+   Event selection (when multiple matches found):
+   - "the first one" / "1" / "number 1" → calendar_edit, select_event, selection_index=1
+   - "the second one" / "2" → calendar_edit, select_event, selection_index=2
+   Confirmation responses (during edit/delete flow):
+   - "yes" / "confirm" / "do it" → calendar_edit, confirm_edit or confirm_delete (based on context)
+   - "no" / "cancel" / "nevermind" → calendar_edit, cancel_edit
+
+7. CONVERSATION - General chat/questions
    Types: greeting, thanks, question, unknown
 
-CALENDAR QUERY vs DEVICE COMMAND (CRITICAL):
+CALENDAR QUERY vs CALENDAR CREATE vs CALENDAR EDIT vs DEVICE COMMAND (CRITICAL):
 - "Show my calendar on the TV" → DEVICE_COMMAND (display on screen)
 - "How many events do I have?" → CALENDAR_QUERY (text answer)
-- "Show my birthday on the screen" → DEVICE_COMMAND (display events)
+- "Schedule a meeting tomorrow" → CALENDAR_CREATE (create new event)
 - "When is my birthday?" → CALENDAR_QUERY (text answer)
-- "Put meetings on the TV" → DEVICE_COMMAND (display on device)
-- "What meetings do I have tomorrow?" → CALENDAR_QUERY (text list)
+- "Add birthday on January 15" → CALENDAR_CREATE (create all-day event)
+- "Book team standup every Monday" → CALENDAR_CREATE (create recurring event)
+- "Reschedule my dentist to 3pm" → CALENDAR_EDIT (modify existing event)
+- "Delete my meeting tomorrow" → CALENDAR_EDIT (remove existing event)
+- "Cancel my appointment" → CALENDAR_EDIT (remove existing event)
 
 RESPONSE FORMAT (JSON only):
 
 {
-  "intent_type": "device_command" | "device_query" | "system_query" | "calendar_query" | "conversation",
+  "intent_type": "device_command" | "device_query" | "system_query" | "calendar_query" | "calendar_create" | "calendar_edit" | "conversation",
   "confidence": 0.0-1.0,
   "device_name": "living room tv" | null,
-  "action": "show_calendar" | "power_on" | "count_events" | "next_event" | etc.,
+  "action": "show_calendar" | "power_on" | "count_events" | "next_event" | "create_event" | "confirm_create" | "cancel_create" | "edit_pending_event" | "edit_existing_event" | "delete_existing_event" | "select_event" | "confirm_edit" | "confirm_delete" | "cancel_edit" | etc.,
   "parameters": {} | null,
   "date_range": "today" | "tomorrow" | "this_week" | "YYYY-MM-DD" | null,
   "search_term": "birthday" | "meeting" | null,
   "original_text": "the original request",
-  "reasoning": "brief explanation"
+  "reasoning": "brief explanation",
+  
+  // For calendar_create intent only:
+  "event_title": "Meeting" | null,
+  "event_date": "2025-01-15" | "tomorrow" | "next monday" | null,
+  "event_time": "18:00" | null,
+  "duration_minutes": 60 | 120 | null,
+  "is_all_day": true | false,
+  "location": "Conference Room A" | null,
+  "recurrence": "daily" | "weekly" | "monthly" | "RRULE:FREQ=WEEKLY;BYDAY=MO" | null,
+  "edit_field": "event_time" | "event_date" | "event_title" | "duration_minutes" | "location" | "recurrence" | null,
+  "edit_value": "new value" | null,
+  
+  // For calendar_edit intent only (Sprint 3.9):
+  "date_filter": "today" | "tomorrow" | "this_week" | "YYYY-MM-DD" | null,
+  "selection_index": 1 | 2 | 3 | null,
+  "event_id": "google_event_id" | null,
+  "changes": {"summary": "New Title", "start_datetime": "2025-01-15T15:00:00"} | null
 }
 
 DEVICE NAME NORMALIZATION:
@@ -362,6 +417,241 @@ Output: {
   "search_term": null,
   "original_text": "Do I have anything tomorrow?",
   "reasoning": "Asking about events for tomorrow - returns text answer"
+}
+
+Input: "Schedule a meeting tomorrow at 6 pm"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.95,
+  "action": "create_event",
+  "event_title": "Meeting",
+  "event_date": "tomorrow",
+  "event_time": "18:00",
+  "duration_minutes": 60,
+  "is_all_day": false,
+  "original_text": "Schedule a meeting tomorrow at 6 pm",
+  "reasoning": "Request to create a timed calendar event"
+}
+
+Input: "Add team standup every Monday at 9 am"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.95,
+  "action": "create_event",
+  "event_title": "Team Standup",
+  "event_time": "09:00",
+  "duration_minutes": 60,
+  "is_all_day": false,
+  "recurrence": "weekly_monday",
+  "original_text": "Add team standup every Monday at 9 am",
+  "reasoning": "Request to create a recurring weekly event"
+}
+
+Input: "Schedule birthday on January 15"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.95,
+  "action": "create_event",
+  "event_title": "Birthday",
+  "event_date": "2025-01-15",
+  "is_all_day": true,
+  "original_text": "Schedule birthday on January 15",
+  "reasoning": "Request to create an all-day event - no time specified"
+}
+
+Input: "Book a 2 hour meeting with John tomorrow at 3pm"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.95,
+  "action": "create_event",
+  "event_title": "Meeting with John",
+  "event_date": "tomorrow",
+  "event_time": "15:00",
+  "duration_minutes": 120,
+  "is_all_day": false,
+  "original_text": "Book a 2 hour meeting with John tomorrow at 3pm",
+  "reasoning": "Request to create a 2-hour meeting event"
+}
+
+Input: "yes"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.85,
+  "action": "confirm_create",
+  "original_text": "yes",
+  "reasoning": "Confirmation response - user confirming pending action"
+}
+
+Input: "no"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.85,
+  "action": "cancel_create",
+  "original_text": "no",
+  "reasoning": "Cancellation response - user cancelling pending action"
+}
+
+Input: "change time to 7 pm"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.90,
+  "action": "edit_pending_event",
+  "edit_field": "event_time",
+  "edit_value": "19:00",
+  "original_text": "change time to 7 pm",
+  "reasoning": "Edit command to change event time"
+}
+
+Input: "make it 2 hours"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.90,
+  "action": "edit_pending_event",
+  "edit_field": "duration_minutes",
+  "edit_value": "120",
+  "original_text": "make it 2 hours",
+  "reasoning": "Edit command to change event duration"
+}
+
+Input: "change title to Team Standup"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.90,
+  "action": "edit_pending_event",
+  "edit_field": "event_title",
+  "edit_value": "Team Standup",
+  "original_text": "change title to Team Standup",
+  "reasoning": "Edit command to change event title"
+}
+
+Input: "make it weekly"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.90,
+  "action": "edit_pending_event",
+  "edit_field": "recurrence",
+  "edit_value": "weekly",
+  "original_text": "make it weekly",
+  "reasoning": "Edit command to add weekly recurrence"
+}
+
+Input: "add location Conference Room A"
+Output: {
+  "intent_type": "calendar_create",
+  "confidence": 0.90,
+  "action": "edit_pending_event",
+  "edit_field": "location",
+  "edit_value": "Conference Room A",
+  "original_text": "add location Conference Room A",
+  "reasoning": "Edit command to add event location"
+}
+
+Input: "reschedule my dentist appointment to 3pm"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "edit_existing_event",
+  "search_term": "dentist",
+  "changes": {"start_datetime": "15:00"},
+  "original_text": "reschedule my dentist appointment to 3pm",
+  "reasoning": "Request to reschedule existing event - edit with time change"
+}
+
+Input: "move my meeting to tomorrow"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "edit_existing_event",
+  "search_term": "meeting",
+  "date_filter": null,
+  "changes": {"start_datetime": "tomorrow"},
+  "original_text": "move my meeting to tomorrow",
+  "reasoning": "Request to move existing meeting to different date"
+}
+
+Input: "change the location of my standup to Room B"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "edit_existing_event",
+  "search_term": "standup",
+  "changes": {"location": "Room B"},
+  "original_text": "change the location of my standup to Room B",
+  "reasoning": "Request to change location of existing event"
+}
+
+Input: "delete my meeting tomorrow"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "delete_existing_event",
+  "search_term": "meeting",
+  "date_filter": "tomorrow",
+  "original_text": "delete my meeting tomorrow",
+  "reasoning": "Request to delete an existing meeting"
+}
+
+Input: "remove the team lunch"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "delete_existing_event",
+  "search_term": "team lunch",
+  "original_text": "remove the team lunch",
+  "reasoning": "Request to remove an existing event"
+}
+
+Input: "cancel my dentist appointment"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "delete_existing_event",
+  "search_term": "dentist",
+  "original_text": "cancel my dentist appointment",
+  "reasoning": "Request to cancel existing appointment - treated as delete"
+}
+
+Input: "the first one"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.90,
+  "action": "select_event",
+  "selection_index": 1,
+  "original_text": "the first one",
+  "reasoning": "Selection response - user picking from list of events"
+}
+
+Input: "number 2"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.90,
+  "action": "select_event",
+  "selection_index": 2,
+  "original_text": "number 2",
+  "reasoning": "Selection response - user picking event #2"
+}
+
+Input: "push back my 3pm meeting to 4pm"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "edit_existing_event",
+  "search_term": "meeting",
+  "date_filter": "today",
+  "changes": {"start_datetime": "16:00"},
+  "original_text": "push back my 3pm meeting to 4pm",
+  "reasoning": "Request to postpone a meeting - time change"
+}
+
+Input: "update my doctor appointment to next Monday"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "edit_existing_event",
+  "search_term": "doctor",
+  "changes": {"start_datetime": "next monday"},
+  "original_text": "update my doctor appointment to next Monday",
+  "reasoning": "Request to update existing appointment date"
 }
 """
 

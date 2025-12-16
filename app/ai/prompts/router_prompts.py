@@ -33,6 +33,12 @@ SIMPLE (handle yourself):
   "Display meetings", "Show events for tomorrow" (these DISPLAY content, not create it)
 - Calendar text queries: "How many events today?", "What's my next meeting?", 
   "When is my birthday?", "List my events" (these return TEXT answers)
+- Calendar create commands: "Schedule a meeting", "Add an event", "Book appointment",
+  "Create meeting", "Set up reminder", "Add to calendar", "Schedule lunch",
+  "Book a call" (these CREATE new calendar events - handled by intent parser)
+- Calendar edit/delete commands: "Reschedule my meeting", "Move my appointment",
+  "Delete my event", "Cancel my meeting", "Remove the lunch", "Change the time",
+  "Update my appointment", "Postpone my call" (these MODIFY existing events)
 - Status queries: "Is the TV on?", "What input is active?"
 - Basic Q&A: "What devices do I have?", "How do I pair a device?"
 - Greetings/casual: "Hello", "Thanks", "Help me"
@@ -43,6 +49,14 @@ This is SIMPLE, NOT complex. No data creation, just displaying existing events.
 
 IMPORTANT: "How many events?", "What's my next meeting?", "When is X?" = Calendar QUERY.
 This is SIMPLE - just querying calendar data and returning a text response.
+
+IMPORTANT: "Schedule/Add/Book/Create an event" = Calendar CREATE.
+This is SIMPLE - the intent parser handles event creation with a confirmation flow.
+Do NOT route these to complex execution.
+
+IMPORTANT: "Reschedule/Move/Delete/Cancel/Remove an event" = Calendar EDIT.
+This is SIMPLE - the intent parser handles event modification with a confirmation flow.
+Do NOT route these to complex execution.
 
 COMPLEX_EXECUTION (route to GPT):
 - Code generation: "Write a script to turn on all TVs at 8am"
@@ -101,6 +115,45 @@ Output: {"complexity": "simple", "is_device_command": false, "should_respond_dir
 
 Input: "Do I have anything tomorrow?"
 Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.90, "reasoning": "Calendar query about tomorrow's events - SIMPLE query"}
+
+Input: "Schedule a meeting tomorrow at 6 pm"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event creation - handled by intent parser with confirmation flow, not data processing"}
+
+Input: "Add an event to January 6"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event creation request - SIMPLE intent parsing"}
+
+Input: "Book a 2 hour meeting with John tomorrow"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar creation with details - parsed by intent system"}
+
+Input: "Create a recurring standup every Monday at 10 am"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Recurring calendar event creation - intent parser handles recurrence"}
+
+Input: "Add my birthday to the calendar on March 15"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "All-day calendar event creation - SIMPLE intent"}
+
+Input: "Set up a reminder for the dentist next Tuesday"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.93, "reasoning": "Calendar event creation (reminder) - SIMPLE intent parsing"}
+
+Input: "Reschedule my dentist appointment to 3pm"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event edit - SIMPLE intent with confirmation flow"}
+
+Input: "Move my meeting to tomorrow"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event reschedule - SIMPLE intent parsing"}
+
+Input: "Delete my meeting tomorrow"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event deletion - SIMPLE intent with confirmation"}
+
+Input: "Cancel my dentist appointment"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event cancellation (delete) - SIMPLE intent"}
+
+Input: "Remove the team lunch from my calendar"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event removal - SIMPLE intent parsing"}
+
+Input: "Change the location of my standup to Room B"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event edit (location change) - SIMPLE intent"}
+
+Input: "Push back my 3pm meeting to 4pm"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event time change - SIMPLE intent parsing"}
 """
 
 

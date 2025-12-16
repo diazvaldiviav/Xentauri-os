@@ -25,11 +25,11 @@ PROFILE_SCOPES = [
     "https://www.googleapis.com/auth/userinfo.profile", # Name, picture
 ]
 
-# Calendar scopes - read-only access to calendars and events
-# Using readonly for MVP security - we don't need to modify calendars
+# Calendar scopes - read and write access to calendars and events
+# Sprint 3.8: Updated to allow event creation
 CALENDAR_SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",  # Read calendars
-    "https://www.googleapis.com/auth/calendar.events.readonly",  # Read events
+    "https://www.googleapis.com/auth/calendar.events",  # Read and write events
 ]
 
 # Drive scopes - for future Sprint (read-only access to files)

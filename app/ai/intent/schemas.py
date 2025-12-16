@@ -28,6 +28,8 @@ class IntentType(str, Enum):
     DEVICE_QUERY: User wants info about a specific device
     SYSTEM_QUERY: User wants info about the system (list devices, help)
     CALENDAR_QUERY: User wants info about calendar events (Sprint 3.8)
+    CALENDAR_CREATE: User wants to create a calendar event (Sprint 3.8)
+    CALENDAR_EDIT: User wants to edit or delete an existing event (Sprint 3.9)
     CONVERSATION: General chat, greetings, questions not about devices
     UNKNOWN: Could not determine intent
     """
@@ -35,6 +37,8 @@ class IntentType(str, Enum):
     DEVICE_QUERY = "device_query"
     SYSTEM_QUERY = "system_query"
     CALENDAR_QUERY = "calendar_query"
+    CALENDAR_CREATE = "calendar_create"  # Sprint 3.8: Event creation
+    CALENDAR_EDIT = "calendar_edit"      # Sprint 3.9: Edit/delete events
     CONVERSATION = "conversation"
     UNKNOWN = "unknown"
 
@@ -83,6 +87,20 @@ class ActionType(str, Enum):
     NEXT_EVENT = "next_event"
     LIST_EVENTS = "list_events"
     FIND_EVENT = "find_event"
+    
+    # Calendar Create actions (Sprint 3.8)
+    CREATE_EVENT = "create_event"           # Initial request to create an event
+    CONFIRM_CREATE = "confirm_create"       # Confirm pending event creation
+    CANCEL_CREATE = "cancel_create"         # Cancel pending event creation
+    EDIT_PENDING_EVENT = "edit_pending_event"  # Edit a pending event before confirmation
+    
+    # Calendar Edit/Delete actions (Sprint 3.9)
+    EDIT_EXISTING_EVENT = "edit_existing_event"  # Edit an existing calendar event
+    DELETE_EXISTING_EVENT = "delete_existing_event"  # Delete an existing calendar event
+    SELECT_EVENT = "select_event"           # Select from multiple matching events
+    CONFIRM_EDIT = "confirm_edit"           # Confirm pending edit
+    CONFIRM_DELETE = "confirm_delete"       # Confirm pending delete
+    CANCEL_EDIT = "cancel_edit"             # Cancel pending edit/delete operation
 
 
 class Intent(BaseModel):
@@ -163,6 +181,77 @@ class CalendarQueryIntent(Intent):
     action: ActionType = Field(description="Query type: count_events, next_event, list_events, find_event")
     date_range: Optional[str] = Field(default=None, description="Date context: today, tomorrow, this_week, or YYYY-MM-DD")
     search_term: Optional[str] = Field(default=None, description="Event search term (birthday, meeting, etc.)")
+
+
+class CalendarCreateIntent(Intent):
+    """
+    Intent for calendar event creation (Sprint 3.8).
+    
+    Used for creating, editing, confirming, or canceling calendar events.
+    Supports a confirmation flow with pending events.
+    
+    Examples:
+    - "schedule a meeting tomorrow at 6 pm" → action=create_event
+    - "yes" (during confirmation) → action=confirm_create
+    - "no" (during confirmation) → action=cancel_create
+    - "change time to 7 pm" (during confirmation) → action=edit_pending_event
+    """
+    intent_type: IntentType = IntentType.CALENDAR_CREATE
+    action: ActionType = Field(description="Create action: create_event, confirm_create, cancel_create, edit_pending_event")
+    
+    # Event details (for create_event action)
+    event_title: Optional[str] = Field(default=None, description="Title of the event")
+    event_date: Optional[str] = Field(default=None, description="Date in YYYY-MM-DD format or relative (tomorrow, next monday)")
+    event_time: Optional[str] = Field(default=None, description="Time in HH:MM format (24-hour)")
+    duration_minutes: int = Field(default=60, description="Duration in minutes (default 1 hour)")
+    is_all_day: bool = Field(default=False, description="True if event has no specific time")
+    location: Optional[str] = Field(default=None, description="Event location")
+    recurrence: Optional[str] = Field(default=None, description="Recurrence rule (e.g., 'weekly', 'daily', 'RRULE:...')")
+    
+    # Edit details (for edit_pending_event action)
+    edit_field: Optional[str] = Field(default=None, description="Field to edit: event_time, event_date, event_title, duration_minutes, location, recurrence")
+    edit_value: Optional[str] = Field(default=None, description="New value for the edited field")
+
+
+class CalendarEditIntent(Intent):
+    """
+    Intent for editing or deleting existing calendar events (Sprint 3.9).
+    
+    Supports a multi-step flow:
+    1. Search for events matching criteria
+    2. Disambiguate if multiple matches
+    3. Confirm edit/delete
+    4. Execute change
+    
+    Examples:
+    - "reschedule my dentist appointment to 3pm" → action=edit_existing_event
+    - "delete my meeting tomorrow" → action=delete_existing_event
+    - "the first one" → action=select_event
+    - "yes" (during edit confirmation) → action=confirm_edit
+    - "no" (during edit confirmation) → action=cancel_edit
+    """
+    intent_type: IntentType = IntentType.CALENDAR_EDIT
+    action: ActionType = Field(description="Edit action: edit_existing_event, delete_existing_event, select_event, confirm_edit, confirm_delete, cancel_edit")
+    
+    # Search criteria (for finding the event to edit/delete)
+    search_term: Optional[str] = Field(default=None, description="Event name or keyword to search for")
+    date_filter: Optional[str] = Field(default=None, description="Date filter: today, tomorrow, this_week, or YYYY-MM-DD")
+    
+    # Event selection (for select_event action)
+    selection_index: Optional[int] = Field(default=None, description="1-based index when selecting from multiple events")
+    event_id: Optional[str] = Field(default=None, description="Direct event ID if known")
+    
+    # Edit details (for edit_existing_event action)
+    changes: Optional[Dict[str, Any]] = Field(default=None, description="Fields to update: {field_name: new_value}")
+    # Supported change fields:
+    # - summary: New event title
+    # - start_datetime: New start time (ISO format or relative)
+    # - end_datetime: New end time (ISO format or relative)
+    # - start_date: New start date (for all-day events)
+    # - end_date: New end date (for all-day events)
+    # - location: New location
+    # - description: New description
+    # - recurrence: New recurrence rule
 
 
 class ConversationIntent(Intent):

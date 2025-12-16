@@ -65,7 +65,7 @@ class GoogleCalendarClient(EnvironmentService):
     service_name = "calendar"
     required_scopes = [
         "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/calendar.events.readonly",
+        "https://www.googleapis.com/auth/calendar.events",  # Sprint 3.8: Write access for event creation
     ]
     
     # Google Calendar API base URL
@@ -863,3 +863,654 @@ class GoogleCalendarClient(EnvironmentService):
         finally:
             # Restore original token
             self.access_token = original_token
+    
+    # -------------------------------------------------------------------------
+    # EVENT CREATION (Sprint 3.8)
+    # -------------------------------------------------------------------------
+    
+    async def get_user_timezone(self, calendar_id: str = "primary") -> str:
+        """
+        Fetch user's primary calendar timezone setting.
+        
+        Sprint 3.8: Used to ensure events are created in user's timezone.
+        
+        Args:
+            calendar_id: Calendar identifier (default: "primary")
+        
+        Returns:
+            Timezone string (e.g., "America/New_York") or "UTC" if not available
+        
+        Example:
+            tz = await client.get_user_timezone()
+            # Returns: "America/Los_Angeles"
+        """
+        try:
+            response_data = await self._make_request(
+                method="GET",
+                endpoint=f"/calendars/{calendar_id}",
+            )
+            
+            timezone_str = response_data.get("timeZone", "UTC")
+            logger.info(f"User timezone: {timezone_str}")
+            return timezone_str
+            
+        except APIError as e:
+            logger.error(f"Failed to get user timezone: {e}")
+            return "UTC"
+    
+    async def create_event(
+        self,
+        request: "EventCreateRequest",
+        calendar_id: str = "primary",
+    ) -> "EventCreateResponse":
+        """
+        Create a timed calendar event.
+        
+        Sprint 3.8: Creates an event with specific start and end times.
+        
+        Args:
+            request: EventCreateRequest with event details
+            calendar_id: Calendar identifier (default: "primary")
+        
+        Returns:
+            EventCreateResponse with created event details
+        
+        Raises:
+            APIError: If event creation fails
+            ValueError: If request is invalid
+        
+        Example:
+            from datetime import datetime
+            from app.environments.google.calendar.schemas import EventCreateRequest
+            
+            request = EventCreateRequest(
+                summary="Team Meeting",
+                start_datetime=datetime(2025, 1, 15, 18, 0),
+                end_datetime=datetime(2025, 1, 15, 19, 0),
+                timezone="America/New_York",
+            )
+            response = await client.create_event(request)
+            print(f"Created: {response.summary} - {response.html_link}")
+        """
+        from app.environments.google.calendar.schemas import EventCreateRequest, EventCreateResponse
+        
+        if not request.is_valid():
+            raise ValueError("Request must have either datetime pair or date pair")
+        
+        # Build the event body for the API
+        event_body: dict = {
+            "summary": request.summary,
+        }
+        
+        # Add time information
+        if request.start_datetime and request.end_datetime:
+            # Timed event - use dateTime format
+            event_body["start"] = {
+                "dateTime": request.start_datetime.isoformat(),
+                "timeZone": request.timezone,
+            }
+            event_body["end"] = {
+                "dateTime": request.end_datetime.isoformat(),
+                "timeZone": request.timezone,
+            }
+        elif request.start_date and request.end_date:
+            # All-day event - use date format
+            event_body["start"] = {
+                "date": request.start_date.isoformat(),
+            }
+            event_body["end"] = {
+                "date": request.end_date.isoformat(),
+            }
+        
+        # Optional fields
+        if request.location:
+            event_body["location"] = request.location
+        if request.description:
+            event_body["description"] = request.description
+        if request.recurrence:
+            event_body["recurrence"] = request.recurrence
+        
+        logger.info(
+            f"Creating calendar event",
+            extra={
+                "summary": request.summary,
+                "calendar_id": calendar_id,
+                "is_all_day": request.is_all_day(),
+            }
+        )
+        
+        # Make the API request
+        response_data = await self._make_post_request(
+            endpoint=f"/calendars/{calendar_id}/events",
+            json_body=event_body,
+        )
+        
+        # Parse the response
+        created_event = self._parse_create_response(response_data, request)
+        
+        logger.info(f"Created event: {created_event.event_id}")
+        
+        return created_event
+    
+    async def create_all_day_event(
+        self,
+        request: "EventCreateRequest",
+        calendar_id: str = "primary",
+    ) -> "EventCreateResponse":
+        """
+        Create an all-day calendar event.
+        
+        Sprint 3.8: Convenience method for creating all-day events.
+        Ensures dates are properly set if only start_date is provided.
+        
+        Args:
+            request: EventCreateRequest with event details (uses date fields)
+            calendar_id: Calendar identifier (default: "primary")
+        
+        Returns:
+            EventCreateResponse with created event details
+        
+        Example:
+            from datetime import date
+            from app.environments.google.calendar.schemas import EventCreateRequest
+            
+            request = EventCreateRequest(
+                summary="Birthday",
+                start_date=date(2025, 1, 15),
+            )
+            response = await client.create_all_day_event(request)
+        """
+        from datetime import timedelta as td
+        from app.environments.google.calendar.schemas import EventCreateRequest
+        
+        # Ensure we have a valid all-day request
+        if not request.start_date:
+            raise ValueError("All-day events require start_date")
+        
+        # If end_date is not set, default to next day (exclusive)
+        if not request.end_date:
+            request = EventCreateRequest(
+                summary=request.summary,
+                start_date=request.start_date,
+                end_date=request.start_date + td(days=1),
+                location=request.location,
+                description=request.description,
+                recurrence=request.recurrence,
+                timezone=request.timezone,
+            )
+        
+        return await self.create_event(request, calendar_id)
+    
+    async def _make_post_request(
+        self,
+        endpoint: str,
+        json_body: dict,
+    ) -> dict:
+        """
+        Make an authenticated POST request to the Calendar API.
+        
+        Args:
+            endpoint: API endpoint path
+            json_body: JSON body to send
+        
+        Returns:
+            Parsed JSON response
+        
+        Raises:
+            APIError: If the request fails
+        """
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    url=url,
+                    headers=self._get_headers(),
+                    json=json_body,
+                    timeout=30.0,
+                )
+                
+                if response.status_code == 401:
+                    logger.error("Calendar API: Unauthorized (token may be expired)")
+                    raise APIError(
+                        "Unauthorized - access token may be expired",
+                        status_code=401,
+                        response=response.text,
+                    )
+                
+                if response.status_code == 403:
+                    logger.error("Calendar API: Forbidden (write scope may be missing)")
+                    raise APIError(
+                        "Forbidden - calendar write scope may not be granted",
+                        status_code=403,
+                        response=response.text,
+                    )
+                
+                if response.status_code not in (200, 201):
+                    error_detail = response.text
+                    logger.error(f"Calendar API error: {response.status_code} - {error_detail}")
+                    raise APIError(
+                        f"API request failed: {error_detail}",
+                        status_code=response.status_code,
+                        response=error_detail,
+                    )
+                
+                return response.json()
+                
+            except httpx.RequestError as e:
+                logger.error(f"Network error in Calendar API: {e}")
+                raise APIError(f"Network error: {e}")
+    
+    def _parse_create_response(
+        self,
+        response_data: dict,
+        request: "EventCreateRequest",
+    ) -> "EventCreateResponse":
+        """Parse the API response into an EventCreateResponse."""
+        from app.environments.google.calendar.schemas import EventCreateResponse
+        from datetime import datetime
+        
+        event_id = response_data.get("id", "")
+        summary = response_data.get("summary", request.summary)
+        html_link = response_data.get("htmlLink", "")
+        
+        # Parse start time/date
+        start_data = response_data.get("start", {})
+        if "dateTime" in start_data:
+            start = datetime.fromisoformat(start_data["dateTime"].replace("Z", "+00:00"))
+        elif "date" in start_data:
+            start = datetime.strptime(start_data["date"], "%Y-%m-%d").date()
+        else:
+            start = request.start_datetime or request.start_date
+        
+        # Parse end time/date
+        end_data = response_data.get("end", {})
+        if "dateTime" in end_data:
+            end = datetime.fromisoformat(end_data["dateTime"].replace("Z", "+00:00"))
+        elif "date" in end_data:
+            end = datetime.strptime(end_data["date"], "%Y-%m-%d").date()
+        else:
+            end = request.end_datetime or request.end_date
+        
+        # Check for recurrence
+        is_recurring = "recurrence" in response_data
+        
+        return EventCreateResponse(
+            event_id=event_id,
+            summary=summary,
+            start=start,
+            end=end,
+            html_link=html_link,
+            timezone=start_data.get("timeZone") or request.timezone,
+            location=response_data.get("location"),
+            is_recurring=is_recurring,
+        )
+
+    # -------------------------------------------------------------------------
+    # EVENT UPDATE & DELETE (Sprint 3.9)
+    # -------------------------------------------------------------------------
+    
+    async def get_event(
+        self,
+        event_id: str,
+        calendar_id: str = "primary",
+    ) -> Optional["CalendarEvent"]:
+        """
+        Get a single calendar event by ID.
+        
+        Sprint 3.9: Retrieve event details before update/delete.
+        
+        Args:
+            event_id: The Google Calendar event ID
+            calendar_id: Calendar identifier (default: "primary")
+        
+        Returns:
+            CalendarEvent if found, None if not found
+        
+        Raises:
+            APIError: If the request fails (except 404)
+        """
+        try:
+            response_data = await self._make_request(
+                method="GET",
+                endpoint=f"/calendars/{calendar_id}/events/{event_id}",
+            )
+            
+            return CalendarEvent(**response_data)
+            
+        except APIError as e:
+            if e.status_code == 404:
+                logger.info(f"Event not found: {event_id}")
+                return None
+            raise
+    
+    async def update_event(
+        self,
+        event_id: str,
+        updates: "EventUpdateRequest",
+        calendar_id: str = "primary",
+    ) -> "CalendarEvent":
+        """
+        Update an existing calendar event.
+        
+        Sprint 3.9: Modify event fields using PATCH request.
+        Only specified fields are updated; others remain unchanged.
+        
+        Args:
+            event_id: The Google Calendar event ID to update
+            updates: EventUpdateRequest with fields to change
+            calendar_id: Calendar identifier (default: "primary")
+        
+        Returns:
+            Updated CalendarEvent
+        
+        Raises:
+            APIError: If update fails
+            ValueError: If no updates provided
+        
+        Example:
+            from app.environments.google.calendar.schemas import EventUpdateRequest
+            
+            # Change event time to 3pm
+            updates = EventUpdateRequest(
+                start_datetime=datetime(2025, 1, 15, 15, 0),
+                end_datetime=datetime(2025, 1, 15, 16, 0),
+                timezone="America/New_York",
+            )
+            updated = await client.update_event("event-id-123", updates)
+        """
+        from app.environments.google.calendar.schemas import EventUpdateRequest
+        
+        if not updates.has_changes():
+            raise ValueError("No updates provided")
+        
+        # First, get the existing event to preserve unchanged fields
+        existing = await self.get_event(event_id, calendar_id)
+        if not existing:
+            raise APIError(f"Event not found: {event_id}", status_code=404)
+        
+        # Build the update body - only include changed fields
+        update_body: dict = {}
+        
+        if updates.summary is not None:
+            update_body["summary"] = updates.summary
+        
+        if updates.location is not None:
+            update_body["location"] = updates.location
+        
+        if updates.description is not None:
+            update_body["description"] = updates.description
+        
+        # Handle time updates
+        if updates.start_datetime and updates.end_datetime:
+            timezone = updates.timezone or "UTC"
+            update_body["start"] = {
+                "dateTime": updates.start_datetime.isoformat(),
+                "timeZone": timezone,
+            }
+            update_body["end"] = {
+                "dateTime": updates.end_datetime.isoformat(),
+                "timeZone": timezone,
+            }
+        elif updates.start_date and updates.end_date:
+            update_body["start"] = {
+                "date": updates.start_date.isoformat(),
+            }
+            update_body["end"] = {
+                "date": updates.end_date.isoformat(),
+            }
+        
+        logger.info(
+            f"Updating calendar event",
+            extra={
+                "event_id": event_id,
+                "calendar_id": calendar_id,
+                "update_fields": list(update_body.keys()),
+            }
+        )
+        
+        # Make the PATCH request
+        response_data = await self._make_patch_request(
+            endpoint=f"/calendars/{calendar_id}/events/{event_id}",
+            json_body=update_body,
+        )
+        
+        # Parse and return updated event
+        updated_event = CalendarEvent(**response_data)
+        
+        logger.info(f"Updated event: {event_id}")
+        
+        return updated_event
+    
+    async def delete_event(
+        self,
+        event_id: str,
+        calendar_id: str = "primary",
+    ) -> bool:
+        """
+        Delete a calendar event.
+        
+        Sprint 3.9: Remove an event from the calendar.
+        
+        Args:
+            event_id: The Google Calendar event ID to delete
+            calendar_id: Calendar identifier (default: "primary")
+        
+        Returns:
+            True if deleted successfully
+        
+        Raises:
+            APIError: If deletion fails
+        
+        Example:
+            success = await client.delete_event("event-id-123")
+            if success:
+                print("Event deleted")
+        """
+        logger.info(
+            f"Deleting calendar event",
+            extra={
+                "event_id": event_id,
+                "calendar_id": calendar_id,
+            }
+        )
+        
+        await self._make_delete_request(
+            endpoint=f"/calendars/{calendar_id}/events/{event_id}",
+        )
+        
+        logger.info(f"Deleted event: {event_id}")
+        
+        return True
+    
+    async def search_events_for_edit(
+        self,
+        query: str,
+        calendar_id: str = "primary",
+        max_results: int = 10,
+        include_past: bool = False,
+    ) -> "EventSearchResult":
+        """
+        Search for events that can be edited/deleted.
+        
+        Sprint 3.9: Returns an EventSearchResult for edit/delete flows.
+        
+        Args:
+            query: Search text (title, description, location)
+            calendar_id: Calendar identifier
+            max_results: Maximum events to return
+            include_past: Whether to include past events
+        
+        Returns:
+            EventSearchResult with matching events
+        
+        Example:
+            result = await client.search_events_for_edit("dentist")
+            if result.has_single_match():
+                event = result.events[0]
+            elif result.needs_disambiguation():
+                # Show list to user
+                pass
+        """
+        from app.environments.google.calendar.schemas import EventSearchResult
+        
+        if not query or not query.strip():
+            return EventSearchResult(query="", events=[], total_count=0)
+        
+        query = query.strip()
+        
+        # Set time range
+        now = datetime.now(timezone.utc)
+        if include_past:
+            time_min = now - timedelta(days=365)  # 1 year back
+        else:
+            time_min = now
+        time_max = now + timedelta(days=365)  # 1 year ahead
+        
+        try:
+            events = await self.search_events(
+                query=query,
+                calendar_id=calendar_id,
+                max_results=max_results,
+                time_min=time_min,
+                time_max=time_max,
+            )
+            
+            return EventSearchResult(
+                query=query,
+                events=events,
+                total_count=len(events),
+            )
+            
+        except APIError as e:
+            logger.error(f"Search for edit failed: {e}")
+            return EventSearchResult(query=query, events=[], total_count=0)
+    
+    async def _make_patch_request(
+        self,
+        endpoint: str,
+        json_body: dict,
+    ) -> dict:
+        """
+        Make an authenticated PATCH request to the Calendar API.
+        
+        Args:
+            endpoint: API endpoint path
+            json_body: JSON body with fields to update
+        
+        Returns:
+            Parsed JSON response
+        
+        Raises:
+            APIError: If the request fails
+        """
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.patch(
+                    url=url,
+                    headers=self._get_headers(),
+                    json=json_body,
+                    timeout=30.0,
+                )
+                
+                if response.status_code == 401:
+                    logger.error("Calendar API: Unauthorized (token may be expired)")
+                    raise APIError(
+                        "Unauthorized - access token may be expired",
+                        status_code=401,
+                        response=response.text,
+                    )
+                
+                if response.status_code == 403:
+                    logger.error("Calendar API: Forbidden (write scope may be missing)")
+                    raise APIError(
+                        "Forbidden - calendar write scope may not be granted",
+                        status_code=403,
+                        response=response.text,
+                    )
+                
+                if response.status_code == 404:
+                    logger.error("Calendar API: Event not found")
+                    raise APIError(
+                        "Event not found",
+                        status_code=404,
+                        response=response.text,
+                    )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error(f"Calendar API error: {response.status_code} - {error_detail}")
+                    raise APIError(
+                        f"API request failed: {error_detail}",
+                        status_code=response.status_code,
+                        response=error_detail,
+                    )
+                
+                return response.json()
+                
+            except httpx.RequestError as e:
+                logger.error(f"Network error in Calendar API: {e}")
+                raise APIError(f"Network error: {e}")
+    
+    async def _make_delete_request(
+        self,
+        endpoint: str,
+    ) -> None:
+        """
+        Make an authenticated DELETE request to the Calendar API.
+        
+        Args:
+            endpoint: API endpoint path
+        
+        Raises:
+            APIError: If the request fails
+        """
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.delete(
+                    url=url,
+                    headers=self._get_headers(),
+                    timeout=30.0,
+                )
+                
+                if response.status_code == 401:
+                    logger.error("Calendar API: Unauthorized (token may be expired)")
+                    raise APIError(
+                        "Unauthorized - access token may be expired",
+                        status_code=401,
+                        response=response.text,
+                    )
+                
+                if response.status_code == 403:
+                    logger.error("Calendar API: Forbidden (write scope may be missing)")
+                    raise APIError(
+                        "Forbidden - calendar write scope may not be granted",
+                        status_code=403,
+                        response=response.text,
+                    )
+                
+                if response.status_code == 404:
+                    logger.error("Calendar API: Event not found")
+                    raise APIError(
+                        "Event not found",
+                        status_code=404,
+                        response=response.text,
+                    )
+                
+                # 204 No Content is the expected success response for DELETE
+                if response.status_code not in (200, 204):
+                    error_detail = response.text
+                    logger.error(f"Calendar API error: {response.status_code} - {error_detail}")
+                    raise APIError(
+                        f"API request failed: {error_detail}",
+                        status_code=response.status_code,
+                        response=error_detail,
+                    )
+                
+            except httpx.RequestError as e:
+                logger.error(f"Network error in Calendar API: {e}")
+                raise APIError(f"Network error: {e}")

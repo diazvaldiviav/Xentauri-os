@@ -128,8 +128,11 @@ Jarvis_Cloud/
 │   │   ├── pairing.py           # Pairing code generation/validation
 │   │   ├── websocket_manager.py # Connection manager
 │   │   ├── commands.py          # Command routing service
-│   │   ├── intent_service.py    # Intent processing business logic (NEW)
-│   │   └── content_token.py     # Signed content tokens for iframes
+│   │   ├── intent_service.py    # Intent processing business logic
+│   │   ├── content_token.py     # Signed content tokens for iframes
+│   │   ├── calendar_search_service.py # Smart calendar search with LLM (Sprint 3.7)
+│   │   ├── pending_event_service.py   # Pending event creation (Sprint 3.8)
+│   │   └── pending_edit_service.py    # Pending edit/delete operations (Sprint 3.9)
 │   ├── schemas/
 │   │   ├── auth.py          # Request/response schemas for auth
 │   │   ├── user.py          # UserOut schema
@@ -188,6 +191,12 @@ Jarvis_Cloud/
 │   ├── test_intent.py            # Intent parsing tests
 │   ├── test_intent_parser.py     # Parser edge cases (33 tests)
 │   ├── test_intent_service.py    # Service layer tests (32 tests)
+│   ├── test_intent_search.py     # Calendar search intent tests
+│   ├── test_calendar_query.py    # Calendar query tests
+│   ├── test_calendar_search.py   # Calendar search tests
+│   ├── test_calendar_smart_search.py # Smart search tests
+│   ├── test_calendar_edit_handler.py # Calendar edit/delete tests (21 tests)
+│   ├── test_calendar_create_handler.py # Calendar create tests
 │   ├── test_pairing.py           # Pairing service tests
 │   └── test_websocket_manager.py # WebSocket manager tests
 ├── alembic/                  # Database migrations
@@ -761,6 +770,72 @@ environments/
 - Configured PostgreSQL with Docker
 - All code files have detailed comments for learning
 - API running locally on port 8000
+
+### December 16, 2025 - Sprint 3.9 Complete (Calendar Edit & Delete)
+- **Calendar Edit Handler:**
+  - `_handle_edit_existing_event()` - Find events by semantic search
+  - Uses `calendar_search_service.smart_search()` for LLM matching (typos, synonyms, translations)
+  - Stores pending edit in `pending_edit_service` for confirmation
+  - `_handle_confirm_edit()` - Context-aware confirmation (checks pending_event first)
+  - `_process_time_changes()` - Combines original event date with new time values
+  - Validation for time-only changes (e.g., "change to 7am")
+- **Calendar Delete Handler:**
+  - `_handle_delete_existing_event()` - Find events by semantic search
+  - Stores pending delete in `pending_edit_service` for confirmation
+  - `_handle_confirm_delete()` - Context-aware confirmation
+- **PendingEditService:**
+  - `store_pending_edit()` - Handles both CalendarEvent objects and dicts
+  - `get_pending()` - Retrieve pending operation (edit/delete)
+  - `select_event()` - User selects from multiple matches
+  - `confirm_pending()` - Execute the edit or delete
+  - Converts CalendarEvent to MatchingEvent format
+- **Context-Aware Confirmation:**
+  - `_handle_confirm_create()` now checks pending_edit first
+  - `_handle_confirm_edit()` checks pending_event first
+  - `_handle_confirm_delete()` checks all pending services
+  - Prevents "yes confirm" routing to wrong handler
+- **Bug Fixes:**
+  - Removed invalid `refresh_token` from GoogleCalendarClient (4 locations)
+  - Fixed `search_result.get()` to direct list assignment
+  - Fixed ValidationError for time-only datetime strings
+- **622 tests passing** ✅
+
+### December 15, 2025 - Sprint 3.8 Complete (Calendar Event Creation)
+- **Calendar Create Handler:**
+  - `_handle_create_event()` - Parse user intent for event creation
+  - Extracts title, date, time, duration, description from natural language
+  - Uses LLM to parse complex date expressions ("next Friday", "tomorrow at 3pm")
+  - Stores pending event in `pending_event_service` for confirmation
+  - `_handle_confirm_create()` - Confirms and creates the event
+- **PendingEventService:**
+  - `store_pending()` - Store event details awaiting confirmation
+  - `get_pending()` - Retrieve pending event for user
+  - `confirm_pending()` - Create event via Google Calendar API
+  - `cancel_pending()` - User cancels creation
+- **Natural Language Parsing:**
+  - Relative dates: "tomorrow", "next week", "in 3 days"
+  - Time expressions: "at 3pm", "from 2-4pm", "for 2 hours"
+  - Combined: "meeting with John tomorrow at 10am for 1 hour"
+
+### December 14, 2025 - Sprint 3.7 Complete (Smart Calendar Search)
+- **CalendarSearchService:**
+  - `smart_search()` - LLM-powered semantic calendar search
+  - Handles typos, synonyms, translations, abbreviations
+  - Returns `SmartSearchResult` with events, corrected_query, no_match_found
+  - Separates search logic from intent handler (Single Responsibility)
+- **SmartSearchResult Dataclass:**
+  - `events: List[CalendarEvent]` - Matching events
+  - `corrected_query: Optional[str]` - LLM-corrected search term
+  - `no_match_found: bool` - True if no events match
+  - `error: Optional[str]` - Error message if any
+- **Query Correction:**
+  - "dentist appt" → "Dentist Appointment"
+  - "mtg w/ john" → "Meeting with John"
+  - "cita médico" → "Doctor Appointment" (translation)
+- **Integration:**
+  - Used by `_handle_edit_existing_event()`
+  - Used by `_handle_delete_existing_event()`
+  - Replaces direct Google Calendar API search
 
 ### Next Session Tasks (Sprint 4 - Raspberry Pi Agent)
 1. Create Jarvis_Stick project structure (Python)

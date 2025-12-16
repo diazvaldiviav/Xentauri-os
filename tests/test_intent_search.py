@@ -126,11 +126,16 @@ class TestParseCalendarSearch:
     @pytest.mark.asyncio
     async def test_parse_calendar_search_with_date(self, parser):
         """Test parsing combined date + search query."""
+        from datetime import datetime, timedelta
+        
+        # Use dynamic tomorrow date since parser resolves "tomorrow" correctly
+        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        
         mock_response = _create_mock_response({
             "intent_type": "device_command",
             "device_name": "office display",
             "action": "show_calendar",
-            "parameters": {"date": "2025-12-13", "search": "meeting"},
+            "parameters": {"date": "tomorrow", "search": "meeting"},
             "confidence": 0.95,
             "reasoning": "Combined date and search query",
         })
@@ -142,7 +147,7 @@ class TestParseCalendarSearch:
             
             assert isinstance(intent, DeviceCommand)
             assert intent.action == ActionType.SHOW_CALENDAR
-            assert intent.parameters.get("date") == "2025-12-13"
+            assert intent.parameters.get("date") == tomorrow
             assert intent.parameters.get("search") == "meeting"
     
     @pytest.mark.asyncio

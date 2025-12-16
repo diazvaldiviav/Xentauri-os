@@ -485,7 +485,7 @@
 </head>
 <body>
     <h1>🤖 Jarvis System Architecture</h1>
-    <p class="subtitle">Intelligent Screen Control System <span class="status-badge">Sprint 3.6 Complete</span></p>
+    <p class="subtitle">Intelligent Screen Control System <span class="status-badge">Sprint 3.9 Complete</span></p>
 
     <!-- Main Architecture -->
     <div class="architecture">
@@ -524,7 +524,10 @@
                 <li><span class="check">✓</span> Google OAuth + Calendar</li>
                 <li><span class="check">✓</span> UnifiedContext system</li>
                 <li><span class="check">✓</span> Structured GPT-4o responses</li>
-                <li><span class="check">✓</span> Bug fixes (schema mismatch)</li>
+                <li><span class="check">✓</span> Smart Calendar Search (LLM)</li>
+                <li><span class="check">✓</span> Calendar Event Creation</li>
+                <li><span class="check">✓</span> Calendar Edit & Delete</li>
+                <li><span class="check">✓</span> 622 tests passing</li>
                 <li><span class="pending">⏳</span> Fly.io deployment</li>
             </ul>
         </div>
@@ -686,6 +689,78 @@
                 </div>
                 <div style="font-size: 0.8rem; color: #666; margin-top: 10px;">
                     → Claude analyzes → Returns insights
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar Operations Flow (Sprint 3.7-3.9) -->
+    <div class="section">
+        <h2 class="section-title">📅 Calendar Operations Flow (Sprint 3.7-3.9)</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">User Request</div>
+                    <div class="flow-step-desc">"Edit my dentist appt"</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Intent Parser</div>
+                    <div class="flow-step-desc">Detects EDIT intent</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">Smart Search</div>
+                    <div class="flow-step-desc">LLM semantic match</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">PendingEditService</div>
+                    <div class="flow-step-desc">Store for confirmation</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">Confirm & Execute</div>
+                    <div class="flow-step-desc">Google Calendar API</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Three calendar operation paths -->
+        <div style="display: flex; justify-content: space-around; margin-top: 30px; flex-wrap: wrap; gap: 20px;">
+            <div class="endpoint-group" style="flex: 1; min-width: 280px; border-left: 4px solid #10b981;">
+                <div class="endpoint-group-title">➕ CREATE Event</div>
+                <div style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">Natural language event creation</div>
+                <div class="endpoint">
+                    <span style="color: #10b981;">Example:</span>
+                    <span>"Schedule meeting tomorrow at 3pm"</span>
+                </div>
+                <div style="font-size: 0.8rem; color: #666; margin-top: 10px;">
+                    → Parse intent → Store pending → Confirm → Create
+                </div>
+            </div>
+            
+            <div class="endpoint-group" style="flex: 1; min-width: 280px; border-left: 4px solid #3b82f6;">
+                <div class="endpoint-group-title">✏️ EDIT Event</div>
+                <div style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">Smart search + semantic matching</div>
+                <div class="endpoint">
+                    <span style="color: #3b82f6;">Example:</span>
+                    <span>"Move dentist to 4pm"</span>
+                </div>
+                <div style="font-size: 0.8rem; color: #666; margin-top: 10px;">
+                    → Smart search → Store changes → Confirm → Update
+                </div>
+            </div>
+            
+            <div class="endpoint-group" style="flex: 1; min-width: 280px; border-left: 4px solid #ef4444;">
+                <div class="endpoint-group-title">🗑️ DELETE Event</div>
+                <div style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">Find and delete with confirmation</div>
+                <div class="endpoint">
+                    <span style="color: #ef4444;">Example:</span>
+                    <span>"Cancel my gym session"</span>
+                </div>
+                <div style="font-size: 0.8rem; color: #666; margin-top: 10px;">
+                    → Smart search → Store pending → Confirm → Delete
                 </div>
             </div>
         </div>
@@ -1166,14 +1241,56 @@
                     <div class="service-method">Solves iframe header auth problem</div>
                 </div>
             </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">🔍</span>
+                    CalendarSearchService
+                </div>
+                <div class="service-desc">LLM-powered semantic calendar search</div>
+                <div class="service-methods">
+                    <div class="service-method">smart_search(query, user) → SmartSearchResult</div>
+                    <div class="service-method">Handles typos, synonyms, translations</div>
+                    <div class="service-method">Returns corrected_query for user feedback</div>
+                    <div class="service-method">→ "dentist appt" finds "Dentist Appointment"</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">📅</span>
+                    PendingEventService
+                </div>
+                <div class="service-desc">Manages pending calendar event creation</div>
+                <div class="service-methods">
+                    <div class="service-method">store_pending(user_id, event_data)</div>
+                    <div class="service-method">get_pending(user_id) → PendingEvent | None</div>
+                    <div class="service-method">confirm_pending(user_id) → CalendarEvent</div>
+                    <div class="service-method">cancel_pending(user_id)</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">✏️</span>
+                    PendingEditService
+                </div>
+                <div class="service-desc">Manages pending edit/delete operations</div>
+                <div class="service-methods">
+                    <div class="service-method">store_pending_edit(user_id, events, changes)</div>
+                    <div class="service-method">get_pending(user_id) → PendingEdit | None</div>
+                    <div class="service-method">select_event(user_id, index) → MatchingEvent</div>
+                    <div class="service-method">confirm_pending(user_id) → Success/Error</div>
+                </div>
+            </div>
         </div>
     </div>
 
     <!-- Stats -->
     <div class="stats">
         <div class="stat">
-            <div class="stat-value">3.6</div>
-            <div class="stat-label">Sprints (3.6 In Progress)</div>
+            <div class="stat-value">3.9</div>
+            <div class="stat-label">Sprints Complete</div>
         </div>
         <div class="stat">
             <div class="stat-value">24</div>
@@ -1184,16 +1301,20 @@
             <div class="stat-label">AI Models</div>
         </div>
         <div class="stat">
-            <div class="stat-value">8</div>
+            <div class="stat-value">11</div>
             <div class="stat-label">Core Services</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">622</div>
+            <div class="stat-label">Tests Passing</div>
         </div>
     </div>
 
     <footer>
-        <p>Jarvis System Architecture • Sprint 3.6 Complete • December 10, 2025</p>
+        <p>Jarvis System Architecture • Sprint 3.9 Complete • December 16, 2025</p>
         <p style="margin-top: 10px; font-size: 0.9rem;">
             Current: Sprint 4 - Raspberry Pi Agent 🍓<br>
-            Completed: AI Router, Google Calendar, UnifiedContext ✅
+            Completed: AI Router, Calendar (Display/Search/Create/Edit/Delete) ✅
         </p>
     </footer>
 </body>

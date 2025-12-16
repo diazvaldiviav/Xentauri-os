@@ -171,3 +171,160 @@ class CalendarListResponse(BaseModel):
     
     class Config:
         populate_by_name = True
+
+
+# ---------------------------------------------------------------------------
+# EVENT CREATION SCHEMAS (Sprint 3.8)
+# ---------------------------------------------------------------------------
+
+class EventCreateRequest(BaseModel):
+    """
+    Request schema for creating a calendar event.
+    
+    Supports both timed events (with start_datetime/end_datetime)
+    and all-day events (with start_date/end_date).
+    
+    For timed events:
+        EventCreateRequest(
+            summary="Team Meeting",
+            start_datetime=datetime(2025, 1, 15, 18, 0),
+            end_datetime=datetime(2025, 1, 15, 19, 0),
+            timezone="America/New_York",
+        )
+    
+    For all-day events:
+        EventCreateRequest(
+            summary="Birthday",
+            start_date=date(2025, 1, 15),
+            end_date=date(2025, 1, 16),  # All-day events are exclusive
+        )
+    """
+    summary: str = Field(..., description="Event title/summary")
+    
+    # For timed events
+    start_datetime: Optional[datetime] = Field(None, description="Start time for timed events")
+    end_datetime: Optional[datetime] = Field(None, description="End time for timed events")
+    
+    # For all-day events
+    start_date: Optional[date] = Field(None, description="Start date for all-day events")
+    end_date: Optional[date] = Field(None, description="End date for all-day events (exclusive)")
+    
+    # Common fields
+    timezone: str = Field(default="UTC", description="Timezone for the event (e.g., America/New_York)")
+    location: Optional[str] = Field(None, description="Event location")
+    description: Optional[str] = Field(None, description="Event description")
+    recurrence: Optional[List[str]] = Field(None, description="Recurrence rules (RRULE format)")
+    
+    def is_all_day(self) -> bool:
+        """Check if this is an all-day event."""
+        return self.start_date is not None and self.start_datetime is None
+    
+    def is_valid(self) -> bool:
+        """Check if the request has valid time/date fields."""
+        # Must have either datetime pair or date pair
+        has_datetime = self.start_datetime is not None and self.end_datetime is not None
+        has_date = self.start_date is not None and self.end_date is not None
+        return has_datetime or has_date
+
+
+class EventCreateResponse(BaseModel):
+    """
+    Response schema after creating a calendar event.
+    
+    Contains the key details of the created event.
+    """
+    event_id: str = Field(..., description="Google Calendar event ID")
+    summary: str = Field(..., description="Event title/summary")
+    start: datetime | date = Field(..., description="Event start time/date")
+    end: datetime | date = Field(..., description="Event end time/date")
+    html_link: str = Field(..., description="Link to view event in Google Calendar")
+    
+    # Optional fields
+    timezone: Optional[str] = Field(None, description="Event timezone")
+    location: Optional[str] = Field(None, description="Event location")
+    is_recurring: bool = Field(default=False, description="Whether this is a recurring event")
+
+
+# ---------------------------------------------------------------------------
+# EVENT UPDATE SCHEMAS (Sprint 3.9)
+# ---------------------------------------------------------------------------
+
+class EventUpdateRequest(BaseModel):
+    """
+    Request schema for updating an existing calendar event.
+    
+    Only include fields that should be changed.
+    None values are ignored (field will remain unchanged).
+    
+    Example:
+        # Change just the time
+        EventUpdateRequest(
+            start_datetime=datetime(2025, 1, 15, 15, 0),
+            end_datetime=datetime(2025, 1, 15, 16, 0),
+        )
+        
+        # Change title and location
+        EventUpdateRequest(
+            summary="New Title",
+            location="Conference Room B",
+        )
+    """
+    summary: Optional[str] = Field(None, description="New event title")
+    
+    # For timed events
+    start_datetime: Optional[datetime] = Field(None, description="New start time")
+    end_datetime: Optional[datetime] = Field(None, description="New end time")
+    
+    # For all-day events
+    start_date: Optional[date] = Field(None, description="New start date (all-day)")
+    end_date: Optional[date] = Field(None, description="New end date (all-day)")
+    
+    # Common fields
+    timezone: Optional[str] = Field(None, description="Timezone for the event")
+    location: Optional[str] = Field(None, description="New location")
+    description: Optional[str] = Field(None, description="New description")
+    
+    def has_changes(self) -> bool:
+        """Check if any field is set."""
+        return any([
+            self.summary,
+            self.start_datetime,
+            self.end_datetime,
+            self.start_date,
+            self.end_date,
+            self.location,
+            self.description,
+        ])
+    
+    def has_time_changes(self) -> bool:
+        """Check if time/date fields are being changed."""
+        return any([
+            self.start_datetime,
+            self.end_datetime,
+            self.start_date,
+            self.end_date,
+        ])
+
+
+class EventSearchResult(BaseModel):
+    """
+    Result from searching calendar events.
+    
+    Contains matching events plus metadata about the search.
+    """
+    events: List[CalendarEvent] = Field(default_factory=list)
+    query: str = Field(..., description="The search query used")
+    total_count: int = Field(0, description="Number of matching events")
+    
+    def is_empty(self) -> bool:
+        """Check if no events were found."""
+        return len(self.events) == 0
+    
+    def has_single_match(self) -> bool:
+        """Check if exactly one event was found."""
+        return len(self.events) == 1
+    
+    def needs_disambiguation(self) -> bool:
+        """Check if multiple events need user selection."""
+        return len(self.events) > 1
+
