@@ -84,14 +84,45 @@ SUPPORTED INTENT TYPES:
    - "make it weekly" → calendar_create, edit_pending_event, edit_field="recurrence"
    - "add location Conference Room A" → calendar_create, edit_pending_event, edit_field="location"
 
+CRITICAL - PENDING OPERATION CONTEXT RULES (Sprint 3.9.1):
+When context includes "pending_operation" field, use these disambiguation rules:
+
+A) pending_op_type = "create" (user has a pending event creation):
+   - "yes" / "confirm" → calendar_create, confirm_create
+   - "no" / "cancel" → calendar_create, cancel_create
+   - "change it to 2pm" → calendar_create, edit_pending_event (NOT calendar_edit!)
+   - "make it at 7pm" → calendar_create, edit_pending_event
+   - "change the time" → calendar_create, edit_pending_event
+   
+B) pending_op_type = "edit" (user has a pending event edit):
+   - "yes" / "confirm" → calendar_edit, confirm_edit
+   - "no" / "cancel" → calendar_edit, cancel_edit
+   
+C) pending_op_type = "delete" (user has a pending event deletion):
+   - "yes" / "confirm" → calendar_edit, confirm_delete
+   - "no" / "cancel" → calendar_edit, cancel_edit
+
+D) pending_op_type = null (no pending operation):
+   - "yes" / "confirm" alone → conversation (ambiguous, ask for clarification)
+   - "change it to 2pm" → calendar_edit, edit_existing_event (needs search)
+
 6. CALENDAR_EDIT - Edit or delete an existing calendar event (Sprint 3.9)
    Actions: edit_existing_event, delete_existing_event, select_event, confirm_edit, confirm_delete, cancel_edit
    IMPORTANT: These are REQUESTS TO MODIFY OR DELETE existing events!
    Edit Keywords: reschedule, move, change, update, modify, push back, postpone
    Delete Keywords: delete, remove, cancel (event), clear
+   
+   CRITICAL - "FROM X TO Y" TIME PATTERN:
+   When user says "change from 2pm to 4pm" or "move from 10am to 3pm":
+   - The FIRST time (X) is the CURRENT/OLD time → IGNORE IT
+   - The SECOND time (Y) is the TARGET/NEW time → EXTRACT THIS ONE
+   - Example: "from 2pm to 4pm" → changes: {"start_datetime": "16:00"} (4pm, NOT 2pm!)
+   - Example: "from 10am to 3pm" → changes: {"start_datetime": "15:00"} (3pm, NOT 10am!)
+   
    - "reschedule my dentist appointment to 3pm" → calendar_edit, edit_existing_event
    - "move my meeting to tomorrow" → calendar_edit, edit_existing_event
    - "change the location of my standup to Room B" → calendar_edit, edit_existing_event
+   - "change my meeting from 2pm to 4pm" → calendar_edit, changes: {"start_datetime": "16:00"}
    - "delete my meeting tomorrow" → calendar_edit, delete_existing_event
    - "remove the team lunch" → calendar_edit, delete_existing_event
    - "cancel my dentist appointment" → calendar_edit, delete_existing_event
@@ -640,7 +671,51 @@ Output: {
   "date_filter": "today",
   "changes": {"start_datetime": "16:00"},
   "original_text": "push back my 3pm meeting to 4pm",
-  "reasoning": "Request to postpone a meeting - time change"
+  "reasoning": "Request to postpone a meeting - time change. When 'from X to Y' pattern is used, extract ONLY the TARGET time (Y)"
+}
+
+Input: "change my meeting from 2pm to 4pm"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "edit_existing_event",
+  "search_term": "meeting",
+  "changes": {"start_datetime": "16:00"},
+  "original_text": "change my meeting from 2pm to 4pm",
+  "reasoning": "CRITICAL: 'from 2pm to 4pm' means change TO 4pm. The '2pm' is the CURRENT time (ignore it), '4pm' is the NEW time (extract it)"
+}
+
+Input: "move my dentist from 10am to 3pm"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "edit_existing_event",
+  "search_term": "dentist",
+  "changes": {"start_datetime": "15:00"},
+  "original_text": "move my dentist from 10am to 3pm",
+  "reasoning": "Pattern 'from X to Y' = change to Y. The 10am is current (context), 3pm is the target (extract 15:00)"
+}
+
+Input: "reschedule from 9am to 11am"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "edit_existing_event",
+  "search_term": null,
+  "changes": {"start_datetime": "11:00"},
+  "original_text": "reschedule from 9am to 11am",
+  "reasoning": "From X to Y pattern: extract ONLY the target time Y (11am = 11:00). The 9am is the old time, ignore it"
+}
+
+Input: "change it from 2 pm to 4 pm"
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "edit_existing_event",
+  "search_term": null,
+  "changes": {"start_datetime": "16:00"},
+  "original_text": "change it from 2 pm to 4 pm",
+  "reasoning": "IMPORTANT: 'from 2 pm to 4 pm' → extract 4pm (16:00) as the NEW time. The 2pm is what it WAS, not what it should BE"
 }
 
 Input: "update my doctor appointment to next Monday"

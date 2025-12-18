@@ -229,10 +229,25 @@ class IntentService:
             devices = self._get_user_devices(db, user_id)
             device_context = device_mapper.to_device_context(devices)
             
+            # Build pending operation state for context-aware routing (Sprint 3.9.1)
+            from app.ai.context import _build_pending_state
+            pending_state = _build_pending_state(str(user_id))
+            
             context = {
                 "devices": device_context,
                 "user_id": str(user_id),
+                # Add pending operation context for routing and parsing
+                "pending_operation": pending_state.to_dict() if pending_state else None,
             }
+            
+            # Log pending state for debugging
+            if pending_state and pending_state.has_any_pending():
+                logger.info(
+                    f"[PENDING_STATE] request_id={request_id}, "
+                    f"pending_op_type={pending_state.pending_op_type}, "
+                    f"pending_op_age={pending_state.pending_op_age_seconds}s, "
+                    f"hint={pending_state.pending_op_hint}"
+                )
             
             # Analyze complexity and get routing decision
             routing_decision = await ai_router.analyze_request(text, context)
@@ -1631,8 +1646,10 @@ class IntentService:
         """
         Confirm and create the pending event.
         
-        Context-aware: If no pending CREATE but pending EDIT exists,
-        delegates to edit confirmation flow.
+        Context-aware confirmation (Sprint 3.9.1):
+        Uses pending_op_type from context to determine which operation to confirm.
+        If pending_op_type indicates EDIT/DELETE, delegates to that handler.
+        If both exist, uses the most recent operation.
         """
         from app.services.pending_event_service import pending_event_service
         from app.services.pending_edit_service import pending_edit_service
@@ -1640,18 +1657,43 @@ class IntentService:
         from app.environments.google.calendar.client import GoogleCalendarClient
         from app.environments.google.calendar.schemas import EventCreateRequest
         from datetime import datetime, timedelta
+        from app.ai.context import _build_pending_state
         
-        # First check if there's a pending CREATE
+        # Get pending state to determine priority (Sprint 3.9.1)
+        pending_state = _build_pending_state(str(user_id))
+        
+        # If pending_op_type indicates EDIT or DELETE, delegate to that handler
+        if pending_state.pending_op_type in ("edit", "delete"):
+            logger.info(
+                f"Confirmation routed by pending_op_type: {pending_state.pending_op_type}",
+                extra={"user_id": str(user_id)[:8], "request_id": request_id}
+            )
+            if pending_state.pending_op_type == "delete":
+                return await self._handle_confirm_delete(
+                    request_id=request_id,
+                    user_id=user_id,
+                    start_time=start_time,
+                    db=db,
+                )
+            else:
+                return await self._handle_confirm_edit(
+                    request_id=request_id,
+                    user_id=user_id,
+                    start_time=start_time,
+                    db=db,
+                )
+        
+        # Check for pending CREATE
         pending = pending_event_service.get_pending(str(user_id))
         
         if not pending:
-            # No pending CREATE - check for pending EDIT/DELETE
+            # No pending CREATE - check for pending EDIT/DELETE as fallback
             pending_edit = pending_edit_service.get_pending(str(user_id))
             
             if pending_edit:
                 # User said "yes" to confirm an edit/delete, not a create
                 logger.info(
-                    f"Confirmation redirected: no pending CREATE, found pending {pending_edit.operation.value}",
+                    f"Confirmation fallback: no pending CREATE, found pending {pending_edit.operation.value}",
                     extra={"user_id": str(user_id)[:8]}
                 )
                 
@@ -2036,6 +2078,17 @@ class IntentService:
         # Limit to first 5 matches
         matching_events = result.events[:5]
         
+        # DEBUG: Log the extracted changes dict for troubleshooting
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"[CALENDAR_EDIT] request_id={request_id}, "
+            f"search_term='{search_term}', "
+            f"original_text='{intent.original_text}', "
+            f"extracted_changes={intent.changes}, "
+            f"matched_events={len(matching_events)}"
+        )
+        
         # Store pending edit operation
         # (pending_edit_service handles CalendarEvent -> MatchingEvent conversion)
         pending = await pending_edit_service.store_pending_edit(
@@ -2252,25 +2305,43 @@ class IntentService:
         """
         Confirm and execute the pending edit.
         
-        Context-aware: If no pending EDIT but pending CREATE exists,
-        delegates to create confirmation flow.
+        Context-aware confirmation (Sprint 3.9.1):
+        Uses pending_op_type to determine which operation to confirm.
+        If pending_op_type indicates CREATE, delegates to that handler.
         """
         from app.services.pending_edit_service import pending_edit_service, PendingOperationType
         from app.services.pending_event_service import pending_event_service
         from app.models.oauth_credential import OAuthCredential
         from app.environments.google.calendar.client import GoogleCalendarClient
         from app.environments.google.calendar.schemas import EventUpdateRequest
+        from app.ai.context import _build_pending_state
+        
+        # Get pending state to determine priority (Sprint 3.9.1)
+        pending_state = _build_pending_state(str(user_id))
+        
+        # If pending_op_type indicates CREATE, delegate to that handler
+        if pending_state.pending_op_type == "create":
+            logger.info(
+                f"Confirmation routed by pending_op_type: create (from _handle_confirm_edit)",
+                extra={"user_id": str(user_id)[:8], "request_id": request_id}
+            )
+            return await self._handle_confirm_create(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
         
         pending = pending_edit_service.get_pending(str(user_id))
         
         if not pending:
-            # No pending EDIT - check for pending CREATE
+            # No pending EDIT - check for pending CREATE as fallback
             pending_create = pending_event_service.get_pending(str(user_id))
             
             if pending_create:
                 # User said "yes" to confirm a create, not an edit
                 logger.info(
-                    f"Confirmation redirected: no pending EDIT, found pending CREATE",
+                    f"Confirmation fallback: no pending EDIT, found pending CREATE",
                     extra={"user_id": str(user_id)[:8]}
                 )
                 return await self._handle_confirm_create(
@@ -2330,6 +2401,19 @@ class IntentService:
                 access_token=credentials.access_token,
             )
             
+            # Get user's timezone to preserve local time intent (Bug Fix: Sprint 3.9.1)
+            # Without this, "change to 4pm" sends 16:00 without timezone,
+            # Google interprets as UTC, user sees wrong time (e.g., 11am in Miami)
+            try:
+                user_timezone = await client.get_user_timezone()
+                logger.debug(
+                    f"Edit confirmation using timezone: {user_timezone}",
+                    extra={"user_id": str(user_id)[:8], "request_id": request_id}
+                )
+            except Exception as e:
+                logger.warning(f"Could not get user timezone for edit: {e}, defaulting to UTC")
+                user_timezone = "UTC"
+            
             event_id = pending.selected_event.event_id
             changes = pending.changes or {}
             
@@ -2339,6 +2423,19 @@ class IntentService:
                 original_start=pending.selected_event.start_time,
                 original_end=pending.selected_event.end_time,
             )
+            
+            # Add timezone to processed changes if we have time changes (Bug Fix: Sprint 3.9.1)
+            if "start_datetime" in processed_changes or "end_datetime" in processed_changes:
+                processed_changes["timezone"] = user_timezone
+                logger.info(
+                    f"Edit event with timezone",
+                    extra={
+                        "user_id": str(user_id)[:8],
+                        "timezone": user_timezone,
+                        "start": str(processed_changes.get("start_datetime")),
+                        "end": str(processed_changes.get("end_datetime")),
+                    }
+                )
             
             # Build update request
             update_request = EventUpdateRequest(**processed_changes)
@@ -2388,23 +2485,54 @@ class IntentService:
         """
         Confirm and execute the pending delete.
         
-        Context-aware: If no pending DELETE but pending CREATE/EDIT exists,
-        delegates to the appropriate confirmation flow.
+        Context-aware confirmation (Sprint 3.9.1):
+        Uses pending_op_type to determine which operation to confirm.
+        If pending_op_type indicates CREATE/EDIT, delegates accordingly.
         """
         from app.services.pending_edit_service import pending_edit_service, PendingOperationType
         from app.services.pending_event_service import pending_event_service
         from app.models.oauth_credential import OAuthCredential
         from app.environments.google.calendar.client import GoogleCalendarClient
+        from app.ai.context import _build_pending_state
+        
+        # Get pending state to determine priority (Sprint 3.9.1)
+        pending_state = _build_pending_state(str(user_id))
+        
+        # If pending_op_type indicates CREATE, delegate to that handler
+        if pending_state.pending_op_type == "create":
+            logger.info(
+                f"Confirmation routed by pending_op_type: create (from _handle_confirm_delete)",
+                extra={"user_id": str(user_id)[:8], "request_id": request_id}
+            )
+            return await self._handle_confirm_create(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        
+        # If pending_op_type indicates EDIT (not delete), delegate
+        if pending_state.pending_op_type == "edit":
+            logger.info(
+                f"Confirmation routed by pending_op_type: edit (from _handle_confirm_delete)",
+                extra={"user_id": str(user_id)[:8], "request_id": request_id}
+            )
+            return await self._handle_confirm_edit(
+                request_id=request_id,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
         
         pending = pending_edit_service.get_pending(str(user_id))
         
         if not pending:
-            # No pending EDIT/DELETE - check for pending CREATE
+            # No pending EDIT/DELETE - check for pending CREATE as fallback
             pending_create = pending_event_service.get_pending(str(user_id))
             
             if pending_create:
                 logger.info(
-                    f"Confirmation redirected: no pending DELETE, found pending CREATE",
+                    f"Confirmation fallback: no pending DELETE, found pending CREATE",
                     extra={"user_id": str(user_id)[:8]}
                 )
                 return await self._handle_confirm_create(

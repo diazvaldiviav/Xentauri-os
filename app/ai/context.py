@@ -117,6 +117,60 @@ class OAuthStatus:
 
 
 @dataclass
+class PendingOperationState:
+    """
+    State of any pending operation (create/edit/delete) for the user.
+    
+    This is critical for context-aware routing and intent parsing.
+    When a user has a pending operation, confirmations like "yes" or
+    edits like "change it to 2pm" should apply to that operation.
+    
+    Sprint 3.9.1: Context-Aware Confirmation Flow
+    """
+    # Operation flags
+    has_pending_create: bool = False
+    has_pending_edit: bool = False
+    has_pending_delete: bool = False
+    
+    # The most recent/relevant pending operation type
+    # Resolves conflicts when multiple pending ops exist
+    pending_op_type: Optional[str] = None  # "create", "edit", "delete", None
+    
+    # Age of the most recent pending operation in seconds
+    pending_op_age_seconds: Optional[int] = None
+    
+    # Hint about what the pending operation involves
+    pending_op_hint: Optional[str] = None  # e.g., "Meeting with John" or "dentist appointment"
+    
+    # For create operations
+    pending_create_title: Optional[str] = None
+    pending_create_time: Optional[str] = None
+    
+    # For edit operations
+    pending_edit_event: Optional[str] = None  # Event being edited
+    pending_edit_changes: Optional[str] = None  # What's being changed
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for prompt injection."""
+        return {
+            "has_pending_create": self.has_pending_create,
+            "has_pending_edit": self.has_pending_edit,
+            "has_pending_delete": self.has_pending_delete,
+            "pending_op_type": self.pending_op_type,
+            "pending_op_age_seconds": self.pending_op_age_seconds,
+            "pending_op_hint": self.pending_op_hint,
+            "pending_create_title": self.pending_create_title,
+            "pending_create_time": self.pending_create_time,
+            "pending_edit_event": self.pending_edit_event,
+            "pending_edit_changes": self.pending_edit_changes,
+        }
+    
+    def has_any_pending(self) -> bool:
+        """Check if any pending operation exists."""
+        return self.has_pending_create or self.has_pending_edit or self.has_pending_delete
+
+
+@dataclass
 class UnifiedContext:
     """
     Unified context for all AI model requests.
@@ -161,6 +215,9 @@ class UnifiedContext:
     available_actions: List[str]
     capabilities_summary: str
     
+    # Pending operation state (Sprint 3.9.1)
+    pending_state: Optional[PendingOperationState] = None
+    
     # Metadata
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     request_id: Optional[str] = None
@@ -189,6 +246,7 @@ class UnifiedContext:
                 "available_actions": self.available_actions,
                 "summary": self.capabilities_summary,
             },
+            "pending_operation": self.pending_state.to_dict() if self.pending_state else None,
             "created_at": self.created_at.isoformat(),
         }
     
@@ -332,6 +390,9 @@ async def build_unified_context(
         has_google_drive,
     )
     
+    # Build pending operation state (Sprint 3.9.1)
+    pending_state = _build_pending_state(str(user_id))
+    
     # Construct UnifiedContext
     return UnifiedContext(
         user_id=user_id,
@@ -345,6 +406,7 @@ async def build_unified_context(
         has_google_drive=has_google_drive,
         available_actions=available_actions,
         capabilities_summary=capabilities_summary,
+        pending_state=pending_state,
         request_id=request_id,
     )
 
@@ -437,3 +499,82 @@ def _build_capabilities_summary(
         parts.append("Can display calendar on screens.")
     
     return " ".join(parts)
+
+
+def _build_pending_state(user_id: str) -> PendingOperationState:
+    """
+    Build pending operation state by querying pending services.
+    
+    This checks both pending_event_service (for create) and
+    pending_edit_service (for edit/delete) and determines the
+    most recent operation for context-aware routing.
+    
+    Sprint 3.9.1: Context-Aware Confirmation Flow
+    """
+    from app.services.pending_event_service import pending_event_service
+    from app.services.pending_edit_service import pending_edit_service
+    
+    state = PendingOperationState()
+    
+    # Check for pending create (event creation)
+    pending_create = pending_event_service.get_pending(user_id)
+    if pending_create:
+        state.has_pending_create = True
+        state.pending_create_title = pending_create.event_title
+        state.pending_create_time = pending_create.event_time
+        
+        # Calculate age in seconds
+        age_seconds = int((datetime.now(timezone.utc) - pending_create.created_at).total_seconds())
+        
+        # Track as candidate for most recent
+        create_timestamp = pending_create.created_at
+    else:
+        create_timestamp = None
+    
+    # Check for pending edit/delete
+    pending_edit = pending_edit_service.get_pending(user_id)
+    if pending_edit:
+        if pending_edit.operation.value == "edit":
+            state.has_pending_edit = True
+        elif pending_edit.operation.value == "delete":
+            state.has_pending_delete = True
+        
+        # Get event hint
+        if pending_edit.selected_event:
+            state.pending_edit_event = pending_edit.selected_event.summary
+        elif pending_edit.matching_events:
+            state.pending_edit_event = pending_edit.matching_events[0].summary
+        
+        # Get changes hint
+        if pending_edit.changes:
+            changes_list = list(pending_edit.changes.keys())
+            state.pending_edit_changes = ", ".join(changes_list[:2])
+        
+        # Calculate age in seconds
+        edit_timestamp = pending_edit.created_at
+    else:
+        edit_timestamp = None
+    
+    # Determine most recent pending operation (priority resolution)
+    # If both exist, use the more recent one
+    if create_timestamp and edit_timestamp:
+        if edit_timestamp >= create_timestamp:
+            # Edit is more recent
+            state.pending_op_type = pending_edit.operation.value  # "edit" or "delete"
+            state.pending_op_age_seconds = int((datetime.now(timezone.utc) - edit_timestamp).total_seconds())
+            state.pending_op_hint = state.pending_edit_event or pending_edit.search_term
+        else:
+            # Create is more recent
+            state.pending_op_type = "create"
+            state.pending_op_age_seconds = int((datetime.now(timezone.utc) - create_timestamp).total_seconds())
+            state.pending_op_hint = state.pending_create_title
+    elif create_timestamp:
+        state.pending_op_type = "create"
+        state.pending_op_age_seconds = int((datetime.now(timezone.utc) - create_timestamp).total_seconds())
+        state.pending_op_hint = state.pending_create_title
+    elif edit_timestamp:
+        state.pending_op_type = pending_edit.operation.value
+        state.pending_op_age_seconds = int((datetime.now(timezone.utc) - edit_timestamp).total_seconds())
+        state.pending_op_hint = state.pending_edit_event or pending_edit.search_term
+    
+    return state

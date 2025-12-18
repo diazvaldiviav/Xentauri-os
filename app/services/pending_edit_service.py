@@ -4,12 +4,14 @@ Pending Edit Service - Manages pending calendar edit/delete operations.
 Sprint 3.9: Calendar Event Edit & Delete with Confirmation Flow
 
 This service manages the state of pending edit/delete operations that are
-awaiting user confirmation or disambiguation. Operations expire after 60 seconds.
+awaiting user confirmation or disambiguation. Operations expire after 120 seconds.
 
 Design follows pending_event_service.py pattern for consistency:
 - In-memory storage with TTL
 - Singleton instance
 - Cleanup on operations
+
+Note: TTL increased from 60s to 120s (Sprint 3.9.1) to give users more time.
 
 Flow for Edit:
 1. User says "reschedule my dentist appointment to 3pm"
@@ -251,7 +253,7 @@ class PendingEdit:
 
 class PendingEditService:
     """
-    Service for managing pending calendar edit/delete operations with 60s TTL.
+    Service for managing pending calendar edit/delete operations with 120s TTL.
     
     This class handles the confirmation flow for calendar event editing/deletion:
     - Store pending operations with search results
@@ -261,10 +263,13 @@ class PendingEditService:
     
     Thread-safety note: For MVP, this is acceptable.
     In production with multiple workers, use Redis instead.
+    
+    Note: TTL increased from 60s to 120s (Sprint 3.9.1) to give users more time
+    to confirm operations, especially when they need to think or clarify details.
     """
     
-    # TTL in seconds (60 seconds for confirmation timeout)
-    TTL_SECONDS = 60
+    # TTL in seconds (120 seconds for confirmation timeout - Sprint 3.9.1)
+    TTL_SECONDS = 120
     
     def __init__(self):
         """Initialize the pending edit service."""

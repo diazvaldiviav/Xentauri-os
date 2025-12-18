@@ -4,7 +4,7 @@ Pending Event Service - Manages pending calendar events during confirmation flow
 Sprint 3.8: Calendar Event Creation with Confirmation Flow
 
 This service manages the state of pending calendar events that are awaiting
-user confirmation. Events expire after 60 seconds if not confirmed.
+user confirmation. Events expire after 120 seconds if not confirmed.
 
 Design follows pairing.py pattern for consistency:
 - In-memory storage with TTL
@@ -13,7 +13,7 @@ Design follows pairing.py pattern for consistency:
 
 Flow:
 1. User says "schedule meeting tomorrow at 6 pm"
-2. Service stores pending event (60s TTL)
+2. Service stores pending event (120s TTL - Sprint 3.9.1)
 3. User can confirm ("yes"), cancel ("no"), or edit ("change time to 7 pm")
 4. On confirm: event is created via Google Calendar API
 5. On cancel/timeout: pending event is removed
@@ -151,7 +151,7 @@ class PendingEvent:
 
 class PendingEventService:
     """
-    Service for managing pending calendar events with 60s TTL.
+    Service for managing pending calendar events with 120s TTL.
     
     This class handles the confirmation flow for calendar event creation:
     - Store pending events with TTL
@@ -162,10 +162,13 @@ class PendingEventService:
     
     Thread-safety note: For MVP, this is acceptable.
     In production with multiple workers, use Redis instead.
+    
+    Note: TTL increased from 60s to 120s (Sprint 3.9.1) to give users more time
+    to confirm operations, especially when they need to think or clarify details.
     """
     
-    # TTL in seconds (60 seconds for confirmation timeout)
-    TTL_SECONDS = 60
+    # TTL in seconds (120 seconds for confirmation timeout - Sprint 3.9.1)
+    TTL_SECONDS = 120
     
     def __init__(self):
         """Initialize the pending event service."""

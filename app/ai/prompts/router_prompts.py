@@ -58,6 +58,33 @@ IMPORTANT: "Reschedule/Move/Delete/Cancel/Remove an event" = Calendar EDIT.
 This is SIMPLE - the intent parser handles event modification with a confirmation flow.
 Do NOT route these to complex execution.
 
+CRITICAL - PENDING OPERATION CONTEXT:
+When context includes "pending_operation" with a pending_op_type, use these rules:
+
+1. CONFIRMATION UTTERANCES with pending operation:
+   - "yes", "no", "confirm", "cancel", "do it", "nevermind" = SIMPLE (not conversational!)
+   - These are calendar confirmations, NOT casual conversation
+   - Route to intent parser which will handle based on pending operation type
+
+2. EDIT COMMANDS with pending CREATE operation:
+   - "change it to 2 pm", "make it 3pm", "change the time" = SIMPLE calendar_create/edit_pending
+   - When pending_op_type="create", "change it to X" modifies the pending event, NOT search for existing events
+   
+3. EDIT COMMANDS with pending EDIT operation:
+   - When pending_op_type="edit" or "delete", "yes" confirms that operation
+
+Examples with pending_operation context:
+- User: "yes" + pending_op_type="create" → SIMPLE (confirm create)
+- User: "yes" + pending_op_type="edit" → SIMPLE (confirm edit)  
+- User: "change it to 2pm" + pending_op_type="create" → SIMPLE (edit pending create)
+- User: "change it to 2pm" + pending_op_type=null → SIMPLE (edit existing - needs search)
+
+EXCEPTION - ESCALATE TO COMPLEX_EXECUTION FOR:
+- Multiple times in ambiguous context: "schedule meetings at 9am, 11am, and 2pm"
+- Complex relative time calculations: "move it to 2 hours after my lunch meeting ends"
+- Conditional scheduling: "if my 2pm is cancelled, then schedule at 3pm"
+Note: Simple "from X to Y" patterns like "change from 2pm to 4pm" are SIMPLE (intent parser handles these)
+
 COMPLEX_EXECUTION (route to GPT):
 - Code generation: "Write a script to turn on all TVs at 8am"
 - API integrations: "Search for the movie and play it"

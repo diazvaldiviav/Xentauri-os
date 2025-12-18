@@ -79,7 +79,7 @@ class IntentParser:
         
         Args:
             text: The user's natural language request
-            context: Optional context (available devices, user info)
+            context: Optional context (available devices, user info, pending operations)
             
         Returns:
             Typed Intent object (DeviceCommand, DeviceQuery, etc.)
@@ -87,12 +87,44 @@ class IntentParser:
         start_time = time.time()
         logger.info(f"Parsing intent: {text[:50]}...")
         
-        # Build context string
-        context_str = ""
+        # Build context string with devices AND pending operation state (Bug Fix: Sprint 3.9.1)
+        context_parts = []
         if context:
+            # Add device context
             if "devices" in context:
                 device_names = [d.get("name", "Unknown") for d in context["devices"]]
-                context_str = f"\n\nAvailable devices: {', '.join(device_names)}"
+                context_parts.append(f"Available devices: {', '.join(device_names)}")
+            
+            # Add pending operation context (critical for "yes"/"no" disambiguation)
+            if "pending_operation" in context and context["pending_operation"]:
+                pending_op = context["pending_operation"]
+                pending_lines = []
+                
+                if pending_op.get("has_pending_create"):
+                    pending_lines.append("has_pending_create: true")
+                    if pending_op.get("pending_create_title"):
+                        pending_lines.append(f"pending_event: {pending_op['pending_create_title']}")
+                
+                if pending_op.get("has_pending_edit"):
+                    pending_lines.append("has_pending_edit: true")
+                    if pending_op.get("pending_edit_event"):
+                        pending_lines.append(f"editing_event: {pending_op['pending_edit_event']}")
+                
+                if pending_op.get("has_pending_delete"):
+                    pending_lines.append("has_pending_delete: true")
+                
+                if pending_op.get("pending_op_type"):
+                    pending_lines.append(f"pending_op_type: {pending_op['pending_op_type']}")
+                
+                if pending_op.get("pending_op_age_seconds") is not None:
+                    pending_lines.append(f"pending_op_age_seconds: {pending_op['pending_op_age_seconds']}")
+                
+                if pending_lines:
+                    context_parts.append("Pending operation state:\n" + "\n".join(pending_lines))
+        
+        context_str = ""
+        if context_parts:
+            context_str = "\n\n" + "\n\n".join(context_parts)
         
         # Build the prompt
         prompt = INTENT_EXTRACTION_PROMPT.format(

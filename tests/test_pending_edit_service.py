@@ -140,7 +140,7 @@ class TestStorePendingEdit:
     
     @pytest.mark.asyncio
     async def test_store_sets_expiration(self, service, sample_events):
-        """Store should set expiration 60 seconds in future."""
+        """Store should set expiration 120 seconds in future (Sprint 3.9.1)."""
         pending = await service.store_pending_edit(
             user_id="user-123",
             operation="edit",
@@ -149,7 +149,7 @@ class TestStorePendingEdit:
         
         now = datetime.now(tz.utc)
         assert pending.expires_at > now
-        assert pending.expires_at < now + timedelta(seconds=65)
+        assert pending.expires_at < now + timedelta(seconds=125)  # 120s + 5s buffer
     
     @pytest.mark.asyncio
     async def test_store_detects_all_day_events(self, service, sample_events):

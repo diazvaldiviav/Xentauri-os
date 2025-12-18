@@ -276,7 +276,7 @@ class TestPendingEventServiceStorage:
     
     @pytest.mark.asyncio
     async def test_store_pending_sets_expiration(self, service):
-        """Should set 60-second TTL."""
+        """Should set 120-second TTL (Sprint 3.9.1)."""
         user_id = str(uuid4())
         
         before = datetime.now(timezone.utc)
@@ -286,9 +286,9 @@ class TestPendingEventServiceStorage:
         )
         after = datetime.now(timezone.utc)
         
-        # Expiration should be ~60 seconds in the future
-        expected_min = before + timedelta(seconds=60)
-        expected_max = after + timedelta(seconds=60)
+        # Expiration should be ~120 seconds in the future (Sprint 3.9.1: increased from 60s)
+        expected_min = before + timedelta(seconds=120)
+        expected_max = after + timedelta(seconds=120)
         
         assert expected_min <= pending.expires_at <= expected_max
     

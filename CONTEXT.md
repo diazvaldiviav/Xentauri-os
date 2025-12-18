@@ -131,8 +131,8 @@ Jarvis_Cloud/
 │   │   ├── intent_service.py    # Intent processing business logic
 │   │   ├── content_token.py     # Signed content tokens for iframes
 │   │   ├── calendar_search_service.py # Smart calendar search with LLM (Sprint 3.7)
-│   │   ├── pending_event_service.py   # Pending event creation (Sprint 3.8)
-│   │   └── pending_edit_service.py    # Pending edit/delete operations (Sprint 3.9)
+│   │   ├── pending_event_service.py   # Pending event creation (Sprint 3.8, TTL 120s)
+│   │   └── pending_edit_service.py    # Pending edit/delete operations (Sprint 3.9, TTL 120s)
 │   ├── schemas/
 │   │   ├── auth.py          # Request/response schemas for auth
 │   │   ├── user.py          # UserOut schema
@@ -197,6 +197,7 @@ Jarvis_Cloud/
 │   ├── test_calendar_smart_search.py # Smart search tests
 │   ├── test_calendar_edit_handler.py # Calendar edit/delete tests (21 tests)
 │   ├── test_calendar_create_handler.py # Calendar create tests
+│   ├── test_sprint_391_bugfixes.py  # Sprint 3.9.1 bug fix tests (13 tests)
 │   ├── test_pairing.py           # Pairing service tests
 │   └── test_websocket_manager.py # WebSocket manager tests
 ├── alembic/                  # Database migrations
@@ -771,6 +772,29 @@ environments/
 - All code files have detailed comments for learning
 - API running locally on port 8000
 
+### December 17, 2025 - Sprint 3.9.1 Complete (AI Layer Bug Fixes)
+- **Bug #1: Timezone Missing in EDIT Flow** ✅
+  - Root cause: `_handle_confirm_edit()` didn't call `get_user_timezone()`
+  - Symptom: Events edited to 4pm would display as 11am (UTC interpretation)
+  - Fix: Added `get_user_timezone()` call and pass to `processed_changes`
+  - Passes timezone to EventUpdateRequest for proper API handling
+- **Bug #2: Parser Ignoring Pending Context** ✅
+  - Root cause: Parser only extracted "devices" from context, ignored pending_operation
+  - Symptom: "Yes" after event creation might not route to CONFIRM_CREATE
+  - Fix: Added pending_operation context extraction in `intent/parser.py`
+  - Now includes: has_pending_create/edit/delete, pending_op_type, age, hints
+- **Bug #3: TTL Too Short** ✅
+  - Root cause: TTL_SECONDS = 60 was too aggressive for confirmation flows
+  - Symptom: Users saying "yes" after 1 minute got "no pending event" errors
+  - Fix: Changed TTL from 60s to 120s in both pending services
+  - Updated docstrings and tests to reflect new timeout
+- **New Tests:**
+  - `tests/test_sprint_391_bugfixes.py` - 13 new tests covering all bug fixes
+  - Timezone extraction and pass-through tests
+  - Parser pending context extraction tests
+  - TTL constant verification tests
+- **648 tests passing** ✅
+
 ### December 16, 2025 - Sprint 3.9 Complete (Calendar Edit & Delete)
 - **Calendar Edit Handler:**
   - `_handle_edit_existing_event()` - Find events by semantic search
@@ -845,6 +869,54 @@ environments/
 5. Command acknowledgment and status reporting
 6. Local configuration and persistence
 7. Test end-to-end with real Raspberry Pi hardware
+
+---
+
+## 🚀 Sprint 4.0 Plan: Calendar + Google Docs Intelligence
+
+**Goal:** Enable users to ask "What's in the doc linked to my meeting?" and get intelligent summaries.
+
+### Sprint 4.0.1: Google Docs OAuth Scope
+- Add `https://www.googleapis.com/auth/documents.readonly` to Google OAuth scopes
+- Single re-auth for existing users (one-time consent flow)
+- No database migration needed
+
+### Sprint 4.0.2: Google Docs Client
+- Create `app/environments/google/docs/client.py`
+- Implement `GoogleDocsClient` with `get_document(doc_id)` method
+- Error handling: 403 (no access) → clear message, 404 (deleted) → clear message
+- Parse various Google Docs URLs to extract document IDs
+
+### Sprint 4.0.3: Calendar Extended Properties
+- Add `attachments` and `conferenceData` fields to `CalendarEvent` schema
+- Update `GoogleCalendarClient` to fetch these fields
+- Parse Meet/Zoom links and Google Docs URLs from events
+
+### Sprint 4.0.4: DocIntelligenceService
+- Create `app/services/doc_intelligence_service.py`
+- Route by document size: Gemini for <5000 chars, Claude for complex docs
+- Methods: `summarize_document()`, `extract_key_points()`, `find_action_items()`
+
+### Sprint 4.0.5: MeetingLinkService
+- Create `app/services/meeting_link_service.py`
+- Calendar as single source of truth for meeting links
+- Extract all linked documents from a calendar event
+- Handle both Meet links and attached Docs
+
+### Sprint 4.0.6: DOC_QUERY Intent
+- Add DOC_QUERY to IntentType enum
+- Create `_handle_doc_query()` in IntentService
+- Query types: meeting_doc (default), standalone doc by URL
+
+### Sprint 4.0.7: Router and Parser Prompts
+- Update `intent_prompts.py` with DOC_QUERY examples
+- Add document context to UnifiedContext when relevant
+- Train intent parser on document-related queries
+
+### Sprint 4.0.8: E2E Test Fixtures (WOW Demo)
+- Create realistic test data for demos
+- Test: "What's in my 3pm meeting doc?" → Summary with action items
+- Complete integration testing across all new components
 
 ---
 
