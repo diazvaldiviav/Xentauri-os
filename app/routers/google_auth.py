@@ -39,7 +39,7 @@ from app.db.session import get_db
 from app.deps import get_current_user
 from app.models.user import User
 from app.models.oauth_credential import OAuthCredential
-from app.environments.google import GoogleAuthClient, CALENDAR_SCOPES
+from app.environments.google import GoogleAuthClient, CALENDAR_SCOPES, DOCS_SCOPES
 
 
 logger = logging.getLogger("jarvis.routers.google_auth")
@@ -117,18 +117,16 @@ async def google_login(
         "redirect_after": redirect_after,
     })
     
-    # Generate authorization URL with Calendar scopes
+    # Generate authorization URL with Calendar + Docs scopes
     auth_url = auth_client.get_authorization_url(
-        scopes=CALENDAR_SCOPES,
+        scopes=CALENDAR_SCOPES + DOCS_SCOPES,
         state=state,
     )
-    
+
     logger.info(
         f"Initiating Google OAuth for user {current_user.id}",
-        extra={"scopes": CALENDAR_SCOPES}
-    )
-    
-    # Redirect to Google
+        extra={"scopes": CALENDAR_SCOPES + DOCS_SCOPES}
+    )    # Redirect to Google
     return RedirectResponse(url=auth_url)
 
 

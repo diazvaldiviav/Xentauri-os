@@ -79,6 +79,11 @@ class PendingEvent:
     expires_at: datetime = field(default_factory=lambda: datetime.now(tz.utc) + timedelta(seconds=60))
     original_text: str = ""
     
+    # Doc source fields (Sprint 3.9)
+    doc_id: Optional[str] = None
+    doc_url: Optional[str] = None
+    source: str = "manual"  # "manual" or "doc"
+    
     def is_expired(self) -> bool:
         """Check if this pending event has expired."""
         return datetime.now(tz.utc) > self.expires_at
@@ -146,6 +151,9 @@ class PendingEvent:
             "created_at": self.created_at.isoformat(),
             "expires_at": self.expires_at.isoformat(),
             "is_expired": self.is_expired(),
+            "doc_id": self.doc_id,
+            "doc_url": self.doc_url,
+            "source": self.source,
         }
 
 
@@ -193,6 +201,10 @@ class PendingEventService:
         recurrence: Optional[str] = None,
         timezone: str = "UTC",
         original_text: str = "",
+        # Doc source fields (Sprint 3.9)
+        doc_id: Optional[str] = None,
+        doc_url: Optional[str] = None,
+        source: str = "manual",
     ) -> PendingEvent:
         """
         Store a pending event for user.
@@ -233,6 +245,9 @@ class PendingEventService:
             created_at=now,
             expires_at=now + timedelta(seconds=self.TTL_SECONDS),
             original_text=original_text,
+            doc_id=doc_id,
+            doc_url=doc_url,
+            source=source,
         )
         
         # Store (overwrites any existing)

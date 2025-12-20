@@ -366,6 +366,12 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
                 case 'show_content':
                     const url = data.parameters?.url || '/cloud/calendar';
                     const contentType = data.parameters?.content_type || 'url';
+                    
+                    // Sprint 3.9: Log Google Docs display
+                    if (contentType === 'google_doc') {{
+                        log(`📄 Displaying Google Doc: ${{url}}`, 'info');
+                    }}
+                    
                     showContent(url, contentType);
                     sendAck(data.command_id, 'completed');
                     break;

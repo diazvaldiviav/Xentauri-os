@@ -25,6 +25,8 @@ from app.environments.google.calendar.schemas import (
     CalendarInfo,
     EventAttendee,
     EventTime,
+    EventAttachment,
+    ExtendedProperties,
 )
 from app.environments.google.calendar.renderer import CalendarRenderer
 
@@ -34,5 +36,7 @@ __all__ = [
     "CalendarInfo",
     "EventAttendee",
     "EventTime",
+    "EventAttachment",
+    "ExtendedProperties",
     "CalendarRenderer",
 ]

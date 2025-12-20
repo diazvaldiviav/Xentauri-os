@@ -32,6 +32,12 @@ CALENDAR_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",  # Read and write events
 ]
 
+# Docs scopes - read-only access to Google Docs (Sprint 3.9)
+# Reference: https://developers.google.com/docs/api/reference/rest
+DOCS_SCOPES = [
+    "https://www.googleapis.com/auth/documents.readonly",  # Read document content
+]
+
 # Drive scopes - for future Sprint (read-only access to files)
 DRIVE_SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",  # Read files

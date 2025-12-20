@@ -39,6 +39,7 @@ from app.ai.intent.schemas import (
     CalendarQueryIntent,
     CalendarCreateIntent,
     CalendarEditIntent,
+    DocQueryIntent,
     ConversationIntent,
     ParsedCommand,
 )
@@ -187,6 +188,9 @@ class IntentParser:
         elif intent_type == "calendar_edit":
             return self._create_calendar_edit(data, original_text, confidence, reasoning)
         
+        elif intent_type == "doc_query":
+            return self._create_doc_query(data, original_text, confidence, reasoning)
+        
         elif intent_type == "conversation":
             return self._create_conversation_intent(data, original_text, confidence, reasoning)
         
@@ -239,6 +243,9 @@ class IntentParser:
         elif "tomorrow" in text_lower:
             tomorrow = today + timedelta(days=1)
             parameters["date"] = tomorrow.strftime("%Y-%m-%d")
+        elif "yesterday" in text_lower:
+            yesterday = today - timedelta(days=1)
+            parameters["date"] = yesterday.strftime("%Y-%m-%d")
         elif "date" in parameters:
             # Resolve if the AI returned relative terms
             date_value = str(parameters.get("date", "")).lower()
@@ -247,6 +254,9 @@ class IntentParser:
             elif date_value == "tomorrow":
                 tomorrow = today + timedelta(days=1)
                 parameters["date"] = tomorrow.strftime("%Y-%m-%d")
+            elif date_value == "yesterday":
+                yesterday = today - timedelta(days=1)
+                parameters["date"] = yesterday.strftime("%Y-%m-%d")
         
         return parameters
     
@@ -258,7 +268,7 @@ class IntentParser:
         reasoning: Optional[str],
     ) -> DeviceQuery:
         """Create a DeviceQuery intent."""
-        device_name = data.get("device_name", "unknown device")
+        device_name = data.get("device_name") or "unknown device"
         action_str = data.get("action", "status").lower()
         action = self._map_action(action_str)
         
@@ -466,6 +476,86 @@ class IntentParser:
             event_id=event_id,
             changes=changes,
         )
+    
+    def _create_doc_query(
+        self,
+        data: Dict[str, Any],
+        original_text: str,
+        confidence: float,
+        reasoning: Optional[str],
+    ) -> DocQueryIntent:
+        """
+        Create a DocQueryIntent for document-related queries.
+        
+        Sprint 3.9: Handles read_doc, link_doc, open_doc, summarize_meeting_doc actions.
+        """
+        action_str = data.get("action", "summarize_meeting_doc").lower()
+        action = self._map_action(action_str)
+        
+        # Extract document identification
+        doc_url = data.get("doc_url")
+        doc_id = data.get("doc_id")
+        
+        # Extract meeting reference
+        meeting_search = data.get("meeting_search")
+        meeting_time = data.get("meeting_time")
+        
+        # Extract query details
+        question = data.get("question")
+        device_name = data.get("device_name")
+        
+        # Try to extract doc ID from URL if present
+        if doc_url and not doc_id:
+            doc_id = self._extract_google_doc_id(doc_url)
+        
+        # Also check the original text for doc URLs
+        if not doc_id:
+            doc_id = self._extract_google_doc_id(original_text)
+        
+        return DocQueryIntent(
+            confidence=confidence,
+            original_text=original_text,
+            reasoning=reasoning,
+            action=action,
+            doc_url=doc_url,
+            doc_id=doc_id,
+            meeting_search=meeting_search,
+            meeting_time=meeting_time,
+            question=question,
+            device_name=device_name,
+        )
+    
+    def _extract_google_doc_id(self, text: str) -> Optional[str]:
+        """
+        Extract a Google Doc ID from text containing a URL.
+        
+        Supports multiple URL formats:
+        - https://docs.google.com/document/d/{docId}/edit
+        - https://docs.google.com/document/d/{docId}/view
+        - https://docs.google.com/open?id={docId}
+        
+        Args:
+            text: Text that might contain a Google Doc URL
+        
+        Returns:
+            Document ID if found, None otherwise
+        """
+        import re
+        
+        if not text:
+            return None
+        
+        # Standard document URL pattern
+        match = re.search(r"docs\.google\.com/document/d/([a-zA-Z0-9_-]+)", text)
+        if match:
+            return match.group(1)
+        
+        # Open URL pattern
+        match = re.search(r"docs\.google\.com/open\?id=([a-zA-Z0-9_-]+)", text)
+        if match:
+            return match.group(1)
+        
+        return None
     
     def _detect_selection_index(self, text: str) -> Optional[int]:
         """
@@ -902,6 +992,12 @@ class IntentParser:
             "confirm_edit": ActionType.CONFIRM_EDIT,
             "confirm_delete": ActionType.CONFIRM_DELETE,
             "cancel_edit": ActionType.CANCEL_EDIT,
+            # Document actions (Sprint 3.9)
+            "read_doc": ActionType.READ_DOC,
+            "link_doc": ActionType.LINK_DOC,
+            "open_doc": ActionType.OPEN_DOC,
+            "summarize_meeting_doc": ActionType.SUMMARIZE_MEETING_DOC,
+            "create_event_from_doc": ActionType.CREATE_EVENT_FROM_DOC,
         }
         return action_map.get(action_str, ActionType.STATUS)
     
@@ -980,6 +1076,18 @@ class IntentParser:
                 "edit_value": intent.edit_value,
             }
             parsed.can_execute = True  # Calendar create actions are always executable
+        
+        elif isinstance(intent, DocQueryIntent):
+            parsed.action = intent.action.value if intent.action else None
+            parsed.parameters = {
+                "doc_url": intent.doc_url,
+                "doc_id": intent.doc_id,
+                "meeting_search": intent.meeting_search,
+                "meeting_time": intent.meeting_time,
+                "question": intent.question,
+                "device_name": intent.device_name,
+            }
+            parsed.can_execute = True  # Doc queries are always executable
         
         elif isinstance(intent, ConversationIntent):
             parsed.can_execute = True  # Conversations are always "executable"

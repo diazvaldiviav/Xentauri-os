@@ -96,6 +96,7 @@ class OAuthStatus:
     has_calendar: bool = False
     has_drive: bool = False
     has_email: bool = False
+    has_docs: bool = False  # Sprint 3.9: Google Docs Intelligence
     scopes: List[str] = field(default_factory=list)
     
     # Token validity
@@ -110,6 +111,7 @@ class OAuthStatus:
             "has_calendar": self.has_calendar,
             "has_drive": self.has_drive,
             "has_email": self.has_email,
+            "has_docs": self.has_docs,
             "scopes": self.scopes,
             "token_valid": self.token_valid,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
@@ -171,6 +173,72 @@ class PendingOperationState:
 
 
 @dataclass
+class ConversationContext:
+    """
+    Tracks recent conversation context for resolving references like
+    "this event", "that doc", "the meeting".
+    
+    Sprint 3.9: Multi-turn conversation context awareness.
+    
+    When a user asks "is there a doc for this event?" after viewing
+    an event, this context helps resolve "this event" to the actual event.
+    
+    TTL: Context expires after 5 minutes (300 seconds).
+    """
+    # Last referenced event (from show_calendar, calendar query, etc.)
+    last_event_title: Optional[str] = None
+    last_event_id: Optional[str] = None
+    last_event_date: Optional[str] = None  # ISO format
+    last_event_timestamp: Optional[datetime] = None
+    
+    # Last referenced document
+    last_doc_id: Optional[str] = None
+    last_doc_url: Optional[str] = None
+    last_doc_title: Optional[str] = None
+    last_doc_timestamp: Optional[datetime] = None
+    
+    # Last search performed
+    last_search_term: Optional[str] = None
+    last_search_type: Optional[str] = None  # "calendar", "doc", "general"
+    last_search_timestamp: Optional[datetime] = None
+    
+    def has_recent_event(self, max_age_seconds: int = 300) -> bool:
+        """Check if there's a recent event in context (within TTL)."""
+        if not self.last_event_timestamp:
+            return False
+        age = (datetime.now(timezone.utc) - self.last_event_timestamp).total_seconds()
+        return age < max_age_seconds
+    
+    def has_recent_doc(self, max_age_seconds: int = 300) -> bool:
+        """Check if there's a recent document in context (within TTL)."""
+        if not self.last_doc_timestamp:
+            return False
+        age = (datetime.now(timezone.utc) - self.last_doc_timestamp).total_seconds()
+        return age < max_age_seconds
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for prompt injection."""
+        return {
+            "last_event": {
+                "title": self.last_event_title,
+                "id": self.last_event_id,
+                "date": self.last_event_date,
+                "is_recent": self.has_recent_event(),
+            } if self.last_event_title else None,
+            "last_doc": {
+                "title": self.last_doc_title,
+                "id": self.last_doc_id,
+                "url": self.last_doc_url,
+                "is_recent": self.has_recent_doc(),
+            } if self.last_doc_id else None,
+            "last_search": {
+                "term": self.last_search_term,
+                "type": self.last_search_type,
+            } if self.last_search_term else None,
+        }
+
+
+@dataclass
 class UnifiedContext:
     """
     Unified context for all AI model requests.
@@ -215,8 +283,14 @@ class UnifiedContext:
     available_actions: List[str]
     capabilities_summary: str
     
+    # Fields with defaults must come after fields without defaults
+    has_google_docs: bool = False  # Sprint 3.9: Google Docs Intelligence
+    
     # Pending operation state (Sprint 3.9.1)
     pending_state: Optional[PendingOperationState] = None
+    
+    # Conversation context (Sprint 3.9: Multi-turn awareness)
+    conversation_context: Optional[ConversationContext] = None
     
     # Metadata
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -240,6 +314,7 @@ class UnifiedContext:
             "oauth": {
                 "google_calendar": self.has_google_calendar,
                 "google_drive": self.has_google_drive,
+                "google_docs": self.has_google_docs,
                 "connections": [o.to_dict() for o in self.oauth_connections],
             },
             "capabilities": {
@@ -247,6 +322,7 @@ class UnifiedContext:
                 "summary": self.capabilities_summary,
             },
             "pending_operation": self.pending_state.to_dict() if self.pending_state else None,
+            "conversation_context": self.conversation_context.to_dict() if self.conversation_context else None,
             "created_at": self.created_at.isoformat(),
         }
     
@@ -340,6 +416,7 @@ async def build_unified_context(
     oauth_statuses = []
     has_google_calendar = False
     has_google_drive = False
+    has_google_docs = False  # Sprint 3.9: Google Docs Intelligence
     
     for cred in oauth_creds:
         # Parse scopes to determine what services are available
@@ -355,6 +432,7 @@ async def build_unified_context(
         has_cal = any("calendar" in s.lower() for s in scopes)
         has_drv = any("drive" in s.lower() for s in scopes)
         has_mail = any("gmail" in s.lower() or "mail" in s.lower() for s in scopes)
+        has_docs = any("documents" in s.lower() for s in scopes)  # Sprint 3.9
         
         oauth_status = OAuthStatus(
             provider=cred.provider,
@@ -362,6 +440,7 @@ async def build_unified_context(
             has_calendar=has_cal,
             has_drive=has_drv,
             has_email=has_mail,
+            has_docs=has_docs,
             scopes=scopes,
             token_valid=token_valid,
             expires_at=cred.expires_at,
@@ -374,12 +453,15 @@ async def build_unified_context(
                 has_google_calendar = True
             if has_drv and token_valid:
                 has_google_drive = True
+            if has_docs and token_valid:
+                has_google_docs = True
     
     # Determine available actions based on user's setup
     available_actions = _compute_available_actions(
         device_capabilities,
         online_devices,
         has_google_calendar,
+        has_google_docs,
     )
     
     # Build capabilities summary
@@ -388,10 +470,14 @@ async def build_unified_context(
         online_devices,
         has_google_calendar,
         has_google_drive,
+        has_google_docs,
     )
     
     # Build pending operation state (Sprint 3.9.1)
     pending_state = _build_pending_state(str(user_id))
+    
+    # Build conversation context (Sprint 3.9)
+    conversation_context = _build_conversation_context(str(user_id))
     
     # Construct UnifiedContext
     return UnifiedContext(
@@ -404,9 +490,11 @@ async def build_unified_context(
         oauth_connections=oauth_statuses,
         has_google_calendar=has_google_calendar,
         has_google_drive=has_google_drive,
+        has_google_docs=has_google_docs,
         available_actions=available_actions,
         capabilities_summary=capabilities_summary,
         pending_state=pending_state,
+        conversation_context=conversation_context,
         request_id=request_id,
     )
 
@@ -415,6 +503,7 @@ def _compute_available_actions(
     devices: List[DeviceCapability],
     online_devices: List[DeviceCapability],
     has_google_calendar: bool,
+    has_google_docs: bool = False,
 ) -> List[str]:
     """
     Compute which actions are actually available.
@@ -451,6 +540,15 @@ def _compute_available_actions(
     if has_google_calendar and content_devices:
         actions.append("show_calendar")
     
+    # Google Docs actions (Sprint 3.9)
+    if has_google_docs:
+        actions.extend([
+            "read_doc",
+            "summarize_doc",
+            "link_doc",
+            "open_doc",
+        ])
+    
     # System actions (always available)
     actions.extend([
         "list_devices",
@@ -465,6 +563,7 @@ def _build_capabilities_summary(
     online_devices: List[DeviceCapability],
     has_google_calendar: bool,
     has_google_drive: bool,
+    has_google_docs: bool = False,
 ) -> str:
     """
     Build a human-readable summary of capabilities.
@@ -490,6 +589,8 @@ def _build_capabilities_summary(
         services.append("Google Calendar")
     if has_google_drive:
         services.append("Google Drive")
+    if has_google_docs:
+        services.append("Google Docs")
     
     if services:
         parts.append(f"Connected services: {', '.join(services)}.")
@@ -497,6 +598,8 @@ def _build_capabilities_summary(
     # Capabilities
     if devices and has_google_calendar:
         parts.append("Can display calendar on screens.")
+    if has_google_docs:
+        parts.append("Can read and summarize Google Docs.")
     
     return " ".join(parts)
 
@@ -578,3 +681,33 @@ def _build_pending_state(user_id: str) -> PendingOperationState:
         state.pending_op_hint = state.pending_edit_event or pending_edit.search_term
     
     return state
+
+
+def _build_conversation_context(user_id: str) -> Optional[ConversationContext]:
+    """
+    Build conversation context from the conversation_context_service.
+    
+    Sprint 3.9: Multi-turn conversation context awareness.
+    
+    Retrieves the last referenced event, document, and search from
+    the in-memory cache for context-aware intent parsing.
+    """
+    from app.services.conversation_context_service import conversation_context_service
+    
+    # Get context from service
+    ctx = conversation_context_service.get_context(user_id)
+    
+    # Build dataclass from service context
+    return ConversationContext(
+        last_event_title=ctx.last_event_title,
+        last_event_id=ctx.last_event_id,
+        last_event_date=ctx.last_event_date,
+        last_event_timestamp=ctx.last_event_timestamp,
+        last_doc_id=ctx.last_doc_id,
+        last_doc_url=ctx.last_doc_url,
+        last_doc_title=ctx.last_doc_title,
+        last_doc_timestamp=ctx.last_doc_timestamp,
+        last_search_term=ctx.last_search_term,
+        last_search_type=ctx.last_search_type,
+        last_search_timestamp=ctx.last_search_timestamp,
+    )

@@ -78,6 +78,7 @@ from app.ai.intent.schemas import (
     CalendarQueryIntent,
     CalendarCreateIntent,
     CalendarEditIntent,
+    DocQueryIntent,
     ConversationIntent,
 )
 from app.ai.router.orchestrator import ai_router, TaskComplexity
@@ -99,6 +100,7 @@ class IntentResultType(str, Enum):
     SYSTEM_QUERY = "system_query"
     CALENDAR_QUERY = "calendar_query"
     CALENDAR_EDIT = "calendar_edit"  # Sprint 3.9
+    DOC_QUERY = "doc_query"          # Sprint 3.9
     CONVERSATION = "conversation"
     COMPLEX_EXECUTION = "complex_execution"
     COMPLEX_REASONING = "complex_reasoning"
@@ -127,6 +129,9 @@ class IntentResult:
     action: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
     
+    # Extra data for specific intent types (Sprint 3.9: DOC_QUERY)
+    data: Optional[Dict[str, Any]] = None
+    
     # Execution result
     command_sent: bool = False
     command_id: Optional[str] = None
@@ -147,6 +152,7 @@ class IntentResult:
             "confidence": self.confidence,
             "action": self.action,
             "parameters": self.parameters,
+            "data": self.data,
             "command_sent": self.command_sent,
             "command_id": self.command_id,
             "message": self.message,
@@ -399,6 +405,15 @@ class IntentService:
         
         elif isinstance(intent, CalendarEditIntent):
             return await self._handle_calendar_edit(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        
+        elif isinstance(intent, DocQueryIntent):
+            return await self._handle_doc_query(
                 request_id=request_id,
                 intent=intent,
                 user_id=user_id,
@@ -772,6 +787,9 @@ class IntentService:
         event = result.events[0]
         title = event.get_display_title()
         
+        # Sprint 3.9: Store event in conversation context for "this event" references
+        self._store_event_context(str(user_id), event)
+        
         # Format the date nicely
         start_dt = event.start.get_datetime() if event.start else None
         if start_dt:
@@ -833,6 +851,9 @@ class IntentService:
         event = result.events[0]
         title = event.get_display_title()
         time_str = event.get_time_display()
+        
+        # Sprint 3.9: Store event in conversation context for "this event" references
+        self._store_event_context(str(user_id), event)
         
         # Format relative time
         start_dt = event.start.get_datetime() if event.start else None
@@ -979,6 +1000,8 @@ class IntentService:
             return " for today"
         elif date_range == "tomorrow":
             return " for tomorrow"
+        elif date_range == "yesterday":
+            return " for yesterday"
         elif date_range == "this_week":
             return " for this week"
         else:
@@ -1482,6 +1505,91 @@ class IntentService:
         return f"Command sent to {device_name}"
     
     # -----------------------------------------------------------------------
+    # CONVERSATION CONTEXT HELPERS (Sprint 3.9)
+    # -----------------------------------------------------------------------
+    
+    def _store_event_context(self, user_id: str, event) -> None:
+        """
+        Store an event in conversation context for "this event" references.
+        
+        Called when a calendar query returns/shows an event, so subsequent
+        requests like "is there a doc for this event?" can resolve the reference.
+        """
+        from app.services.conversation_context_service import conversation_context_service
+        
+        try:
+            # Extract event date
+            event_date = None
+            if event.start:
+                start_dt = event.start.get_datetime()
+                if start_dt:
+                    event_date = start_dt.isoformat()
+                elif event.start.date:
+                    event_date = event.start.date
+            
+            conversation_context_service.set_last_event(
+                user_id=user_id,
+                event_title=event.get_display_title(),
+                event_id=event.id,
+                event_date=event_date,
+            )
+            logger.debug(f"Stored event context: {event.get_display_title()}")
+        except Exception as e:
+            logger.warning(f"Failed to store event context: {e}")
+    
+    def _store_doc_context(self, user_id: str, doc_id: str, doc_url: str, doc_title: str = None) -> None:
+        """
+        Store a document in conversation context for "this doc" references.
+        
+        Called when a doc query returns/shows a document, so subsequent
+        requests can reference it.
+        """
+        from app.services.conversation_context_service import conversation_context_service
+        
+        try:
+            conversation_context_service.set_last_doc(
+                user_id=user_id,
+                doc_id=doc_id,
+                doc_url=doc_url,
+                doc_title=doc_title,
+            )
+            logger.debug(f"Stored doc context: {doc_title or doc_id}")
+        except Exception as e:
+            logger.warning(f"Failed to store doc context: {e}")
+    
+    def _store_search_context(self, user_id: str, search_term: str, search_type: str) -> None:
+        """
+        Store a search in conversation context.
+        
+        Called when a search is performed, so subsequent requests can
+        reference "the same search".
+        """
+        from app.services.conversation_context_service import conversation_context_service
+        
+        try:
+            conversation_context_service.set_last_search(
+                user_id=user_id,
+                search_term=search_term,
+                search_type=search_type,
+            )
+            logger.debug(f"Stored search context: {search_term} ({search_type})")
+        except Exception as e:
+            logger.warning(f"Failed to store search context: {e}")
+    
+    def _get_event_from_context(self, user_id: str):
+        """
+        Get the last referenced event from conversation context.
+        
+        Returns (title, event_id, event_date) or (None, None, None) if not found.
+        """
+        from app.services.conversation_context_service import conversation_context_service
+        
+        event = conversation_context_service.get_last_event(user_id)
+        if event:
+            return event.get("title"), event.get("id"), event.get("date")
+        return None, None, None
+    
+    # -----------------------------------------------------------------------
     # CALENDAR CREATE HANDLER (Sprint 3.8)
     # -----------------------------------------------------------------------
     
@@ -1522,6 +1630,7 @@ class IntentService:
                 user_id=user_id,
                 start_time=start_time,
                 db=db,
+                intent=intent,
             )
         elif action == ActionType.CANCEL_CREATE:
             return await self._handle_cancel_create(
@@ -1642,6 +1751,7 @@ class IntentService:
         user_id: UUID,
         start_time: float,
         db: Session,
+        intent: Optional["CalendarCreateIntent"] = None,
     ) -> IntentResult:
         """
         Confirm and create the pending event.
@@ -1650,6 +1760,8 @@ class IntentService:
         Uses pending_op_type from context to determine which operation to confirm.
         If pending_op_type indicates EDIT/DELETE, delegates to that handler.
         If both exist, uses the most recent operation.
+        
+        Sprint 3.9: If intent contains event_date/event_time, update pending before creating.
         """
         from app.services.pending_event_service import pending_event_service
         from app.services.pending_edit_service import pending_edit_service
@@ -1729,6 +1841,75 @@ class IntentService:
                 request_id=request_id,
             )
         
+        # Sprint 3.9: Update pending with date/time from confirmation intent
+        if intent:
+            needs_refresh = False
+            
+            # Update event_date if provided in confirmation and pending is missing it
+            if hasattr(intent, 'event_date') and intent.event_date and not pending.event_date:
+                try:
+                    from datetime import date as date_type
+                    # Parse the date
+                    if isinstance(intent.event_date, str):
+                        parsed_date = self._resolve_date_string(intent.event_date)
+                    elif isinstance(intent.event_date, date_type):
+                        parsed_date = intent.event_date
+                    else:
+                        parsed_date = None
+                    
+                    if parsed_date:
+                        pending_event_service.update_pending(str(user_id), "event_date", parsed_date)
+                        needs_refresh = True
+                        logger.info(f"Updated pending event_date from confirmation: {parsed_date}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse event_date from confirmation: {e}")
+            
+            # Update event_time if provided in confirmation and pending is missing it
+            if hasattr(intent, 'event_time') and intent.event_time and not pending.event_time:
+                pending_event_service.update_pending(str(user_id), "event_time", intent.event_time)
+                needs_refresh = True
+                logger.info(f"Updated pending event_time from confirmation: {intent.event_time}")
+            
+            # Update duration if provided and different from pending (Sprint 3.9 fix)
+            if hasattr(intent, 'duration_minutes') and intent.duration_minutes and intent.duration_minutes != pending.duration_minutes:
+                pending_event_service.update_pending(str(user_id), "duration_minutes", intent.duration_minutes)
+                needs_refresh = True
+                logger.info(f"Updated pending duration_minutes from confirmation: {intent.duration_minutes}")
+            
+            # Refresh pending after updates
+            if needs_refresh:
+                pending = pending_event_service.get_pending(str(user_id))
+                if not pending:
+                    processing_time = (time.time() - start_time) * 1000
+                    return IntentResult(
+                        success=False,
+                        intent_type=IntentResultType.CALENDAR_QUERY,
+                        message="Pending event expired. Please try again.",
+                        processing_time_ms=processing_time,
+                        request_id=request_id,
+                    )
+        
+        # Validate we have required fields
+        if not pending.event_date:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message="I still need the date for this event. When should it be scheduled?",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        if not pending.event_time and not pending.is_all_day:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.CALENDAR_QUERY,
+                message="I still need the time for this event. What time should it start?",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
         # Get credentials
         credentials = db.query(OAuthCredential).filter(
             OAuthCredential.user_id == user_id,
@@ -1749,6 +1930,11 @@ class IntentService:
         try:
             calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
             
+            # Build description - include doc link if from doc source (Sprint 3.9)
+            description = None
+            if pending.source == "doc" and pending.doc_url:
+                description = f"📄 Meeting Document: {pending.doc_url}"
+            
             if pending.is_all_day:
                 # All-day event
                 request = EventCreateRequest(
@@ -1758,6 +1944,7 @@ class IntentService:
                     location=pending.location,
                     recurrence=[pending.recurrence] if pending.recurrence else None,
                     timezone=pending.timezone,
+                    description=description,
                 )
                 response = await calendar_client.create_all_day_event(request)
             else:
@@ -1772,11 +1959,32 @@ class IntentService:
                     location=pending.location,
                     recurrence=[pending.recurrence] if pending.recurrence else None,
                     timezone=pending.timezone,
+                    description=description,
                 )
                 response = await calendar_client.create_event(request)
             
             # Remove from pending after successful creation
             await pending_event_service.confirm_pending(str(user_id))
+            
+            # Sprint 3.9 fix: Store event and doc in conversation context
+            from app.services.conversation_context_service import conversation_context_service
+            
+            # Store event context
+            conversation_context_service.set_last_event(
+                user_id=str(user_id),
+                event_title=pending.event_title,
+                event_id=response.event_id,
+                event_date=pending.event_date.isoformat() if pending.event_date else None,
+            )
+            
+            # If from doc source, also store doc context
+            if pending.source == "doc" and pending.doc_id and pending.doc_url:
+                conversation_context_service.set_last_doc(
+                    user_id=str(user_id),
+                    doc_id=pending.doc_id,
+                    doc_url=pending.doc_url,
+                    doc_title=pending.event_title,
+                )
             
             # Build success message
             success_message = self._build_calendar_success_message(pending, response)
@@ -3022,6 +3230,946 @@ class IntentService:
         elif action == "clear_content":
             return f"Cleared display on {device_name}"
         return f"Content action completed on {device_name}"
+
+    # -----------------------------------------------------------------------
+    # DOC QUERY HANDLERS (Sprint 3.9)
+    # -----------------------------------------------------------------------
+
+    async def _handle_doc_query(
+        self,
+        request_id: str,
+        intent: "DocQueryIntent",
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Handle Google Docs intelligence queries.
+        
+        Sprint 3.9: Routes doc query actions:
+        1. LINK_DOC: Link a document to a calendar event
+        2. OPEN_DOC: Open a document linked to an event
+        3. READ_DOC: Read/analyze document content
+        4. SUMMARIZE_MEETING_DOC: Summarize document linked to meeting
+        """
+        action = intent.action
+        
+        # Route based on action type
+        if action == ActionType.LINK_DOC:
+            return await self._handle_link_doc(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.OPEN_DOC:
+            return await self._handle_open_doc(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.READ_DOC:
+            return await self._handle_read_doc(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.SUMMARIZE_MEETING_DOC:
+            return await self._handle_summarize_meeting_doc(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        elif action == ActionType.CREATE_EVENT_FROM_DOC:
+            return await self._handle_create_event_from_doc(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                start_time=start_time,
+                db=db,
+            )
+        else:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=f"Unknown doc query action: {action}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+
+    async def _handle_link_doc(
+        self,
+        request_id: str,
+        intent: "DocQueryIntent",
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Link a Google Doc to a calendar event.
+        
+        Note: This feature requires updating calendar event extended properties,
+        which needs a calendar API update method. For now, we provide helpful feedback.
+        """
+        from app.services.meeting_link_service import meeting_link_service
+        from app.environments.google.docs import GoogleDocsClient
+        
+        doc_url = intent.doc_url
+        meeting_search = intent.meeting_search
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        # Validate doc URL
+        if not doc_url:
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message="Please provide a Google Docs URL to link.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        if not GoogleDocsClient.validate_doc_url(doc_url):
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message="Invalid Google Docs URL format.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Need meeting_search to find the event
+        # Sprint 3.9: Use conversation context if no meeting specified
+        if not meeting_search:
+            context_title, context_id, context_date = self._get_event_from_context(str(user_id))
+            if context_title:
+                meeting_search = context_title
+                logger.debug(f"Using event from context: {context_title}")
+            else:
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message="Please specify which meeting to link the document to.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+        
+        try:
+            # Find the meeting first
+            meeting_result = await meeting_link_service.find_meeting_with_doc(
+                query=meeting_search,
+                user_id=user_id,
+                db=db,
+            )
+            
+            if not meeting_result.found:
+                processing_time = (time.time() - start_time) * 1000
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message=f"Could not find meeting '{meeting_search}' in your calendar.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            # For now, we can't actually link the doc (requires event update API)
+            # But we can provide helpful information
+            doc_id = meeting_link_service.extract_doc_id_from_url(doc_url)
+            processing_time = (time.time() - start_time) * 1000
+            
+            return IntentResult(
+                success=True,
+                intent_type=IntentResultType.DOC_QUERY,
+                action="link_doc",
+                message=f"Found meeting '{meeting_result.event.summary}'. Document linking requires calendar API update support.",
+                response=f"To link documents, add the doc URL to the meeting description in Google Calendar.",
+                data={"doc_url": doc_url, "doc_id": doc_id, "event_id": meeting_result.event.id},
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+                
+        except Exception as e:
+            logger.error(f"Error linking doc: {e}")
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=f"Error linking document: {str(e)}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+
+    async def _handle_open_doc(
+        self,
+        request_id: str,
+        intent: "DocQueryIntent",
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Get the document linked to a calendar event.
+        
+        Uses find_meeting_with_doc to search for the meeting and get its linked docs.
+        Returns the document URL for the client to open.
+        
+        Sprint 3.9: If device_name is specified, displays the doc on that device.
+        """
+        from app.services.meeting_link_service import meeting_link_service
+        
+        meeting_search = intent.meeting_search
+        meeting_time = intent.meeting_time
+        device_name = intent.device_name  # Sprint 3.9: Support device display
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        # Sprint 3.9: Use conversation context if no meeting specified
+        # This handles "is there a doc for this event?" after showing an event
+        if not meeting_search and not meeting_time:
+            context_title, context_id, context_date = self._get_event_from_context(str(user_id))
+            if context_title:
+                meeting_search = context_title
+                logger.debug(f"Using event from context: {context_title}")
+            else:
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message="Please specify which meeting's document you want to open.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+        
+        try:
+            # Use meeting search query or time reference
+            query = meeting_search or meeting_time
+            
+            # Find the meeting and its linked doc
+            meeting_result = await meeting_link_service.find_meeting_with_doc(
+                query=query,
+                user_id=user_id,
+                db=db,
+            )
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            if not meeting_result.found:
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message=f"Could not find meeting '{query}' in your calendar.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            if not meeting_result.has_linked_doc:
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message="No document linked to this event.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            # Build doc URL from doc_id
+            doc_url = f"https://docs.google.com/document/d/{meeting_result.doc_id}/edit"
+            
+            # Sprint 3.9: If device specified, display doc on device
+            if device_name:
+                # Get user's devices
+                devices = self._get_user_devices(db, user_id)
+                
+                if devices:
+                    # Find the device
+                    device, match_confidence = device_mapper.match(device_name, devices)
+                    
+                    if device:
+                        # Send show_content command with doc URL
+                        result = await command_service.show_content(
+                            device_id=device.id,
+                            url=doc_url,
+                            content_type="google_doc",
+                        )
+                        
+                        processing_time = (time.time() - start_time) * 1000
+                        
+                        # Track the command
+                        ai_monitor.track_command(
+                            request_id=request_id,
+                            device_id=device.id,
+                            device_name=device.name,
+                            action="show_content",
+                            command_id=result.command_id,
+                            success=result.success,
+                            error=result.error,
+                        )
+                        
+                        if result.success:
+                            # Store doc in context for future references
+                            self._store_doc_context(
+                                str(user_id), 
+                                meeting_result.doc_id, 
+                                doc_url,
+                                meeting_result.event.summary,
+                            )
+                            
+                            return IntentResult(
+                                success=True,
+                                intent_type=IntentResultType.DOC_QUERY,
+                                action="open_doc",
+                                device=device,
+                                command_sent=True,
+                                command_id=result.command_id,
+                                message=f"Showing document for '{meeting_result.event.summary}' on {device.name}.",
+                                response=f"Document displayed on {device.name}.",
+                                data={
+                                    "doc_url": doc_url,
+                                    "doc_id": meeting_result.doc_id,
+                                    "event_title": meeting_result.event.summary,
+                                },
+                                processing_time_ms=processing_time,
+                                request_id=request_id,
+                            )
+                        else:
+                            return IntentResult(
+                                success=False,
+                                intent_type=IntentResultType.ERROR,
+                                message=f"Found doc but failed to send to {device.name}: {result.error}",
+                                processing_time_ms=processing_time,
+                                request_id=request_id,
+                            )
+                    else:
+                        # Device not found
+                        processing_time = (time.time() - start_time) * 1000
+                        return IntentResult(
+                            success=False,
+                            intent_type=IntentResultType.ERROR,
+                            message=f"Could not find device '{device_name}'. Try 'list devices' to see available devices.",
+                            processing_time_ms=processing_time,
+                            request_id=request_id,
+                        )
+            
+            # No device specified - check for display intent to auto-assign device
+            # Sprint 3.9: Auto-select device for display-intent phrases
+            display_keywords = ['show', 'display', 'see', 'look', 'put on', 'view', 'lemme']
+            original_text = (intent.original_text or "").lower()
+            
+            has_display_intent = any(keyword in original_text for keyword in display_keywords)
+            
+            if has_display_intent:
+                # User wants to SEE it - try to auto-assign device
+                devices = self._get_user_devices(db, user_id)
+                display_devices = [d for d in devices if d.is_online]
+                
+                if len(display_devices) == 1:
+                    # Auto-select the only available device
+                    device = display_devices[0]
+                    logger.info(f"Auto-selected display device: {device.name}")
+                    
+                    # Send show_content command
+                    result = await command_service.show_content(
+                        device_id=device.id,
+                        url=doc_url,
+                        content_type="google_doc",
+                    )
+                    
+                    processing_time = (time.time() - start_time) * 1000
+                    
+                    # Track the command
+                    ai_monitor.track_command(
+                        request_id=request_id,
+                        device_id=device.id,
+                        device_name=device.name,
+                        action="show_content",
+                        command_id=result.command_id,
+                        success=result.success,
+                        error=result.error,
+                    )
+                    
+                    if result.success:
+                        # Store doc in context
+                        self._store_doc_context(
+                            str(user_id),
+                            meeting_result.doc_id,
+                            doc_url,
+                            meeting_result.event.summary,
+                        )
+                        
+                        return IntentResult(
+                            success=True,
+                            intent_type=IntentResultType.DOC_QUERY,
+                            action="open_doc",
+                            device=device,
+                            command_sent=True,
+                            command_id=result.command_id,
+                            message=f"Showing document for '{meeting_result.event.summary}' on {device.name}.",
+                            response=f"Document displayed on {device.name}.",
+                            data={
+                                "doc_url": doc_url,
+                                "doc_id": meeting_result.doc_id,
+                                "event_title": meeting_result.event.summary,
+                            },
+                            processing_time_ms=processing_time,
+                            request_id=request_id,
+                        )
+                    else:
+                        return IntentResult(
+                            success=False,
+                            intent_type=IntentResultType.ERROR,
+                            message=f"Found doc but failed to send to {device.name}: {result.error}",
+                            processing_time_ms=processing_time,
+                            request_id=request_id,
+                        )
+                elif len(display_devices) > 1:
+                    # Multiple devices - ask user which one
+                    device_names = ", ".join([d.name for d in display_devices])
+                    processing_time = (time.time() - start_time) * 1000
+                    return IntentResult(
+                        success=True,
+                        intent_type=IntentResultType.DOC_QUERY,
+                        action="open_doc",
+                        message=f"Found document for '{meeting_result.event.summary}'. Which device should I display it on?",
+                        response=f"Available devices: {device_names}. Say 'show on [device name]' to display.",
+                        data={
+                            "doc_url": doc_url,
+                            "doc_id": meeting_result.doc_id,
+                            "event_title": meeting_result.event.summary,
+                            "available_devices": [d.name for d in display_devices],
+                        },
+                        processing_time_ms=processing_time,
+                        request_id=request_id,
+                    )
+            
+            # No display intent or no devices - just return URL (query mode)
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=True,
+                intent_type=IntentResultType.DOC_QUERY,
+                action="open_doc",
+                message=f"Opening document for '{meeting_result.event.summary}'.",
+                response=f"Here's the meeting document: {doc_url}",
+                data={
+                    "doc_url": doc_url,
+                    "doc_id": meeting_result.doc_id,
+                    "event_id": meeting_result.event.id,
+                    "event_title": meeting_result.event.summary,
+                },
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+                
+        except Exception as e:
+            logger.error(f"Error getting linked doc: {e}")
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=f"Error opening document: {str(e)}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+
+    async def _handle_read_doc(
+        self,
+        request_id: str,
+        intent: "DocQueryIntent",
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Read and analyze a Google Doc.
+        
+        Uses DocIntelligenceService to process the document with AI.
+        """
+        from app.services.doc_intelligence_service import doc_intelligence_service
+        from app.environments.google.docs import GoogleDocsClient
+        from app.models.oauth_credential import OAuthCredential
+        
+        doc_url = intent.doc_url
+        question = intent.question
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        if not doc_url:
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message="Please provide a Google Docs URL to read.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        if not GoogleDocsClient.validate_doc_url(doc_url):
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message="Invalid Google Docs URL format.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        try:
+            # Get OAuth credentials from database
+            credentials = db.query(OAuthCredential).filter(
+                OAuthCredential.user_id == user_id,
+                OAuthCredential.provider == "google",
+            ).first()
+            
+            if not credentials or not credentials.access_token:
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message="Google account not connected. Please link your account first.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            # Fetch the document
+            doc_id = GoogleDocsClient.extract_doc_id(doc_url)
+            docs_client = GoogleDocsClient(access_token=credentials.access_token)
+            doc = await docs_client.get_document(doc_id)
+            doc_content = doc.to_doc_content()
+            
+            # Analyze/summarize the document
+            summary_result = await doc_intelligence_service.summarize_document(
+                doc_content=doc_content,
+                question=question,
+            )
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            if not summary_result.error:
+                return IntentResult(
+                    success=True,
+                    intent_type=IntentResultType.DOC_QUERY,
+                    action="read_doc",
+                    message=summary_result.summary,
+                    response=summary_result.summary,
+                    data={
+                        "doc_url": doc_url,
+                        "title": summary_result.title,
+                        "word_count": summary_result.word_count,
+                        "model_used": summary_result.model_used,
+                    },
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            else:
+                error_msg = summary_result.error
+                # Handle specific error cases
+                if "404" in error_msg or "not found" in error_msg.lower():
+                    error_msg = "Document not found. Please check the URL."
+                elif "403" in error_msg or "permission" in error_msg.lower():
+                    error_msg = "You don't have access to this document."
+                    
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message=error_msg,
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+                
+        except Exception as e:
+            logger.error(f"Error reading doc: {e}")
+            processing_time = (time.time() - start_time) * 1000
+            error_msg = str(e)
+            if "404" in error_msg or "not found" in error_msg.lower():
+                error_msg = "Document not found. Please check the URL."
+            elif "403" in error_msg or "permission" in error_msg.lower():
+                error_msg = "You don't have access to this document."
+            else:
+                error_msg = f"Error reading document: {error_msg}"
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=error_msg,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+
+    async def _handle_summarize_meeting_doc(
+        self,
+        request_id: str,
+        intent: "DocQueryIntent",
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Summarize a document linked to a meeting.
+        
+        Finds the meeting by search/time reference, gets its linked doc,
+        then uses DocIntelligenceService to generate a summary.
+        """
+        from app.services.doc_intelligence_service import doc_intelligence_service
+        from app.services.meeting_link_service import meeting_link_service
+        from app.environments.google.docs import GoogleDocsClient
+        from app.models.oauth_credential import OAuthCredential
+        
+        doc_url = intent.doc_url
+        meeting_search = intent.meeting_search
+        meeting_time = intent.meeting_time
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        # If no doc URL, try to find the meeting's linked doc
+        if not doc_url:
+            # Sprint 3.9: Use conversation context if no meeting specified
+            if not meeting_search and not meeting_time:
+                context_title, context_id, context_date = self._get_event_from_context(str(user_id))
+                if context_title:
+                    meeting_search = context_title
+                    logger.debug(f"Using event from context: {context_title}")
+                else:
+                    return IntentResult(
+                        success=False,
+                        intent_type=IntentResultType.ERROR,
+                        message="Please specify which meeting's document you want to summarize, or provide a Google Docs URL.",
+                        processing_time_ms=processing_time,
+                        request_id=request_id,
+                    )
+            
+            # Find the meeting and its linked doc
+            query = meeting_search or meeting_time
+            meeting_result = await meeting_link_service.find_meeting_with_doc(
+                query=query,
+                user_id=user_id,
+                db=db,
+            )
+            
+            if not meeting_result.found:
+                processing_time = (time.time() - start_time) * 1000
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message=f"Could not find meeting '{query}' in your calendar.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            if not meeting_result.has_linked_doc:
+                processing_time = (time.time() - start_time) * 1000
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message="This meeting doesn't have a linked document.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            # Build doc URL from doc_id
+            doc_url = f"https://docs.google.com/document/d/{meeting_result.doc_id}/edit"
+        
+        # Now we have a doc_url, validate and summarize
+        if not GoogleDocsClient.validate_doc_url(doc_url):
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message="Invalid Google Docs URL format.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        try:
+            # Get OAuth credentials from database
+            credentials = db.query(OAuthCredential).filter(
+                OAuthCredential.user_id == user_id,
+                OAuthCredential.provider == "google",
+            ).first()
+            
+            if not credentials or not credentials.access_token:
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message="Google account not connected. Please link your account first.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            # Fetch the document
+            doc_id = GoogleDocsClient.extract_doc_id(doc_url)
+            docs_client = GoogleDocsClient(access_token=credentials.access_token)
+            doc = await docs_client.get_document(doc_id)
+            doc_content = doc.to_doc_content()
+            
+            # Summarize the document
+            summary_result = await doc_intelligence_service.summarize_document(
+                doc_content=doc_content,
+            )
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            if not summary_result.error:
+                return IntentResult(
+                    success=True,
+                    intent_type=IntentResultType.DOC_QUERY,
+                    action="summarize_meeting_doc",
+                    message=summary_result.summary,
+                    response=summary_result.summary,
+                    data={
+                        "doc_url": doc_url,
+                        "title": summary_result.title,
+                        "word_count": summary_result.word_count,
+                        "is_complex": summary_result.is_complex,
+                        "model_used": summary_result.model_used,
+                    },
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            else:
+                error_msg = summary_result.error
+                if "404" in error_msg or "not found" in error_msg.lower():
+                    error_msg = "Document not found. Please check the URL."
+                elif "403" in error_msg or "permission" in error_msg.lower():
+                    error_msg = "You don't have access to this document."
+                    
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message=error_msg,
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+                
+        except Exception as e:
+            logger.error(f"Error summarizing doc: {e}")
+            processing_time = (time.time() - start_time) * 1000
+            error_msg = str(e)
+            if "404" in error_msg or "not found" in error_msg.lower():
+                error_msg = "Document not found. Please check the URL."
+            elif "403" in error_msg or "permission" in error_msg.lower():
+                error_msg = "You don't have access to this document."
+            else:
+                error_msg = f"Error summarizing document: {error_msg}"
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=error_msg,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+
+    async def _handle_create_event_from_doc(
+        self,
+        request_id: str,
+        intent: "DocQueryIntent",
+        user_id: UUID,
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Create a calendar event from document content.
+        
+        Sprint 3.9: Extract meeting details from doc and create event.
+        
+        Flow:
+        1. Fetch and read the document
+        2. Extract meeting details using LLM
+        3. If missing date/time, ask user for clarification
+        4. Create the calendar event
+        5. Link the document to the event (in description)
+        """
+        from app.services.doc_intelligence_service import doc_intelligence_service
+        from app.environments.google.docs import GoogleDocsClient
+        from app.environments.google.calendar.client import GoogleCalendarClient
+        from app.models.oauth_credential import OAuthCredential
+        from datetime import timedelta
+        from zoneinfo import ZoneInfo
+        
+        doc_url = intent.doc_url
+        
+        processing_time = (time.time() - start_time) * 1000
+        
+        if not doc_url:
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message="Please provide a Google Doc URL to create an event from.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Validate and extract doc ID
+        if not GoogleDocsClient.validate_doc_url(doc_url):
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message="That doesn't look like a valid Google Docs URL.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        doc_id = GoogleDocsClient.extract_doc_id(doc_url)
+        
+        # Get credentials
+        credentials = db.query(OAuthCredential).filter(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == "google",
+        ).first()
+        
+        if not credentials or not credentials.access_token:
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message="Please connect Google to create calendar events.",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        try:
+            # Fetch document content
+            doc_content = await doc_intelligence_service.get_document_for_user(
+                doc_id=doc_id,
+                user_id=user_id,
+                db=db,
+            )
+        except Exception as e:
+            processing_time = (time.time() - start_time) * 1000
+            error_msg = str(e)
+            if "404" in error_msg or "not found" in error_msg.lower():
+                error_msg = "Document not found. Please check the URL."
+            elif "403" in error_msg or "permission" in error_msg.lower():
+                error_msg = "I can't access that document. Please check sharing permissions."
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=error_msg,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Extract meeting details using LLM
+        details = await doc_intelligence_service.extract_meeting_details(doc_content)
+        
+        if details.error:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=f"Could not extract meeting details: {details.error}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Check if we need clarification (missing date/time)
+        if details.needs_clarification:
+            # Get user timezone for pending event
+            try:
+                calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
+                user_tz = await calendar_client.get_user_timezone()
+            except Exception:
+                user_tz = "UTC"
+            
+            # Store pending event with doc metadata for follow-up
+            from app.services.pending_event_service import pending_event_service
+            await pending_event_service.store_pending(
+                user_id=str(user_id),
+                event_title=details.event_title or doc_content.title,
+                event_date=None,  # Missing - user will provide
+                event_time=None,  # Missing - user will provide
+                duration_minutes=details.duration_minutes or 60,
+                location=details.location,
+                timezone=user_tz,
+                original_text=intent.original_text,
+                # Doc metadata
+                doc_id=doc_id,
+                doc_url=doc_url,
+                source="doc",
+            )
+            
+            missing = " and ".join(details.missing_fields)
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.DOC_QUERY,
+                action="create_event_from_doc",
+                message=f"I found the document '{doc_content.title}' but couldn't find the {missing}. When should this meeting be scheduled?",
+                data={
+                    "doc_id": doc_id,
+                    "doc_url": doc_url,
+                    "extracted_title": details.event_title,
+                    "missing_fields": details.missing_fields,
+                    "pending": True,  # Flag to indicate pending event stored
+                },
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+        
+        # Create the calendar event
+        try:
+            calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
+            
+            # Get user timezone
+            user_tz = await calendar_client.get_user_timezone()
+            tz = ZoneInfo(user_tz)
+            
+            # Parse date and time
+            from datetime import datetime as dt
+            event_date = dt.strptime(details.event_date, "%Y-%m-%d")
+            hour, minute = map(int, details.event_time.split(":"))
+            
+            start_dt = event_date.replace(hour=hour, minute=minute, tzinfo=tz)
+            end_dt = start_dt + timedelta(minutes=details.duration_minutes)
+            
+            # Build description with doc link
+            description = details.description or ""
+            description += f"\n\n📄 Meeting Document: {doc_url}"
+            
+            # Create event
+            event = await calendar_client.create_event(
+                summary=details.event_title,
+                start_datetime=start_dt,
+                end_datetime=end_dt,
+                description=description,
+                location=details.location,
+            )
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            # Store event in conversation context
+            self._store_event_context(str(user_id), event)
+            
+            # Format time for response
+            time_str = start_dt.strftime("%I:%M %p").lstrip("0")
+            date_str = start_dt.strftime("%B %d, %Y")
+            
+            return IntentResult(
+                success=True,
+                intent_type=IntentResultType.DOC_QUERY,
+                action="create_event_from_doc",
+                message=f"Created event '{details.event_title}' on {date_str} at {time_str}.",
+                response=f"I've created the meeting '{details.event_title}' for {date_str} at {time_str} and linked the document.",
+                data={
+                    "event_id": event.id,
+                    "event_title": details.event_title,
+                    "event_date": details.event_date,
+                    "event_time": details.event_time,
+                    "doc_id": doc_id,
+                    "doc_url": doc_url,
+                },
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to create event from doc: {e}")
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=f"Failed to create event: {str(e)}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
 
 
 # ---------------------------------------------------------------------------

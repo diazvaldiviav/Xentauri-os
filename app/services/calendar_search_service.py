@@ -199,21 +199,24 @@ class CalendarSearchService:
             corrected_query = result_data.get("corrected_query", query)
             no_match_found = result_data.get("no_match_found", False)
             
+            # Log LLM response for debugging
+            logger.info(f"LLM response: matched_events={result_data.get('matched_events', [])}, no_match={no_match_found}")
+            
             # Extract matched event titles
             for match in result_data.get("matched_events", []):
                 title = match.get("event_title", "")
                 confidence = match.get("confidence", 0)
                 
                 if title and confidence >= 0.50:
-                    matched_titles.add(title.lower())
-                    logger.debug(
+                    matched_titles.add(title.lower().strip())
+                    logger.info(
                         f"LLM matched: '{title}' with confidence {confidence:.2f}"
                     )
             
             # Filter original events by matched titles
             matched_events = []
             for event in events:
-                event_title = event.get_display_title().lower()
+                event_title = event.get_display_title().lower().strip()
                 
                 # Check if this event's title matches any LLM-identified titles
                 if event_title in matched_titles:
@@ -224,6 +227,16 @@ class CalendarSearchService:
                         if matched_title in event_title or event_title in matched_title:
                             matched_events.append(event)
                             break
+            
+            # IMPORTANT: If query exactly matches an event title, include it!
+            # This handles cases where user types the exact event name
+            query_lower = query.lower().strip()
+            for event in events:
+                event_title = event.get_display_title().lower().strip()
+                if query_lower == event_title or query_lower in event_title or event_title in query_lower:
+                    if event not in matched_events:
+                        logger.info(f"Added exact/partial match: '{event_title}' for query '{query}'")
+                        matched_events.append(event)
             
             logger.info(
                 f"Smart search matched {len(matched_events)} events "
@@ -284,34 +297,57 @@ class CalendarSearchService:
         try:
             calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
             
-            # Parse the date
+            # Get user's timezone for accurate date parsing
+            user_timezone = await calendar_client.get_user_timezone()
+            
+            from zoneinfo import ZoneInfo
             try:
-                date_obj = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                tz = ZoneInfo(user_timezone)
+            except Exception:
+                tz = ZoneInfo("UTC")
+            
+            # Parse the date in user's timezone
+            try:
+                date_obj = datetime.strptime(date, "%Y-%m-%d")
+                # Create date boundaries in user's timezone
+                local_start = date_obj.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
+                local_end = local_start + timedelta(days=1)
+                
+                # Convert to UTC for API call
+                day_start = local_start.astimezone(timezone.utc)
+                day_end = local_end.astimezone(timezone.utc)
+                
+                logger.info(f"Date range for {date} in {user_timezone}: {day_start} to {day_end} UTC")
+                
             except ValueError:
                 return SmartSearchResult(
                     events=[],
                     error=f"Invalid date format: {date}",
                 )
             
-            # Fetch events for that specific date
-            day_start = date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end = day_start + timedelta(days=1)
-            
+            # Fetch events for that date range
             day_events = await calendar_client.list_upcoming_events(
                 max_results=50,
                 time_min=day_start,
                 time_max=day_end,
             )
             
-            if not day_events:
+            # No need to filter - the date range is already correct for user's timezone
+            filtered_events = day_events
+            
+            if not filtered_events:
+                logger.warning(f"No events found for date {date} in {user_timezone}")
+                
                 return SmartSearchResult(
                     events=[],
                     no_match_found=True,
                     corrected_query=query,
                 )
             
+            logger.info(f"Found {len(filtered_events)} events for {date}, running LLM match for '{query}'")
+            
             # Use LLM for semantic matching
-            return await self._match_events_with_llm(query, day_events)
+            return await self._match_events_with_llm(query, filtered_events)
             
         except APIError as e:
             logger.error(f"Calendar API error: {e}")

@@ -96,6 +96,15 @@ COMPLEX_REASONING (route to Claude):
 - Analysis with tradeoffs: "Why does my TV keep losing connection?"
 - Critical decisions: "What's the best TV for my setup?"
 - Complex troubleshooting: "Debug why the HDMI handshake fails"
+- Deep document analysis: Large documents (5000+ chars) requiring thorough analysis
+
+DOC QUERY COMMANDS (SIMPLE - handled by intent parser):
+- "Summarize this doc" → SIMPLE (uses Gemini for simple docs, Claude for complex)
+- "Link this document to my meeting" → SIMPLE
+- "Open the meeting doc" → SIMPLE
+- "Read this Google Doc" → SIMPLE
+- "Create a meeting from this document" → SIMPLE
+The doc intelligence service handles complexity detection internally.
 
 RESPONSE FORMAT:
 You must respond with a JSON object. No explanation, just JSON.
@@ -181,6 +190,21 @@ Output: {"complexity": "simple", "is_device_command": false, "should_respond_dir
 
 Input: "Push back my 3pm meeting to 4pm"
 Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event time change - SIMPLE intent parsing"}
+
+Input: "Summarize this doc https://docs.google.com/document/d/abc123"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Document summarization - SIMPLE intent, doc service handles complexity internally"}
+
+Input: "Link this document to my standup meeting"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Document linking to calendar event - SIMPLE intent parsing"}
+
+Input: "Open the meeting doc for my team sync"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Retrieve linked document - SIMPLE intent"}
+
+Input: "What does this Google Doc say about the project timeline?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Document query with specific question - SIMPLE intent"}
+
+Input: "Create a meeting from this planning document"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Extract meeting context from doc - SIMPLE intent parsing"}
 """
 
 

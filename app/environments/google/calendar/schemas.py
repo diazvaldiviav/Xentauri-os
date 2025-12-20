@@ -59,6 +59,68 @@ class EventAttendee(BaseModel):
         populate_by_name = True
 
 
+class EventAttachment(BaseModel):
+    """
+    An attachment on a calendar event.
+    
+    Attachments can be Google Drive files, Google Docs, etc.
+    Reference: https://developers.google.com/calendar/api/v3/reference/events
+    """
+    file_url: Optional[str] = Field(None, alias="fileUrl", description="URL to the attachment")
+    title: Optional[str] = Field(None, description="Attachment title")
+    mime_type: Optional[str] = Field(None, alias="mimeType", description="MIME type")
+    icon_link: Optional[str] = Field(None, alias="iconLink", description="Icon URL")
+    file_id: Optional[str] = Field(None, alias="fileId", description="Drive file ID")
+    
+    class Config:
+        populate_by_name = True
+    
+    def is_google_doc(self) -> bool:
+        """Check if this attachment is a Google Doc."""
+        if self.mime_type:
+            return "document" in self.mime_type.lower()
+        if self.file_url:
+            return "docs.google.com/document" in self.file_url
+        return False
+    
+    def get_doc_id(self) -> Optional[str]:
+        """Extract Google Doc ID from the attachment."""
+        if not self.file_url:
+            return self.file_id
+        
+        # Extract from URL like: https://docs.google.com/document/d/{docId}/...
+        import re
+        match = re.search(r"docs\.google\.com/document/d/([a-zA-Z0-9_-]+)", self.file_url)
+        if match:
+            return match.group(1)
+        return self.file_id
+
+
+class ExtendedProperties(BaseModel):
+    """
+    Extended properties for a calendar event.
+    
+    Custom key-value pairs stored on an event.
+    - private: Only visible to the user who set them
+    - shared: Visible to all attendees
+    
+    Sprint 3.9: Used to store linked document IDs.
+    """
+    private: Optional[Dict[str, str]] = Field(None)
+    shared: Optional[Dict[str, str]] = Field(None)
+    
+    class Config:
+        populate_by_name = True
+    
+    def get_linked_doc_id(self) -> Optional[str]:
+        """Get the linked Google Doc ID if one is stored."""
+        if self.private and "linked_doc_id" in self.private:
+            return self.private["linked_doc_id"]
+        if self.shared and "linked_doc_id" in self.shared:
+            return self.shared["linked_doc_id"]
+        return None
+
+
 class CalendarEvent(BaseModel):
     """
     A Google Calendar event.
@@ -97,6 +159,15 @@ class CalendarEvent(BaseModel):
     creator: Optional[Dict[str, Any]] = Field(None)
     organizer: Optional[Dict[str, Any]] = Field(None)
     
+    # Attachments (Sprint 3.9 - for linked documents)
+    attachments: Optional[List[EventAttachment]] = Field(None, description="File attachments")
+    
+    # Extended properties (Sprint 3.9 - for custom data like linked doc IDs)
+    extended_properties: Optional[ExtendedProperties] = Field(None, alias="extendedProperties")
+    
+    # Conference data (for Meet/Zoom links)
+    conference_data: Optional[Dict[str, Any]] = Field(None, alias="conferenceData")
+    
     class Config:
         populate_by_name = True
     
@@ -123,6 +194,96 @@ class CalendarEvent(BaseModel):
             return start_dt.strftime("%I:%M %p").lstrip("0")
         
         return ""
+    
+    def get_linked_doc_id(self) -> Optional[str]:
+        """
+        Get the linked Google Doc ID from this event.
+        
+        Sprint 3.9: Checks extended properties first, then attachments.
+        
+        Returns:
+            Document ID if found, None otherwise
+        """
+        # First check extended properties (manually linked)
+        if self.extended_properties:
+            doc_id = self.extended_properties.get_linked_doc_id()
+            if doc_id:
+                return doc_id
+        
+        # Then check attachments (Drive attachments)
+        if self.attachments:
+            for attachment in self.attachments:
+                if attachment.is_google_doc():
+                    doc_id = attachment.get_doc_id()
+                    if doc_id:
+                        return doc_id
+        
+        # Check description for embedded doc links
+        if self.description:
+            import re
+            match = re.search(r"docs\.google\.com/document/d/([a-zA-Z0-9_-]+)", self.description)
+            if match:
+                return match.group(1)
+        
+        return None
+    
+    def get_all_linked_doc_ids(self) -> List[str]:
+        """
+        Get all linked Google Doc IDs from this event.
+        
+        Returns all document IDs found in:
+        - Extended properties
+        - Attachments
+        - Description links
+        
+        Returns:
+            List of document IDs (may be empty)
+        """
+        doc_ids = []
+        
+        # From extended properties
+        if self.extended_properties:
+            doc_id = self.extended_properties.get_linked_doc_id()
+            if doc_id and doc_id not in doc_ids:
+                doc_ids.append(doc_id)
+        
+        # From attachments
+        if self.attachments:
+            for attachment in self.attachments:
+                if attachment.is_google_doc():
+                    doc_id = attachment.get_doc_id()
+                    if doc_id and doc_id not in doc_ids:
+                        doc_ids.append(doc_id)
+        
+        # From description
+        if self.description:
+            import re
+            matches = re.findall(r"docs\.google\.com/document/d/([a-zA-Z0-9_-]+)", self.description)
+            for doc_id in matches:
+                if doc_id not in doc_ids:
+                    doc_ids.append(doc_id)
+        
+        return doc_ids
+    
+    def get_meet_link(self) -> Optional[str]:
+        """
+        Get the Google Meet link for this event.
+        
+        Returns:
+            Meet URL if available, None otherwise
+        """
+        # Check hangoutLink first (older style)
+        if self.hangout_link:
+            return self.hangout_link
+        
+        # Check conferenceData (newer style)
+        if self.conference_data:
+            entry_points = self.conference_data.get("entryPoints", [])
+            for entry in entry_points:
+                if entry.get("entryPointType") == "video":
+                    return entry.get("uri")
+        
+        return None
 
 
 class CalendarInfo(BaseModel):

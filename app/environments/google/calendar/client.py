@@ -495,7 +495,9 @@ class GoogleCalendarClient(EnvironmentService):
             text = await client.get_event_count_text(date_range="today")
             # Returns: "You have 3 events scheduled for today."
         """
-        time_min, time_max = self._parse_date_range(date_range)
+        # Get user's timezone for accurate date parsing
+        user_timezone = await self.get_user_timezone(calendar_id)
+        time_min, time_max = self._parse_date_range(date_range, user_timezone)
         
         try:
             if search_term:
@@ -630,7 +632,9 @@ class GoogleCalendarClient(EnvironmentService):
             text = await client.get_events_list_text(date_range="tomorrow")
             # Returns: "Your events for tomorrow:\n• 9:00 AM - Team standup\n• 2:00 PM - Design review"
         """
-        time_min, time_max = self._parse_date_range(date_range)
+        # Get user's timezone for accurate date parsing
+        user_timezone = await self.get_user_timezone(calendar_id)
+        time_min, time_max = self._parse_date_range(date_range, user_timezone)
         
         try:
             if search_term:
@@ -730,33 +734,67 @@ class GoogleCalendarClient(EnvironmentService):
     def _parse_date_range(
         self,
         date_range: Optional[str],
+        user_timezone: str = "UTC",
     ) -> tuple[datetime, Optional[datetime]]:
-        """Parse date_range string into time_min and time_max datetimes."""
-        now = datetime.now(timezone.utc)
+        """
+        Parse date_range string into time_min and time_max datetimes.
+        
+        Uses user's timezone to correctly interpret "today", "tomorrow", etc.
+        The returned datetimes are in UTC for the Google Calendar API.
+        
+        Args:
+            date_range: "today", "tomorrow", "yesterday", "this_week", or YYYY-MM-DD
+            user_timezone: User's timezone (e.g., "America/New_York")
+        
+        Returns:
+            Tuple of (time_min, time_max) in UTC
+        """
+        from zoneinfo import ZoneInfo
+        
+        # Get user's timezone
+        try:
+            tz = ZoneInfo(user_timezone)
+        except Exception:
+            tz = ZoneInfo("UTC")
+        
+        now = datetime.now(tz)
         
         if not date_range:
-            return now, None
+            return now.astimezone(timezone.utc), None
         
         date_range = date_range.lower().strip()
         
         if date_range == "today":
-            time_min = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            time_max = time_min + timedelta(days=1)
+            # Start and end of TODAY in user's timezone
+            local_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            local_end = local_start + timedelta(days=1)
+            # Convert to UTC for API
+            time_min = local_start.astimezone(timezone.utc)
+            time_max = local_end.astimezone(timezone.utc)
         elif date_range == "tomorrow":
-            time_min = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            time_max = time_min + timedelta(days=1)
+            local_start = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            local_end = local_start + timedelta(days=1)
+            time_min = local_start.astimezone(timezone.utc)
+            time_max = local_end.astimezone(timezone.utc)
+        elif date_range == "yesterday":
+            local_start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            local_end = local_start + timedelta(days=1)
+            time_min = local_start.astimezone(timezone.utc)
+            time_max = local_end.astimezone(timezone.utc)
         elif date_range == "this_week":
-            time_min = now
-            time_max = now + timedelta(days=7)
+            time_min = now.astimezone(timezone.utc)
+            time_max = (now + timedelta(days=7)).astimezone(timezone.utc)
         else:
-            # Try to parse as YYYY-MM-DD
+            # Try to parse as YYYY-MM-DD in user's timezone
             try:
-                date_obj = datetime.strptime(date_range, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                time_min = date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
-                time_max = time_min + timedelta(days=1)
+                date_obj = datetime.strptime(date_range, "%Y-%m-%d")
+                local_start = date_obj.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
+                local_end = local_start + timedelta(days=1)
+                time_min = local_start.astimezone(timezone.utc)
+                time_max = local_end.astimezone(timezone.utc)
             except ValueError:
                 # Default to now if can't parse
-                time_min = now
+                time_min = now.astimezone(timezone.utc)
                 time_max = None
         
         return time_min, time_max
@@ -772,6 +810,8 @@ class GoogleCalendarClient(EnvironmentService):
             return " for today"
         elif date_range == "tomorrow":
             return " for tomorrow"
+        elif date_range == "yesterday":
+            return " for yesterday"
         elif date_range == "this_week":
             return " for this week"
         else:

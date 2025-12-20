@@ -30,6 +30,7 @@ class IntentType(str, Enum):
     CALENDAR_QUERY: User wants info about calendar events (Sprint 3.8)
     CALENDAR_CREATE: User wants to create a calendar event (Sprint 3.8)
     CALENDAR_EDIT: User wants to edit or delete an existing event (Sprint 3.9)
+    DOC_QUERY: User wants to read, summarize, or link documents (Sprint 3.9)
     CONVERSATION: General chat, greetings, questions not about devices
     UNKNOWN: Could not determine intent
     """
@@ -39,6 +40,7 @@ class IntentType(str, Enum):
     CALENDAR_QUERY = "calendar_query"
     CALENDAR_CREATE = "calendar_create"  # Sprint 3.8: Event creation
     CALENDAR_EDIT = "calendar_edit"      # Sprint 3.9: Edit/delete events
+    DOC_QUERY = "doc_query"              # Sprint 3.9: Document intelligence
     CONVERSATION = "conversation"
     UNKNOWN = "unknown"
 
@@ -101,6 +103,13 @@ class ActionType(str, Enum):
     CONFIRM_EDIT = "confirm_edit"           # Confirm pending edit
     CONFIRM_DELETE = "confirm_delete"       # Confirm pending delete
     CANCEL_EDIT = "cancel_edit"             # Cancel pending edit/delete operation
+    
+    # Document actions (Sprint 3.9)
+    READ_DOC = "read_doc"                   # Read/summarize a document
+    LINK_DOC = "link_doc"                   # Link a document to a meeting
+    OPEN_DOC = "open_doc"                   # Open a document (e.g., on screen)
+    SUMMARIZE_MEETING_DOC = "summarize_meeting_doc"  # Summarize doc linked to a meeting
+    CREATE_EVENT_FROM_DOC = "create_event_from_doc"  # Create calendar event from doc content
 
 
 class Intent(BaseModel):
@@ -252,6 +261,37 @@ class CalendarEditIntent(Intent):
     # - location: New location
     # - description: New description
     # - recurrence: New recurrence rule
+
+
+class DocQueryIntent(Intent):
+    """
+    Intent for document-related queries (Sprint 3.9).
+    
+    Supports reading, summarizing, and linking Google Docs.
+    
+    Examples:
+    - "What's in my meeting doc?" → action=summarize_meeting_doc
+    - "Summarize the doc from my 3pm meeting" → action=summarize_meeting_doc
+    - "Link this doc to my standup" → action=link_doc
+    - "Read https://docs.google.com/..." → action=read_doc
+    - "Open the meeting document" → action=open_doc
+    """
+    intent_type: IntentType = IntentType.DOC_QUERY
+    action: ActionType = Field(description="Doc action: read_doc, link_doc, open_doc, summarize_meeting_doc")
+    
+    # Document identification
+    doc_url: Optional[str] = Field(default=None, description="Google Doc URL if provided")
+    doc_id: Optional[str] = Field(default=None, description="Extracted document ID")
+    
+    # Meeting reference (for summarize_meeting_doc)
+    meeting_search: Optional[str] = Field(default=None, description="Search term for the meeting (e.g., '3pm meeting', 'standup')")
+    meeting_time: Optional[str] = Field(default=None, description="Time reference (e.g., '3pm', 'tomorrow at 2')")
+    
+    # Query details
+    question: Optional[str] = Field(default=None, description="Specific question about the document")
+    
+    # Display target (for open_doc)
+    device_name: Optional[str] = Field(default=None, description="Device to display the doc on")
 
 
 class ConversationIntent(Intent):
