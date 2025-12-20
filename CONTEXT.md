@@ -1,9 +1,9 @@
 # Jarvis Project Context
 
-> **Last Updated:** December 12, 2025
-> **Current Sprint:** Sprint 4 - Raspberry Pi Agent
+> **Last Updated:** December 20, 2025
+> **Current Sprint:** Sprint 3.9 - Google Docs Intelligence ✅ COMPLETE
 > **Tech Debt Cleanup:** ✅ Complete (301 tests, 84% router reduction)
-> **Status:** ✅ Ready for Pi Agent development
+> **Status:** ✅ Ready for Sprint 4 (Raspberry Pi Agent)
 
 Jarvis is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
 
@@ -86,6 +86,28 @@ Jarvis is an intelligent screen control system that lets users operate multiple 
 | GPT-4o JSON response logging & error handling | ✅ Done |
 | Calendar date URL parameter passthrough | ✅ Done |
 
+### Sprint 3.9: Google Docs Intelligence ✅ COMPLETE (December 20, 2025)
+| Task | Status |
+|------|--------|
+| GoogleDocsClient with Google Docs API v1 | ✅ Done |
+| DOCS_SCOPES in OAuth flow (documents.readonly) | ✅ Done |
+| DocQueryIntent schema (doc_url, meeting_search) | ✅ Done |
+| ActionTypes: READ_DOC, LINK_DOC, OPEN_DOC, SUMMARIZE_MEETING_DOC | ✅ Done |
+| ActionType: CREATE_EVENT_FROM_DOC | ✅ Done |
+| DocIntelligenceService with LLM analysis | ✅ Done |
+| Meeting extraction from documents (ExtractedMeetingDetails) | ✅ Done |
+| Intent prompts for doc commands (English + Spanish) | ✅ Done |
+| _handle_doc_query in IntentService | ✅ Done |
+| _handle_create_event_from_doc handler | ✅ Done |
+| PendingEvent extended with doc_id, doc_url, source fields | ✅ Done |
+| ConversationContextService (TTL 300s) | ✅ Done |
+| Context storage after confirm_create (event + doc) | ✅ Done |
+| Display docs on device (device_name auto-selection) | ✅ Done |
+| Duration fix in confirm_create | ✅ Done |
+| Device query vs system query distinction | ✅ Done |
+| Null handling fix in parser (device_name) | ✅ Done |
+| validate_access method for GoogleDocsClient | ✅ Done |
+
 ### Sprint 4: Raspberry Pi Agent (Next)
 - Agent project structure (Python)
 - WebSocket client to connect to cloud
@@ -132,7 +154,9 @@ Jarvis_Cloud/
 │   │   ├── content_token.py     # Signed content tokens for iframes
 │   │   ├── calendar_search_service.py # Smart calendar search with LLM (Sprint 3.7)
 │   │   ├── pending_event_service.py   # Pending event creation (Sprint 3.8, TTL 120s)
-│   │   └── pending_edit_service.py    # Pending edit/delete operations (Sprint 3.9, TTL 120s)
+│   │   ├── pending_edit_service.py    # Pending edit/delete operations (Sprint 3.9, TTL 120s)
+│   │   ├── doc_intelligence_service.py # Google Docs AI analysis (Sprint 3.9)
+│   │   └── conversation_context_service.py # Conversation context tracking (Sprint 3.9, TTL 300s)
 │   ├── schemas/
 │   │   ├── auth.py          # Request/response schemas for auth
 │   │   ├── user.py          # UserOut schema
@@ -158,7 +182,8 @@ Jarvis_Cloud/
 │   │   │   ├── base_prompt.py      # Shared templates for all models
 │   │   │   ├── execution_prompts.py # GPT-4o execution prompts
 │   │   │   ├── router_prompts.py   # Routing decision prompts
-│   │   │   └── intent_prompts.py   # Intent extraction prompts
+│   │   │   ├── intent_prompts.py   # Intent extraction prompts
+│   │   │   └── doc_prompts.py      # Google Docs analysis prompts (Sprint 3.9)
 │   │   ├── schemas/         # AI Response Schemas (Sprint 3.6)
 │   │   │   ├── __init__.py  # Schema exports
 │   │   │   └── action_response.py  # Structured GPT-4o responses
@@ -174,12 +199,15 @@ Jarvis_Cloud/
 │           ├── auth/        # Google OAuth 2.0
 │           │   ├── __init__.py
 │           │   ├── client.py    # OAuth flow implementation
-│           │   └── schemas.py   # Auth data structures
-│           └── calendar/    # Google Calendar API
+│           │   └── schemas.py   # Auth data structures (CALENDAR_SCOPES, DOCS_SCOPES)
+│           ├── calendar/    # Google Calendar API
+│           │   ├── __init__.py
+│           │   ├── client.py    # Calendar API client
+│           │   ├── schemas.py   # Calendar data structures
+│           │   └── renderer.py  # HTML rendering for Raspberry Pi
+│           └── docs/        # Google Docs API (Sprint 3.9)
 │               ├── __init__.py
-│               ├── client.py    # Calendar API client
-│               ├── schemas.py   # Calendar data structures
-│               └── renderer.py  # HTML rendering for Raspberry Pi
+│               └── client.py    # GoogleDocsClient (get_document, validate_access)
 ├── tests/
 │   ├── conftest.py          # Pytest fixtures
 │   ├── test_action_registry.py   # Action registry tests (37 tests)
@@ -197,7 +225,12 @@ Jarvis_Cloud/
 │   ├── test_calendar_smart_search.py # Smart search tests
 │   ├── test_calendar_edit_handler.py # Calendar edit/delete tests (21 tests)
 │   ├── test_calendar_create_handler.py # Calendar create tests
+│   ├── test_calendar_create_intent.py  # Calendar create intent tests
 │   ├── test_sprint_391_bugfixes.py  # Sprint 3.9.1 bug fix tests (13 tests)
+│   ├── test_context_aware_confirmation.py # Context-aware confirmation tests
+│   ├── test_conversation_context.py # Conversation context service tests (Sprint 3.9)
+│   ├── test_pending_event_service.py # Pending event tests
+│   ├── test_pending_edit_service.py  # Pending edit tests
 │   ├── test_pairing.py           # Pairing service tests
 │   └── test_websocket_manager.py # WebSocket manager tests
 ├── alembic/                  # Database migrations
@@ -453,7 +486,7 @@ Before (1319 lines):                After (205 + 1056 lines):
 
 ---
 
-## 🌐 Environment Integrations Architecture (Sprint 3.5)
+## 🌐 Environment Integrations Architecture (Sprint 3.5 + 3.9)
 
 The environments module provides a modular, extensible architecture for integrating
 with external services (Google, Microsoft, Apple, etc.).
@@ -472,13 +505,14 @@ environments/
 ├── google/                    # Google Workspace ✅ Implemented
 │   ├── auth/                  # Shared OAuth for all Google services
 │   │   ├── client.py          # GoogleAuthClient
-│   │   └── schemas.py         # Scopes, token responses
+│   │   └── schemas.py         # CALENDAR_SCOPES, DOCS_SCOPES
 │   ├── calendar/              # ✅ Google Calendar API
 │   │   ├── client.py          # GoogleCalendarClient
 │   │   ├── schemas.py         # CalendarEvent, etc.
 │   │   └── renderer.py        # HTML for Raspberry Pi
+│   ├── docs/                  # ✅ Google Docs API (Sprint 3.9)
+│   │   └── client.py          # GoogleDocsClient (get_document, validate_access)
 │   ├── drive/                 # 🔜 Planned
-│   ├── docs/                  # 🔜 Planned
 │   └── gmail/                 # 🔜 Planned
 │
 ├── microsoft/                 # 🔜 Microsoft 365 (future)
@@ -489,6 +523,73 @@ environments/
 └── apple/                     # 🔜 Apple Services (future)
     └── calendar/              # iCloud Calendar
 ```
+
+### Google Docs Intelligence Flow (Sprint 3.9)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     Google Docs Intelligence Flow                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+1. READ/ANALYZE DOCUMENT
+   ┌─────────┐     ┌─────────────────┐     ┌──────────────┐
+   │  User   │────▶│ POST /intent    │────▶│ GoogleDocs   │
+   │ "read   │     │ DOC_QUERY       │     │ API v1       │
+   │  doc"   │     │ action=read_doc │     │              │
+   └─────────┘     └────────┬────────┘     └──────────────┘
+                            │
+                            ▼
+                   ┌─────────────────┐
+                   │ DocIntelligence │
+                   │ Service (LLM)   │
+                   └────────┬────────┘
+                            │
+                            ▼
+                   ┌─────────────────┐
+                   │ Analysis/Summary│
+                   │ returned to user│
+                   └─────────────────┘
+
+2. CREATE EVENT FROM DOCUMENT
+   ┌─────────┐     ┌─────────────────┐     ┌──────────────┐
+   │  User   │────▶│ POST /intent    │────▶│ GoogleDocs   │
+   │"create  │     │ DOC_QUERY       │     │ API v1       │
+   │event    │     │action=create_   │     └──────┬───────┘
+   │from doc"│     │event_from_doc   │            │
+   └─────────┘     └────────┬────────┘            │
+                            │                     ▼
+                            │            ┌──────────────┐
+                            ▼            │ Extract      │
+                   ┌─────────────────┐   │ Meeting      │
+                   │ PendingEvent    │◀──│ Details (LLM)│
+                   │ (missing date?) │   └──────────────┘
+                   └────────┬────────┘
+                            │
+           ┌────────────────┴────────────────┐
+           ▼                                 ▼
+   ┌─────────────────┐              ┌─────────────────┐
+   │ All data found  │              │ Missing date/   │
+   │ Create event    │              │ time - ask user │
+   │ immediately     │              │ Store pending   │
+   └────────┬────────┘              └────────┬────────┘
+            │                                │
+            ▼                                ▼
+   ┌─────────────────┐              ┌─────────────────┐
+   │ Google Calendar │              │ User confirms   │
+   │ Event Created   │              │ with date/time  │
+   │ + Doc link      │              │ → Create event  │
+   └─────────────────┘              └─────────────────┘
+```
+
+### ActionTypes for Documents (Sprint 3.9)
+
+| Action | Description | Required Fields |
+|--------|-------------|-----------------|
+| READ_DOC | Read and analyze document content | doc_url |
+| LINK_DOC | Link document to calendar event | doc_url, meeting_search |
+| OPEN_DOC | Find/open doc linked to meeting | meeting_search |
+| SUMMARIZE_MEETING_DOC | Summarize meeting document | meeting_search |
+| CREATE_EVENT_FROM_DOC | Create calendar event from doc | doc_url |
 
 ### Google Calendar Flow
 
@@ -772,6 +873,42 @@ environments/
 - All code files have detailed comments for learning
 - API running locally on port 8000
 
+### December 20, 2025 - Sprint 3.9 Complete (Google Docs Intelligence)
+- **Google Docs Client:**
+  - `GoogleDocsClient` with Google Docs API v1 integration
+  - `get_document()` - Fetch document content and metadata
+  - `validate_access()` - Abstract method implementation for EnvironmentService
+  - URL validation and doc_id extraction utilities
+- **OAuth Scopes Update:**
+  - Added `DOCS_SCOPES` (documents.readonly) to OAuth flow
+  - Combined with `CALENDAR_SCOPES` in `/auth/google/login`
+- **DocQueryIntent Schema:**
+  - New intent type for document operations
+  - Fields: doc_url, meeting_search, device_name
+  - ActionTypes: READ_DOC, LINK_DOC, OPEN_DOC, SUMMARIZE_MEETING_DOC, CREATE_EVENT_FROM_DOC
+- **DocIntelligenceService:**
+  - LLM-powered document analysis (summarize, extract key points)
+  - `extract_meeting_details()` - Parse meeting info from documents
+  - `ExtractedMeetingDetails` dataclass with needs_clarification flag
+- **Create Event from Doc Flow:**
+  - `_handle_create_event_from_doc()` handler in IntentService
+  - Extracts title, date, time, duration from document content
+  - Stores pending with doc_id, doc_url, source fields
+  - Links document to created calendar event in description
+- **ConversationContextService (TTL 300s):**
+  - Tracks last_event, last_doc, last_search per user
+  - Enables "this event", "that doc" references
+  - `set_last_event()`, `set_last_doc()`, `get_last_event()`, etc.
+- **Bug Fixes:**
+  - Duration extraction: Changed condition to update when intent differs from pending
+  - Context storage: `_handle_confirm_create()` now stores event and doc context
+  - Null handling: `device_name = data.get("device_name") or "unknown device"`
+  - Intent parser: Added `create_event_from_doc` to action mapping
+- **New Tests:**
+  - `test_conversation_context.py` - Context service tests
+  - `test_doc_intelligence.py` - Document analysis tests
+- **4,827 lines added across 25 files**
+
 ### December 17, 2025 - Sprint 3.9.1 Complete (AI Layer Bug Fixes)
 - **Bug #1: Timezone Missing in EDIT Flow** ✅
   - Root cause: `_handle_confirm_edit()` didn't call `get_user_timezone()`
@@ -872,51 +1009,57 @@ environments/
 
 ---
 
-## 🚀 Sprint 4.0 Plan: Calendar + Google Docs Intelligence
+## 🚀 Sprint 4.0 Plan: Raspberry Pi Agent
 
-**Goal:** Enable users to ask "What's in the doc linked to my meeting?" and get intelligent summaries.
+**Goal:** Create the edge agent software that runs on Raspberry Pi devices connected to screens, enabling real hardware control.
 
-### Sprint 4.0.1: Google Docs OAuth Scope
-- Add `https://www.googleapis.com/auth/documents.readonly` to Google OAuth scopes
-- Single re-auth for existing users (one-time consent flow)
-- No database migration needed
+### Sprint 4.0.1: Project Structure
+- Create `Jarvis_Stick/` project directory (Python)
+- Set up virtual environment and dependencies
+- Configuration management (device ID, cloud URL, auth)
+- Logging and error handling framework
 
-### Sprint 4.0.2: Google Docs Client
-- Create `app/environments/google/docs/client.py`
-- Implement `GoogleDocsClient` with `get_document(doc_id)` method
-- Error handling: 403 (no access) → clear message, 404 (deleted) → clear message
-- Parse various Google Docs URLs to extract document IDs
+### Sprint 4.0.2: WebSocket Client
+- Implement WebSocket client to connect to Jarvis Cloud
+- Automatic reconnection with exponential backoff
+- Message queue for offline operation
+- Heartbeat/ping-pong for connection health
 
-### Sprint 4.0.3: Calendar Extended Properties
-- Add `attachments` and `conferenceData` fields to `CalendarEvent` schema
-- Update `GoogleCalendarClient` to fetch these fields
-- Parse Meet/Zoom links and Google Docs URLs from events
+### Sprint 4.0.3: Pairing Flow
+- Display pairing code on connected screen
+- HTTP callback to cloud with pairing code
+- Receive and store device credentials
+- Transition to paired state
 
-### Sprint 4.0.4: DocIntelligenceService
-- Create `app/services/doc_intelligence_service.py`
-- Route by document size: Gemini for <5000 chars, Claude for complex docs
-- Methods: `summarize_document()`, `extract_key_points()`, `find_action_items()`
+### Sprint 4.0.4: HDMI-CEC Command Execution
+- Integrate with `cec-client` (libCEC)
+- Commands: power_on, power_off, set_input, volume_up/down, mute
+- Parse CEC responses for device state
+- Error handling for unsupported devices
 
-### Sprint 4.0.5: MeetingLinkService
-- Create `app/services/meeting_link_service.py`
-- Calendar as single source of truth for meeting links
-- Extract all linked documents from a calendar event
-- Handle both Meet links and attached Docs
+### Sprint 4.0.5: Content Display
+- Chromium kiosk mode for content display
+- Handle SHOW_CONTENT commands (calendar, docs)
+- URL navigation and refresh
+- CLEAR_CONTENT to return to idle screen
 
-### Sprint 4.0.6: DOC_QUERY Intent
-- Add DOC_QUERY to IntentType enum
-- Create `_handle_doc_query()` in IntentService
-- Query types: meeting_doc (default), standalone doc by URL
+### Sprint 4.0.6: Command Acknowledgment
+- Send ACK/NACK for received commands
+- Report command execution status
+- Periodic status updates to cloud
+- Device capability reporting
 
-### Sprint 4.0.7: Router and Parser Prompts
-- Update `intent_prompts.py` with DOC_QUERY examples
-- Add document context to UnifiedContext when relevant
-- Train intent parser on document-related queries
+### Sprint 4.0.7: Local Persistence
+- SQLite for local state and queue
+- Survive reboots and network outages
+- Sync pending commands when reconnected
+- Configuration persistence
 
-### Sprint 4.0.8: E2E Test Fixtures (WOW Demo)
-- Create realistic test data for demos
-- Test: "What's in my 3pm meeting doc?" → Summary with action items
-- Complete integration testing across all new components
+### Sprint 4.0.8: End-to-End Testing
+- Test with real Raspberry Pi 4 hardware
+- Test all command types through full stack
+- Latency and reliability measurements
+- Demo scenario: voice command → TV control
 
 ---
 
