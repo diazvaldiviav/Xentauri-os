@@ -41,6 +41,7 @@ class IntentType(str, Enum):
     CALENDAR_CREATE = "calendar_create"  # Sprint 3.8: Event creation
     CALENDAR_EDIT = "calendar_edit"      # Sprint 3.9: Edit/delete events
     DOC_QUERY = "doc_query"              # Sprint 3.9: Document intelligence
+    DISPLAY_CONTENT = "display_content"  # Sprint 4.0: Scene-based content display
     CONVERSATION = "conversation"
     UNKNOWN = "unknown"
 
@@ -110,6 +111,35 @@ class ActionType(str, Enum):
     OPEN_DOC = "open_doc"                   # Open a document (e.g., on screen)
     SUMMARIZE_MEETING_DOC = "summarize_meeting_doc"  # Summarize doc linked to a meeting
     CREATE_EVENT_FROM_DOC = "create_event_from_doc"  # Create calendar event from doc content
+    
+    # Display Content actions (Sprint 4.0 - Scene Graph)
+    DISPLAY_SCENE = "display_scene"          # Display a Scene Graph on device
+    REFRESH_DISPLAY = "refresh_display"      # Refresh current display
+
+
+# ---------------------------------------------------------------------------
+# SEQUENTIAL ACTIONS (Sprint 4.0.3 - Multi-Action Support)
+# ---------------------------------------------------------------------------
+
+class SequentialAction(BaseModel):
+    """
+    A single action to execute as part of a multi-action request.
+    
+    Sprint 4.0.3: When users make compound requests like 
+    "clear the screen AND show my calendar", the additional actions
+    are captured in a sequential_actions array.
+    
+    Example:
+        {
+            "action": "show_calendar",
+            "device_name": "Living Room",
+            "parameters": {"view": "fullscreen"}
+        }
+    """
+    action: str = Field(description="The action to execute (e.g., show_calendar, power_on)")
+    device_name: Optional[str] = Field(default=None, description="Target device name if applicable")
+    parameters: Optional[Dict[str, Any]] = Field(default=None, description="Action parameters")
+    content_type: Optional[str] = Field(default=None, description="Content type for display actions")
 
 
 class Intent(BaseModel):
@@ -132,6 +162,9 @@ class DeviceCommand(Intent):
     Examples:
     - "Turn on the TV" → action=power_on, device_name="TV"
     - "Switch to HDMI 2" → action=set_input, parameters={"input": "hdmi2"}
+    
+    Sprint 4.0.3: Supports multi-action requests via sequential_actions.
+    - "Clear screen AND show calendar" → action=clear_content, sequential_actions=[show_calendar]
     """
     intent_type: IntentType = IntentType.DEVICE_COMMAND
     device_name: str = Field(description="Device name as spoken by user")
@@ -141,6 +174,12 @@ class DeviceCommand(Intent):
     # Resolved fields (populated by DeviceMapper)
     device_id: Optional[UUID] = Field(default=None, description="Resolved device UUID")
     matched_device_name: Optional[str] = Field(default=None, description="Exact matched device name")
+    
+    # Multi-action support (Sprint 4.0.3)
+    sequential_actions: List[SequentialAction] = Field(
+        default_factory=list,
+        description="Additional actions to execute after the primary action"
+    )
 
 
 class DeviceQuery(Intent):
@@ -268,6 +307,7 @@ class DocQueryIntent(Intent):
     Intent for document-related queries (Sprint 3.9).
     
     Supports reading, summarizing, and linking Google Docs.
+    Now supports compound requests (Sprint 4.0.2): summarize AND display.
     
     Examples:
     - "What's in my meeting doc?" → action=summarize_meeting_doc
@@ -275,6 +315,10 @@ class DocQueryIntent(Intent):
     - "Link this doc to my standup" → action=link_doc
     - "Read https://docs.google.com/..." → action=read_doc
     - "Open the meeting document" → action=open_doc
+    
+    Compound examples (also_display=True):
+    - "Dame un resumen Y ábreme el documento en la pantalla" → summarize + display
+    - "Summarize this AND show it on the TV" → summarize + display
     """
     intent_type: IntentType = IntentType.DOC_QUERY
     action: ActionType = Field(description="Doc action: read_doc, link_doc, open_doc, summarize_meeting_doc")
@@ -292,6 +336,10 @@ class DocQueryIntent(Intent):
     
     # Display target (for open_doc)
     device_name: Optional[str] = Field(default=None, description="Device to display the doc on")
+    
+    # Compound intent support (Sprint 4.0.2)
+    also_display: bool = Field(default=False, description="True if user ALSO wants to display doc on a device")
+    display_device: Optional[str] = Field(default=None, description="Target device for display (if also_display=True)")
 
 
 class ConversationIntent(Intent):
@@ -306,6 +354,56 @@ class ConversationIntent(Intent):
     intent_type: IntentType = IntentType.CONVERSATION
     action: Optional[ActionType] = Field(default=None)
     response_hint: Optional[str] = Field(default=None, description="Suggested response type")
+
+
+class DisplayContentIntent(Intent):
+    """
+    Intent for scene-based content display on devices (Sprint 4.0).
+    
+    Used when users request custom visual layouts like:
+    - "Show my calendar on the left with a clock in the corner"
+    - "Display a dashboard with weather and events"
+    - "Fullscreen calendar on the living room TV"
+    
+    The layout_hints are raw strings extracted by Gemini, which the
+    SceneService normalizes into structured LayoutHint objects.
+    
+    Distinguishing from device_command:
+    - display_content: Has positioning/layout requirements ("on the left", "dashboard", "sidebar")
+    - device_command with show_calendar: Simple display without layout ("show my calendar")
+    
+    Examples:
+    - "calendar on the left with clock" → layout_hints=["calendar left", "clock corner"]
+    - "fullscreen agenda" → layout_hints=["fullscreen"], info_type="calendar"
+    - "dashboard with weather and calendar" → layout_hints=["dashboard", "weather", "calendar"]
+    """
+    intent_type: IntentType = IntentType.DISPLAY_CONTENT
+    
+    # Classification
+    info_type: str = Field(
+        default="calendar",
+        description="Primary content type: calendar, clock, weather, mixed"
+    )
+    output_type: str = Field(
+        default="display",
+        description="Output type: display (visual) vs query (text answer)"
+    )
+    layout_type: str = Field(
+        default="default",
+        description="Layout type: default (use preset) vs custom (Claude generates)"
+    )
+    
+    # Layout hints (raw strings from Gemini, normalized by service)
+    layout_hints: List[str] = Field(
+        default_factory=list,
+        description="Raw layout hints: 'calendar left', 'clock corner', 'dashboard'"
+    )
+    
+    # Target device (if specified by user)
+    device_name: Optional[str] = Field(
+        default=None,
+        description="Target device name if specified (e.g., 'living room TV')"
+    )
 
 
 class ParsedCommand(BaseModel):

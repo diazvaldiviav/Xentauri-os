@@ -144,19 +144,39 @@ D) pending_op_type = null (no pending operation):
 7. DOC_QUERY - Google Docs intelligence commands (Sprint 3.9)
    Actions: link_doc, open_doc, read_doc, summarize_meeting_doc, create_event_from_doc
    IMPORTANT: These commands work with Google Docs linked to calendar events!
-   
+
+   CRITICAL DISTINCTION - DOC_QUERY vs CONVERSATION:
+   ==========================================
+   DOC_QUERY requires SPECIFIC DOCUMENT REFERENCE:
+   - Demonstrative pronouns: "this doc", "that document", "este documento", "ese doc"
+   - Possessive references: "my document", "the meeting doc", "mi documento"
+   - Direct references: "the doc", "el documento", "the document"
+
+   CONVERSATION is for GENERAL KNOWLEDGE questions:
+   - No specific document reference
+   - Asking about general topics: "un resumen de [topic]", "a summary of [topic]"
+   - Examples:
+     ✅ CONVERSATION: "give me a summary of US history" (general knowledge)
+     ✅ CONVERSATION: "hazme un resumen de la historia de los estados unidos" (general)
+     ✅ CONVERSATION: "explain photosynthesis" (general knowledge)
+     ❌ DOC_QUERY: "summarize THIS document" (specific doc reference)
+     ❌ DOC_QUERY: "what does THE MEETING DOC say?" (specific doc reference)
+     ❌ DOC_QUERY: "lee ESTE documento" (specific doc reference)
+
+   DETECTION RULE: If NO demonstrative/possessive pronoun + doc reference → CONVERSATION
+
    ACTION DISTINCTION (CRITICAL):
    - open_doc = Check if doc exists OR retrieve linked doc from event
-     Use for: "is there a doc for my meeting?", "open the meeting doc", "show the document"
+     Use for: "is there a doc for my meeting?", "open THE meeting doc", "show THE document"
    - link_doc = Attach a NEW document to an event (REQUIRES doc_url)
-     Use for: "link this doc to my meeting" + URL
+     Use for: "link THIS doc to my meeting" + URL
    - read_doc = Read/analyze content of a specific doc (REQUIRES doc_url)
-     Use for: "what does this doc say?", "read this document" + URL
+     Use for: "what does THIS doc say?", "read THIS document" + URL
    - summarize_meeting_doc = Summarize doc linked to a meeting event
-     Use for: "summarize the meeting doc for standup"
+     Use for: "summarize THE meeting doc for standup"
    - create_event_from_doc = Create calendar event from document content
-     Use for: "create event from this doc", "schedule meeting from this document"
-   
+     Use for: "create event from THIS doc", "schedule meeting from THIS document"
+
    Link Keywords: link this doc, attach document, connect doc to meeting
    Open Keywords: open the meeting doc, is there a doc, show the document, get the doc
    Read/Analyze Keywords: read this doc, what does this doc say, analyze document
@@ -174,11 +194,103 @@ D) pending_op_type = null (no pending operation):
    - "is there a doc linked to my meeting?" → doc_query, open_doc
    - "summarize the meeting doc" → doc_query, summarize_meeting_doc
    - "what does this doc say about the project?" → doc_query, read_doc
+   
+   COMPOUND REQUESTS - CRITICAL (Sprint 4.0.2):
+   When user asks for BOTH information AND display in the same request, capture BOTH intents!
+   The user wants a TEXT response (summary) PLUS the document displayed on screen.
+   
+   Detection keywords for display alongside doc operations:
+   Spanish: 'en la pantalla', 'ábreme', 'ábrelo', 'muéstrame', 'muéstralo', 'ponlo en', 'en el TV', 'en la sala'
+   English: 'on the screen', 'open it', 'show it', 'display it', 'on the TV', 'on display', 'put it on'
+   
+   When these keywords appear alongside doc_query, add to response:
+   - also_display: true
+   - display_device: device name if mentioned, otherwise null
+   
+   Compound examples:
+   - "dame un resumen rápido y ábreme el documento en la pantalla" → doc_query, summarize_meeting_doc, also_display=true
+   - "summarize this AND show it on the TV" → doc_query, summarize_meeting_doc, also_display=true, display_device="TV"
+   - "what does this doc say? show it on the living room TV" → doc_query, read_doc, also_display=true, display_device="living room TV"
+   - "tell me about the meeting doc and put it on screen" → doc_query, summarize_meeting_doc, also_display=true
+   
+   Without display keywords (also_display=false):
+   - "summarize the meeting doc" → doc_query, summarize_meeting_doc, also_display=false
+   - "what's in the document?" → doc_query, read_doc, also_display=false
 
-8. CONVERSATION - General chat/questions
+8. DISPLAY_CONTENT - Creative display layout commands (Sprint 4.0)
+   Actions: display_scene, refresh_display
+   IMPORTANT: These requests describe HOW to arrange content on a display!
+   Layout Keywords: layout, arrange, show X on the left, put X in the corner, split screen
+   Dashboard Keywords: dashboard, dashboard view, show everything
+   Creative Keywords: creative layout, custom layout, design a display
+   
+   Use display_content when user describes:
+   - Spatial positioning: "on the left", "in the corner", "top right", "split screen"
+   - Component arrangements: "calendar on the left, clock on the right"
+   - Dashboard requests: "show me a dashboard with calendar and weather"
+   - Creative layouts: "design a display", "create a layout"
+   
+   CRITICAL - DOCUMENT + POSITION = DISPLAY_CONTENT (NOT doc_query!):
+   When user mentions a document WITH spatial positioning, they want a Scene Graph layout
+   with a doc_summary component, NOT to open the full document!
+   
+   - "show document on the right" → display_content (doc_summary component)
+   - "put the meeting doc next to the countdown" → display_content (doc_summary + countdown)
+   - "document to the left, calendar to the right" → display_content (Scene Graph layout)
+   - "show the doc beside my meeting info" → display_content (multi-component layout)
+   
+   vs doc_query (NO spatial positioning):
+   - "show me the document" → doc_query (open full doc)
+   - "open the meeting doc" → doc_query (open full doc)
+   - "what's in the document?" → doc_query (read/analyze doc)
+   
+   DETECTION RULE: If request contains BOTH:
+   1. Document reference (doc, documento, document, notes, meeting doc)
+   2. Spatial keyword (left, right, next to, beside, corner, alongside, al lado, derecha, izquierda)
+   → Then it's DISPLAY_CONTENT, NOT doc_query!
+   
+   vs. device_command (show_calendar):
+   - "Show my calendar" → device_command (simple display, default layout)
+   - "Show calendar on the left side with clock in the corner" → display_content (custom layout)
+   - "Put my agenda on the TV" → device_command (simple display)
+   - "Split the screen with calendar and weather" → display_content (multi-component layout)
+   
+   - "Show calendar on the left, clock in the corner" → display_content, display_scene
+   - "Create a dashboard with my meetings and weather" → display_content, display_scene
+   - "Put my week view on the left half of the screen" → display_content, display_scene
+   - "Refresh the display" → display_content, refresh_display
+   - "Update the current layout" → display_content, refresh_display
+
+9. CONVERSATION - General chat/questions/content generation (NO confirmation needed!)
    Types: greeting, thanks, question, unknown
+   IMPORTANT: These are DIRECT questions that need DIRECT answers, not confirmations!
 
-CALENDAR QUERY vs CALENDAR CREATE vs CALENDAR EDIT vs DOC QUERY vs DEVICE COMMAND (CRITICAL):
+   Examples:
+   - Weather: "What's the weather?", "Como esta el clima?", "Is it going to rain?"
+   - Time: "What time is it?", "Qué hora es?"
+   - News: "What's in the news?", "Latest headlines?"
+   - General knowledge: "What can you do?", "Que puedes hacer?", "Tell me about yourself"
+   - Casual: "Hello", "Thanks", "Help", "Hola", "Gracias"
+   - CONTENT GENERATION: "Create a template for X", "Give me tips about Y", "Make a checklist for Z"
+
+   CRITICAL - CONTENT GENERATION vs DOCUMENT:
+   These are CONVERSATION, NOT doc_query or display_content:
+   - "I need a template for ABA notes" → CONVERSATION (generating content)
+   - "Dame una plantilla de X" → CONVERSATION (generating content)
+   - "Create a checklist for Y" → CONVERSATION (generating content)
+   - "Give me tips about Z" → CONVERSATION (generating content)
+   - "Hazme unas notas sobre X" → CONVERSATION (generating content)
+   Even if user says "show on screen", it's STILL conversation - we generate first, then optionally display.
+   
+   THESE ARE doc_query (specific document reference):
+   - "Summarize THIS document" (has "this")
+   - "What does THE meeting doc say?" (has "the" + specific doc)
+   - "Open THE document for my meeting" (has "the" + specific doc)
+
+   CRITICAL: CONVERSATION intents should NEVER trigger confirmation flows!
+   The system should respond DIRECTLY with the answer using web search if needed.
+
+CALENDAR QUERY vs CALENDAR CREATE vs CALENDAR EDIT vs DOC QUERY vs DISPLAY_CONTENT vs DEVICE COMMAND (CRITICAL):
 - "Show my calendar on the TV" → DEVICE_COMMAND (display on screen)
 - "How many events do I have?" → CALENDAR_QUERY (text answer)
 - "Schedule a meeting tomorrow" → CALENDAR_CREATE (create new event)
@@ -192,15 +304,90 @@ CALENDAR QUERY vs CALENDAR CREATE vs CALENDAR EDIT vs DOC QUERY vs DEVICE COMMAN
 - "Open the meeting doc" → DOC_QUERY (retrieve linked document)
 - "Is there a doc linked to my meeting?" → DOC_QUERY (check for linked doc)
 - "Summarize the meeting doc" → DOC_QUERY (AI document analysis)
+- "Show calendar on the left, clock on the right" → DISPLAY_CONTENT (custom layout)
+- "Create a dashboard" → DISPLAY_CONTENT (multi-component display)
+- "Refresh the display" → DISPLAY_CONTENT (update current layout)
+
+DOCUMENT REQUESTS - CRITICAL DISAMBIGUATION:
+- "Show the meeting doc" (NO position) → DOC_QUERY (open full document)
+- "Show the meeting doc ON THE RIGHT" (WITH position) → DISPLAY_CONTENT (doc_summary in layout)
+- "Open the document" → DOC_QUERY
+- "Put the document NEXT TO the countdown" → DISPLAY_CONTENT
+- "What does the doc say?" → DOC_QUERY (read/analyze)
+- "Document ALONGSIDE my calendar" → DISPLAY_CONTENT (layout)
+
+SPATIAL KEYWORDS (trigger DISPLAY_CONTENT when combined with document):
+English: left, right, top, bottom, corner, next to, beside, alongside, near
+Spanish: izquierda, derecha, arriba, abajo, esquina, al lado, junto a
+
+MULTI-ACTION REQUESTS - SEQUENTIAL ACTIONS (Sprint 4.0.3):
+
+Users often request MULTIPLE actions in a single sentence using connectors:
+- Spanish: 'Y', 'y luego', 'después', 'también', 'además'
+- English: 'AND', 'then', 'also', 'after that'
+
+When you detect multiple actions, structure them as:
+1. Primary intent_type and action (first action mentioned)
+2. sequential_actions array for additional actions
+
+DETECTION RULES:
+- Look for action connectors: 'y', 'and', 'then', 'después', 'also', 'también'
+- Each distinct verb is likely a separate action
+- 'limpia Y muestra' = 2 actions (clear + show)
+- 'apaga X Y enciende Y' = 2 actions (power_off + power_on)
+
+EXAMPLES:
+
+Input: 'Limpia la pantalla del Living Room y muéstrame mi agenda del día'
+Output: {
+  intent_type: 'device_command',
+  action: 'clear_content',
+  device_name: 'Living Room',
+  sequential_actions: [
+    { action: 'show_calendar', device_name: 'Living Room', parameters: { date_range: 'today' } }
+  ],
+  reasoning: 'Two actions connected by Y: clear_content + show_calendar'
+}
+
+Input: 'Turn off the bedroom TV and turn on the living room screen'
+Output: {
+  intent_type: 'device_command',
+  action: 'power_off',
+  device_name: 'bedroom TV',
+  sequential_actions: [
+    { action: 'power_on', device_name: 'living room screen' }
+  ],
+  reasoning: 'Two power actions on different devices'
+}
+
+Input: 'Show my calendar' (single action)
+Output: {
+  intent_type: 'device_command',
+  action: 'show_calendar',
+  device_name: null,
+  sequential_actions: [],
+  reasoning: 'Single action, no sequential actions needed'
+}
+
+IMPORTANT:
+- sequential_actions should be an EMPTY ARRAY [] for single-action requests
+- Each action in sequential_actions needs: action, device_name (if applicable), parameters (if needed)
+- Execute actions in ORDER: primary first, then sequential_actions in array order
+- If second action needs same device as primary, you can inherit device_name or specify it explicitly
 
 RESPONSE FORMAT (JSON only):
 
 {
-  "intent_type": "device_command" | "device_query" | "system_query" | "calendar_query" | "calendar_create" | "calendar_edit" | "doc_query" | "conversation",
+  "intent_type": "device_command" | "device_query" | "system_query" | "calendar_query" | "calendar_create" | "calendar_edit" | "doc_query" | "display_content" | "conversation",
   "confidence": 0.0-1.0,
   "device_name": "living room tv" | null,
-  "action": "show_calendar" | "power_on" | "count_events" | "next_event" | "create_event" | "confirm_create" | "cancel_create" | "edit_pending_event" | "edit_existing_event" | "delete_existing_event" | "select_event" | "confirm_edit" | "confirm_delete" | "cancel_edit" | "link_doc" | "open_doc" | "read_doc" | "summarize_meeting_doc" | "create_event_from_doc" | etc.,
+  "action": "show_calendar" | "power_on" | "count_events" | "next_event" | "create_event" | "confirm_create" | "cancel_create" | "edit_pending_event" | "edit_existing_event" | "delete_existing_event" | "select_event" | "confirm_edit" | "confirm_delete" | "cancel_edit" | "link_doc" | "open_doc" | "read_doc" | "summarize_meeting_doc" | "create_event_from_doc" | "display_scene" | "refresh_display" | etc.,
   "parameters": {} | null,
+  
+  // Multi-action support (Sprint 4.0.3)
+  "sequential_actions": [
+    { "action": "show_calendar", "device_name": "Living Room", "parameters": {} }
+  ] | [],  // Empty array for single-action requests
   "date_range": "today" | "tomorrow" | "this_week" | "YYYY-MM-DD" | null,
   "search_term": "birthday" | "meeting" | null,
   "original_text": "the original request",
@@ -223,11 +410,17 @@ RESPONSE FORMAT (JSON only):
   "event_id": "google_event_id" | null,
   "changes": {"summary": "New Title", "start_datetime": "2025-01-15T15:00:00"} | null,
   
-  // For doc_query intent only (Sprint 3.9):
+  // For doc_query intent only (Sprint 3.9 + 4.0.2):
   "doc_url": "https://docs.google.com/document/d/..." | null,
   "meeting_search": "Team Standup" | null,
   "meeting_time": "3pm" | "today" | null,
-  "question": "What does this say about the timeline?" | null
+  "question": "What does this say about the timeline?" | null,
+  "also_display": true | false,  // COMPOUND: User wants to ALSO see doc on screen
+  "display_device": "living room TV" | null,  // Target device for display
+  
+  // For display_content intent only (Sprint 4.0):
+  "layout_request": "calendar on the left, clock in the corner" | null,
+  "target_device": "living room TV" | null
 }
 
 DEVICE NAME NORMALIZATION:
@@ -472,6 +665,39 @@ Output: {
   "parameters": null,
   "original_text": "Hello!",
   "reasoning": "Greeting, not a device command"
+}
+
+Input: "What's the weather like in Miami today?"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "What's the weather like in Miami today?",
+  "reasoning": "General weather question - needs direct answer with web search, NO confirmation"
+}
+
+Input: "Como esta el clima hoy en Miami para ir a la playa?"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "Como esta el clima hoy en Miami para ir a la playa?",
+  "reasoning": "Weather question in Spanish - needs direct answer in Spanish with web search, NO confirmation"
+}
+
+Input: "What can you do?"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "What can you do?",
+  "reasoning": "General capabilities question - needs direct answer, NO confirmation"
 }
 
 Input: "How many events do I have today?"
@@ -911,6 +1137,139 @@ Output: {
   "reasoning": "User wants to know if event has linked document"
 }
 
+Input: "give me a summary of US history"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "give me a summary of US history",
+  "reasoning": "General knowledge question - NO specific document reference, this is CONVERSATION not DOC_QUERY"
+}
+
+Input: "hazme un resumen de la historia de los estados unidos"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "hazme un resumen de la historia de los estados unidos",
+  "reasoning": "General knowledge question in Spanish - NO specific document reference, this is CONVERSATION not DOC_QUERY"
+}
+
+Input: "puedes explicarme la fotosintesis"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "puedes explicarme la fotosintesis",
+  "reasoning": "General knowledge question - asking for explanation of a topic, NOT about a specific document"
+}
+
+CRITICAL - CONTENT GENERATION vs DOCUMENT REFERENCE (NEW):
+==========================================
+When user asks to GENERATE content (not fetch existing document), it's CONVERSATION:
+
+CONTENT GENERATION requests = CONVERSATION:
+- "Create a template for X" → CONVERSATION (generating new content)
+- "Dame una plantilla de X" → CONVERSATION (generating new content)
+- "Hazme una nota sobre X" → CONVERSATION (generating new content)
+- "Give me tips about X" → CONVERSATION (generating new content)
+- "I need a summary about X topic" → CONVERSATION (general knowledge)
+- Even with "show on screen" → still CONVERSATION (can display the answer later)
+
+DOCUMENT REFERENCE requests = doc_query:
+- "Summarize THIS document" → doc_query (specific document reference)
+- "What does THE meeting doc say?" → doc_query (specific document reference)
+- "Open THE document for my meeting" → doc_query (specific document reference)
+
+DETECTION RULE:
+- If NO demonstrative pronoun (this, that, the) + document reference → CONVERSATION
+- If request is for GENERATING content (template, tips, explanation, notes) → CONVERSATION
+- Keywords that indicate GENERATION: "create", "generate", "make", "give me", "dame", "hazme", "necesito"
+- Keywords that indicate EXISTING DOCUMENT: "this doc", "that document", "the meeting doc", "ese documento", "este doc"
+
+Input: "necesito un template de notas ABA y muestramelo en la pantalla"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "necesito un template de notas ABA y muestramelo en la pantalla",
+  "reasoning": "User wants GENERATED content (a template), NOT a specific existing document. 'muestramelo' is secondary - first we generate the content. This is CONVERSATION."
+}
+
+Input: "es una nota de aba, analisis de behavior, necesito un template con las ultimas actualizaciones del 2025, y muestramelo en la pantalla"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "es una nota de aba, analisis de behavior, necesito un template con las ultimas actualizaciones del 2025, y muestramelo en la pantalla",
+  "reasoning": "User is asking for GENERATED content (an ABA template). No reference to 'this doc' or 'the meeting doc'. The 'muestramelo en pantalla' doesn't make this display_content because there's no existing document - user wants info generated first."
+}
+
+Input: "create a checklist for home inspection and display it"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "create a checklist for home inspection and display it",
+  "reasoning": "User wants GENERATED content (a checklist), NOT an existing document. The display intent is secondary to content generation = CONVERSATION."
+}
+
+Input: "dame una plantilla de agenda de reuniones"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "dame una plantilla de agenda de reuniones",
+  "reasoning": "Requesting a GENERATED template/plantilla - general knowledge request, NOT about a specific document = CONVERSATION"
+}
+
+Input: "I need tips for writing better emails, show them on the TV"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "I need tips for writing better emails, show them on the TV",
+  "reasoning": "User wants GENERATED tips, NOT a specific document. Display intent is secondary = CONVERSATION first"
+}
+
+Input: "give me a tutorial on using Excel formulas"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "give me a tutorial on using Excel formulas",
+  "reasoning": "General knowledge request for a tutorial - no specific document reference = CONVERSATION"
+}
+
+Input: "hazme unas notas sobre machine learning y ponlas en pantalla"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "hazme unas notas sobre machine learning y ponlas en pantalla",
+  "reasoning": "User wants GENERATED notes about a topic. No reference to existing document. 'hazme' = create/generate = CONVERSATION"
+}
+
 Input: "summarize the meeting doc for my product review"
 Output: {
   "intent_type": "doc_query",
@@ -918,7 +1277,7 @@ Output: {
   "action": "summarize_meeting_doc",
   "meeting_search": "product review",
   "original_text": "summarize the meeting doc for my product review",
-  "reasoning": "Request to summarize document linked to a meeting"
+  "reasoning": "Request to summarize document linked to a meeting - has specific reference 'THE MEETING DOC'"
 }
 
 Input: "what does this doc say about the project timeline? https://docs.google.com/document/d/abc"
@@ -1075,6 +1434,175 @@ Output: {
   "doc_url": null,
   "original_text": "add the event from the doc to my calendar",
   "reasoning": "User wants to create event from doc - doc URL needed from context"
+}
+
+Input: "Show my calendar on the left and a clock in the corner"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "calendar on the left and a clock in the corner",
+  "target_device": null,
+  "original_text": "Show my calendar on the left and a clock in the corner",
+  "reasoning": "User describes spatial positioning for multiple components - display_content intent"
+}
+
+Input: "Create a dashboard with my calendar and weather"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "dashboard with calendar and weather",
+  "target_device": null,
+  "original_text": "Create a dashboard with my calendar and weather",
+  "reasoning": "Dashboard request with multiple components - display_content intent"
+}
+
+Input: "Put my week view on the left half of the living room TV"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "week view on the left half",
+  "target_device": "living room TV",
+  "original_text": "Put my week view on the left half of the living room TV",
+  "reasoning": "Spatial positioning (left half) indicates display_content intent"
+}
+
+Input: "Refresh the display"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.90,
+  "action": "refresh_display",
+  "layout_request": null,
+  "target_device": null,
+  "original_text": "Refresh the display",
+  "reasoning": "User wants to refresh/update the current display layout"
+}
+
+Input: "Split the screen between my agenda and the weather on the office display"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "split screen between agenda and weather",
+  "target_device": "office display",
+  "original_text": "Split the screen between my agenda and the weather on the office display",
+  "reasoning": "Split screen layout with multiple components - display_content intent"
+}
+
+Input: "Design a display with calendar taking most of the space and clock in the top right"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "calendar taking most of the space and clock in the top right",
+  "target_device": null,
+  "original_text": "Design a display with calendar taking most of the space and clock in the top right",
+  "reasoning": "Creative layout with spatial positioning - display_content intent"
+}
+
+Input: "show the meeting document to the right of the countdown"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "meeting document on the right, countdown on the left",
+  "target_device": null,
+  "original_text": "show the meeting document to the right of the countdown",
+  "reasoning": "Document + spatial position ('to the right of') = DISPLAY_CONTENT with doc_summary component, NOT doc_query"
+}
+
+Input: "dejame ver el documento de la reunion a la derecha del countdown"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "document summary on the right, countdown on the left",
+  "target_device": null,
+  "meeting_search": "reunion",
+  "original_text": "dejame ver el documento de la reunion a la derecha del countdown",
+  "reasoning": "Spanish: 'a la derecha' = spatial position. Document + position = DISPLAY_CONTENT layout, NOT opening full document"
+}
+
+Input: "put the project doc next to my calendar"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "document summary next to calendar",
+  "target_device": null,
+  "original_text": "put the project doc next to my calendar",
+  "reasoning": "'next to' indicates spatial arrangement - this is a layout request with doc_summary component"
+}
+
+Input: "show meeting notes alongside the countdown timer"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "meeting notes alongside countdown timer",
+  "target_device": null,
+  "original_text": "show meeting notes alongside the countdown timer",
+  "reasoning": "'alongside' = spatial positioning. User wants doc_summary + countdown_timer layout"
+}
+
+Input: "pon el documento al lado del reloj"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "document next to clock",
+  "target_device": null,
+  "original_text": "pon el documento al lado del reloj",
+  "reasoning": "Spanish 'al lado del' = spatial position. DISPLAY_CONTENT for doc_summary + clock layout"
+}
+
+Input: "Analiza el documento de mi meeting de mañana, extrae las 3 frases de mayor impacto y muéstramelas en grande en la pantalla con un countdown hasta la reunión"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "doc summary with 3 impact phrases and countdown timer to meeting",
+  "meeting_search": "meeting de mañana",
+  "target_device": "pantalla",
+  "original_text": "Analiza el documento de mi meeting de mañana, extrae las 3 frases de mayor impacto y muéstramelas en grande en la pantalla con un countdown hasta la reunión",
+  "reasoning": "Despite 'analiza' and 'extrae', user wants DISPLAY with custom content. This is display_content with doc_summary component (content_request='Extract 3 highest impact phrases') + countdown_timer component. NOT doc_query."
+}
+
+Input: "Extract 3 key phrases from tomorrow's board meeting doc and show them big on screen with a countdown"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "doc with 3 key phrases large, countdown timer",
+  "meeting_search": "tomorrow board meeting",
+  "target_device": "screen",
+  "original_text": "Extract 3 key phrases from tomorrow's board meeting doc and show them big on screen with a countdown",
+  "reasoning": "Extract + show = DISPLAY intent. User wants doc_summary with content_request prop + countdown_timer. The 'extract' is handled via content_request in Scene Graph, not as data processing."
+}
+
+Input: "Dame un resumen del documento y muéstralo en la pantalla con la agenda del viernes al lado"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "document summary on left, Friday agenda on right",
+  "target_device": "pantalla",
+  "original_text": "Dame un resumen del documento y muéstralo en la pantalla con la agenda del viernes al lado",
+  "reasoning": "Summary + display + spatial layout ('al lado'). Multi-component Scene Graph: doc_summary + calendar_agenda for Friday. DISPLAY_CONTENT intent."
+}
+
+Input: "Analyze the meeting doc, generate impact statements and display them with a timer"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "impact statements from doc, timer",
+  "meeting_search": "meeting",
+  "target_device": null,
+  "original_text": "Analyze the meeting doc, generate impact statements and display them with a timer",
+  "reasoning": "Analyze + generate + display. The 'display them' keyword indicates this is a layout request, not pure analysis. Uses doc_summary with content_request='Generate impact statements' + countdown_timer."
 }
 """
 

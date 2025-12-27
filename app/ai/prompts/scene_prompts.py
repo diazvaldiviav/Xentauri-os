@@ -1,0 +1,552 @@
+"""
+Scene Generation Prompts - Templates for Claude scene generation.
+
+Sprint 4.0: These prompts are used when users request custom layouts
+that don't match any default scene template.
+
+Claude receives:
+1. System prompt with available components and schema
+2. Generation prompt with user request and hints
+3. Returns valid Scene Graph JSON
+
+Usage:
+======
+    from app.ai.prompts.scene_prompts import (
+        SCENE_SYSTEM_PROMPT,
+        build_scene_generation_prompt,
+    )
+    
+    response = await anthropic_provider.generate_json(
+        prompt=build_scene_generation_prompt(user_request, hints, info_type),
+        system_prompt=SCENE_SYSTEM_PROMPT.format(
+            components=component_registry.to_prompt_context(),
+            schema=SCENE_GRAPH_SCHEMA,
+        ),
+    )
+"""
+
+# ---------------------------------------------------------------------------
+# SCENE GRAPH SCHEMA (for Claude reference)
+# ---------------------------------------------------------------------------
+
+SCENE_GRAPH_SCHEMA = """
+{
+    "scene_id": "descriptive-id-001",
+    "version": "1.1",
+    "target_devices": ["device-uuid-1"],
+    "layout": {
+        "intent": "fullscreen | two_column | three_column | sidebar | dashboard | overlay | stack",
+        "engine": "grid | flex | absolute",
+        "columns": 1-12 (for grid),
+        "rows": 1-12 (for grid),
+        "gap": "16px | 24px"
+    },
+    "components": [
+        {
+            "id": "unique_component_id",
+            "type": "component_type_from_registry",
+            "priority": "primary | secondary | tertiary",
+            "position": {
+                "grid_column": "1" or "1 / 3" (for grid),
+                "grid_row": "1" (for grid)
+            },
+            "style": {
+                "background": "#1a1a2e (REQUIRED - never null)",
+                "text_color": "#ffffff (REQUIRED)",
+                "border_radius": "12px | 16px (REQUIRED)",
+                "padding": "20px | 24px (REQUIRED)"
+            },
+            "props": {},
+            "data": {}
+        }
+    ],
+    "global_style": {
+        "background": "#0f0f23 (REQUIRED)",
+        "font_family": "Inter (REQUIRED)",
+        "text_color": "#ffffff (REQUIRED)",
+        "accent_color": "#7b2cbf (REQUIRED)"
+    },
+    "metadata": {
+        "created_at": "ISO datetime",
+        "refresh_seconds": 60 | 300,
+        "user_request": "original request",
+        "generated_by": "claude_sonnet"
+    }
+}
+"""
+
+
+# ---------------------------------------------------------------------------
+# SYSTEM PROMPT
+# ---------------------------------------------------------------------------
+
+SCENE_SYSTEM_PROMPT = """You are a layout designer for smart TV displays.
+Generate Scene Graph JSON that describes visual layouts for Raspberry Pi screens.
+
+CRITICAL RULES:
+1. Output ONLY valid JSON - no explanations, no markdown, no code blocks
+2. Use only components from the available list below
+3. The "primary" component should be the main user focus
+4. NEVER return null for style fields - ALWAYS apply styling to every component
+5. Leave the "data" field empty for all components - the service will populate it
+
+LAYOUT INTENT SELECTION:
+- "fullscreen" → single component, full screen
+- "two_column" → equal 50/50 split (2-column grid)
+- "three_column" → equal 33/33/33 split (3-column grid)
+- "sidebar" → main content 75% + sidebar 25% (4-column grid: 3+1)
+- "dashboard" → multi-widget grid (2x2, 3x2, etc.)
+- "overlay" → layered components with absolute positioning
+- "stack" → vertical stack using flex column
+
+DESIGN SYSTEM - ALWAYS APPLY THESE DEFAULTS:
+When user doesn't specify styling, use these values:
+
+Colors (Dark Theme):
+- Scene background: "#0f0f23" (darkest)
+- Primary component background: "#1a1a2e"
+- Secondary component background: "#16213e"
+- Tertiary/accent background: "#0f3460"
+- Text color: "#ffffff"
+- Accent color: "#7b2cbf" (purple) or "#4361ee" (blue)
+
+Spacing & Sizing:
+- Layout gap: "16px" (compact) or "24px" (spacious)
+- Component padding: "20px" or "24px"
+- Border radius: "12px" (cards) or "16px" (large panels)
+- Font family: "Inter" (clean, readable from distance)
+
+Component Styling Rules:
+- Primary components: larger padding (24px), prominent background (#1a1a2e)
+- Secondary components: standard padding (20px), subtle background (#16213e)
+- Timers/Countdowns: use accent color for emphasis
+- Meeting details: include subtle border or shadow for separation
+
+POSITIONING GUIDELINES:
+- Two-column: grid with columns=2, rows=1, each component in grid_column="1" or "2"
+- Sidebar: grid with columns=4, main spans "1 / 4", sidebar is "4"
+- Dashboard: grid with columns=2, rows=2, gap="16px"
+- Fullscreen: flex engine with flex=1
+- Corner overlays: absolute positioning with top/right/bottom/left
+
+DOCUMENT COMPONENT GUIDANCE:
+When user asks for a document related to a meeting/event, use these props:
+- "meeting_search": Use when document is linked to a calendar event (e.g., "project kickoff meeting")
+- "event_id": Use if you know the specific event ID
+- "doc_id": Use only if you have the exact Google Doc ID
+- "doc_url": Use only if you have the full document URL
+
+The service will search the meeting, find the linked document in the event description, and fetch it.
+
+AI DOCUMENT INTELLIGENCE (CRITICAL):
+When user requests SPECIFIC types of content from a document, use content_request prop to specify what AI should generate.
+
+- "content_request": Natural language description of what to generate from the document
+  Examples:
+  - "Generate 3 powerful opening phrases for this meeting"
+  - "Create a time-boxed agenda script with speaker notes"
+  - "Extract the 5 key decisions from this document"
+  - "List all action items with owners"
+  - "Summarize the main objectives in 3 bullet points"
+
+- "content_type": Category hint for the renderer
+  Values: "impact_phrases", "script", "key_points", "action_items", "summary", "agenda", "custom"
+
+IMPORTANT - DIFFERENT CONTENT FOR DIFFERENT COMPONENTS:
+When user asks for MULTIPLE DIFFERENT outputs from the same document, you MUST use DIFFERENT content_request for each component.
+
+Examples:
+- "frases de impacto a la izquierda y guion a la derecha"
+  → Component 1: content_request="Generate 3 powerful impact phrases", content_type="impact_phrases"
+  → Component 2: content_request="Create a structured meeting script", content_type="script"
+
+- "key points on top, action items on bottom"
+  → Component 1: content_request="Extract the main key points", content_type="key_points"
+  → Component 2: content_request="List all action items", content_type="action_items"
+
+- "resumen a la izquierda, agenda completa a la derecha"
+  → Component 1: content_request="Summarize the document in 3-4 sentences", content_type="summary"
+  → Component 2: content_request="Show the complete agenda with times", content_type="agenda"
+
+NEVER use the same content_request for multiple components when user clearly asks for different things!
+
+MEETING + DOCUMENT COMBINATIONS:
+When user asks for meeting info AND something from the agenda/document, use TWO components:
+
+- "próxima reunión con hora + primer punto de la agenda"
+  → Component 1: meeting_detail (shows meeting time, location, attendees)
+  → Component 2: doc_summary with content_request="Extract only the first agenda item in one line"
+
+- "countdown to meeting + key topics"
+  → Component 1: countdown_timer or event_countdown
+  → Component 2: doc_summary with content_request="List the 3 main topics to discuss"
+
+COMPONENT SELECTION GUIDE:
+- "próxima reunión" / "next meeting" → meeting_detail (NOT calendar_week)
+- "countdown" / "cuanto falta" → countdown_timer or event_countdown
+- "calendario de la semana" / "week calendar" → calendar_week
+- "agenda del día" / "today's events" → calendar_agenda
+- "primer punto" / "first item" / "puntos de la agenda" → doc_summary with content_request
+
+Example for AI-generated content:
+{{
+    "type": "doc_summary",
+    "props": {{
+        "meeting_search": "project kickoff meeting",
+        "content_request": "Generate 3 powerful opening phrases that capture the meeting's main goals",
+        "content_type": "impact_phrases"
+    }}
+}}
+
+Example for meeting-related document (simple preview):
+{{
+    "type": "doc_preview",
+    "props": {{
+        "meeting_search": "project kickoff meeting",
+        "show_title": true,
+        "max_chars": 800
+    }}
+}}
+
+COMPLETE EXAMPLE: Meeting + First Agenda Item (TWO COMPONENTS):
+User request: "próxima reunión con hora y abajo el primer punto de la agenda"
+→ This is a MULTI-PART request requiring 2 components in a "stack" layout:
+
+{{
+    "layout": {{ "intent": "stack", "engine": "flex", "gap": "16px" }},
+    "components": [
+        {{
+            "id": "meeting_info",
+            "type": "meeting_detail",
+            "priority": "primary",
+            "position": {{ "flex": 2 }},
+            "style": {{ "background": "#1a1a2e", "text_color": "#ffffff", "border_radius": "16px", "padding": "24px" }},
+            "props": {{ "show_location": true, "show_attendees": false }},
+            "data": {{}}
+        }},
+        {{
+            "id": "agenda_first_item",
+            "type": "doc_summary",
+            "priority": "secondary",
+            "position": {{ "flex": 1 }},
+            "style": {{ "background": "#16213e", "text_color": "#ffffff", "border_radius": "12px", "padding": "20px" }},
+            "props": {{
+                "meeting_search": "next meeting",
+                "content_request": "Extract ONLY the first agenda item in a single line. Just the first point, nothing more.",
+                "content_type": "agenda"
+            }},
+            "data": {{}}
+        }}
+    ]
+}}
+
+EXAMPLE COMPLETE COMPONENT (NEVER return less than this):
+{{
+    "id": "countdown_main",
+    "type": "countdown_timer",
+    "priority": "primary",
+    "position": {{
+        "grid_column": "1",
+        "grid_row": "1"
+    }},
+    "style": {{
+        "background": "#1a1a2e",
+        "text_color": "#ffffff",
+        "border_radius": "16px",
+        "padding": "24px"
+    }},
+    "props": {{
+        "show_label": true
+    }},
+    "data": {{}}
+}}
+
+{components}
+
+SCHEMA:
+{schema}
+"""
+
+
+# ---------------------------------------------------------------------------
+# GENERATION PROMPT
+# ---------------------------------------------------------------------------
+
+SCENE_GENERATION_TEMPLATE = """Generate a Scene Graph for this display request.
+
+User Request: {user_request}
+Content Type: {info_type}
+Layout Hints: {layout_hints}
+Target Devices: {device_count} device(s)
+{realtime_data}
+Requirements:
+1. Follow the user's layout instructions exactly
+2. Choose appropriate layout intent based on component count and user description
+3. ALWAYS include complete "style" object for EVERY component - NEVER null
+4. Apply the design system defaults for any styling not specified by user
+5. Use the correct component types from the registry
+6. Assign priorities: main focus = primary, supporting = secondary
+7. Include proper position for each component based on layout engine
+8. If REAL-TIME DATA is provided above, include it in the component's "data" field with "is_placeholder": false
+9. For components WITHOUT real-time data, leave "data" empty (will be populated by service)
+10. Set appropriate refresh_seconds in metadata (60 for countdowns, 300 for static)
+11. DETECT MULTI-PART REQUESTS: If user asks for X AND Y, create separate components for each part
+    - "reunión + agenda" = meeting_detail + doc_summary with content_request
+    - "countdown + summary" = countdown_timer + doc_summary
+
+STYLE CHECKLIST (verify before responding):
+□ Every component has "style" object (not null)
+□ Every style has: background, text_color, border_radius, padding
+□ global_style has: background, font_family, text_color, accent_color
+□ Primary components use #1a1a2e background
+□ Secondary components use #16213e background
+
+Respond with ONLY the JSON Scene Graph. No explanation, no markdown."""
+
+
+# ---------------------------------------------------------------------------
+# BUILDER FUNCTIONS
+# ---------------------------------------------------------------------------
+
+def build_scene_system_prompt(components_context: str) -> str:
+    """
+    Build the complete system prompt for scene generation.
+    
+    Args:
+        components_context: Output from component_registry.to_prompt_context()
+        
+    Returns:
+        Formatted system prompt
+    """
+    return SCENE_SYSTEM_PROMPT.format(
+        components=components_context,
+        schema=SCENE_GRAPH_SCHEMA,
+    )
+
+
+def build_scene_generation_prompt(
+    user_request: str,
+    layout_hints: list,
+    info_type: str,
+    device_count: int = 1,
+    realtime_data: dict = None,
+) -> str:
+    """
+    Build the generation prompt for a scene request.
+    
+    Sprint 4.1: Now accepts realtime_data for dynamic scene content.
+    
+    Args:
+        user_request: Original user request
+        layout_hints: List of LayoutHint objects or strings
+        info_type: Content type (calendar, weather, mixed)
+        device_count: Number of target devices
+        realtime_data: Pre-fetched real-time data from Gemini
+        
+    Returns:
+        Formatted generation prompt
+    """
+    import json
+    
+    # Format hints for prompt
+    if layout_hints:
+        hints_str = ", ".join([
+            h.raw_hint if hasattr(h, 'raw_hint') and h.raw_hint else str(h)
+            for h in layout_hints
+        ])
+    else:
+        hints_str = "None specified"
+    
+    # Build realtime data section for prompt
+    realtime_section = ""
+    if realtime_data:
+        realtime_section = "\n\nREAL-TIME DATA AVAILABLE (include in component data fields):\n"
+        for component_type, data in realtime_data.items():
+            realtime_section += f"\n{component_type}:\n{json.dumps(data, indent=2)}\n"
+        realtime_section += "\nIMPORTANT: Include this real data in the 'data' field of matching components with 'is_placeholder': false!\n"
+    
+    return SCENE_GENERATION_TEMPLATE.format(
+        user_request=user_request,
+        info_type=info_type,
+        layout_hints=hints_str,
+        device_count=device_count,
+        realtime_data=realtime_section,
+    )
+
+
+# ---------------------------------------------------------------------------
+# EXAMPLE SCENES (for few-shot learning if needed)
+# ---------------------------------------------------------------------------
+
+EXAMPLE_SIDEBAR_SCENE = """{
+    "scene_id": "example-sidebar-001",
+    "version": "1.1",
+    "target_devices": ["device-1"],
+    "layout": {
+        "intent": "sidebar",
+        "engine": "grid",
+        "columns": 4,
+        "rows": 1,
+        "gap": "16px"
+    },
+    "components": [
+        {
+            "id": "calendar_main",
+            "type": "calendar_week",
+            "priority": "primary",
+            "position": {
+                "grid_column": "1 / 4",
+                "grid_row": "1"
+            },
+            "props": {
+                "show_times": true,
+                "start_hour": 8,
+                "end_hour": 20
+            },
+            "style": {
+                "background": "#1a1a2e",
+                "text_color": "#ffffff",
+                "border_radius": "16px",
+                "padding": "24px"
+            },
+            "data": {}
+        },
+        {
+            "id": "clock_sidebar",
+            "type": "clock_digital",
+            "priority": "secondary",
+            "position": {
+                "grid_column": "4",
+                "grid_row": "1"
+            },
+            "props": {
+                "format": "12h",
+                "show_seconds": false
+            },
+            "style": {
+                "background": "#16213e",
+                "text_color": "#ffffff",
+                "border_radius": "12px",
+                "padding": "20px"
+            },
+            "data": {}
+        }
+    ],
+    "global_style": {
+        "background": "#0f0f23",
+        "font_family": "Inter",
+        "text_color": "#ffffff",
+        "accent_color": "#7b2cbf"
+    },
+    "metadata": {
+        "created_at": "2025-12-22T10:00:00Z",
+        "refresh_seconds": 300,
+        "user_request": "calendar on the left with clock in the corner",
+        "generated_by": "claude_sonnet"
+    }
+}"""
+
+
+EXAMPLE_DASHBOARD_SCENE = """{
+    "scene_id": "example-dashboard-001",
+    "version": "1.1",
+    "target_devices": ["device-1"],
+    "layout": {
+        "intent": "dashboard",
+        "engine": "grid",
+        "columns": 2,
+        "rows": 2,
+        "gap": "16px"
+    },
+    "components": [
+        {
+            "id": "calendar_widget",
+            "type": "calendar_widget",
+            "priority": "primary",
+            "position": {
+                "grid_column": "1",
+                "grid_row": "1"
+            },
+            "props": {
+                "max_events": 5
+            },
+            "style": {
+                "background": "#1a1a2e",
+                "text_color": "#ffffff",
+                "border_radius": "12px",
+                "padding": "24px"
+            },
+            "data": {}
+        },
+        {
+            "id": "clock_widget",
+            "type": "clock_digital",
+            "priority": "secondary",
+            "position": {
+                "grid_column": "2",
+                "grid_row": "1"
+            },
+            "props": {
+                "format": "12h",
+                "show_date": true
+            },
+            "style": {
+                "background": "#16213e",
+                "text_color": "#ffffff",
+                "border_radius": "12px",
+                "padding": "20px"
+            },
+            "data": {}
+        },
+        {
+            "id": "weather_widget",
+            "type": "weather_current",
+            "priority": "secondary",
+            "position": {
+                "grid_column": "1",
+                "grid_row": "2"
+            },
+            "props": {
+                "units": "fahrenheit"
+            },
+            "style": {
+                "background": "#0f3460",
+                "text_color": "#ffffff",
+                "border_radius": "12px",
+                "padding": "20px"
+            },
+            "data": {}
+        },
+        {
+            "id": "agenda_widget",
+            "type": "calendar_agenda",
+            "priority": "secondary",
+            "position": {
+                "grid_column": "2",
+                "grid_row": "2"
+            },
+            "props": {
+                "max_events": 5
+            },
+            "style": {
+                "background": "#1a1a2e",
+                "text_color": "#ffffff",
+                "border_radius": "12px",
+                "padding": "20px"
+            },
+            "data": {}
+        }
+    ],
+    "global_style": {
+        "background": "#0f0f23",
+        "font_family": "Inter",
+        "text_color": "#ffffff",
+        "accent_color": "#7b2cbf"
+    },
+    "metadata": {
+        "created_at": "2025-12-22T10:00:00Z",
+        "refresh_seconds": 300,
+        "user_request": "dashboard with weather, clock, and calendar",
+        "generated_by": "claude_sonnet"
+    }
+}"""

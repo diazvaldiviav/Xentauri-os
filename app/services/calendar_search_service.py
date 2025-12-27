@@ -2,15 +2,17 @@
 Calendar Search Service - Smart semantic search for calendar events.
 
 Sprint 3.9: Smart Calendar Search with LLM Semantic Matching
+Sprint 4.1: Consolidated smart_search with date_range parameter (DRY fix)
 
 This service provides intelligent calendar event search that handles:
 - Typos: "birday" matches "birthday" or "Cumpleaños"
 - Translations: "anniversary" matches "aniversario"
 - Synonyms: "bday" matches "birthday"
+- Date filtering: "today", "tomorrow", "this_week", or search all
 
 Architecture:
 =============
-1. Fetch ALL calendar events for time range (next 365 days)
+1. Fetch calendar events for specified time range (or next 365 days by default)
 2. Send events + user query to OpenAI GPT for semantic matching
 3. GPT returns matched events (handles typos, translations, synonyms)
 4. Return only matched events
@@ -19,12 +21,14 @@ Usage:
 ======
     from app.services.calendar_search_service import calendar_search_service
     
-    events = await calendar_search_service.smart_search(
-        user_query="birday",
-        user_id=user.id,
-        db=db_session,
-    )
-    # Returns: [CalendarEvent("Cumpleaños de Victor")]
+    # Search all upcoming events
+    events = await calendar_search_service.smart_search("birday", user_id, db)
+    
+    # Search only today
+    events = await calendar_search_service.smart_search("meeting", user_id, db, date_range="today")
+    
+    # Search this week
+    events = await calendar_search_service.smart_search("reunion", user_id, db, date_range="this_week")
 """
 
 import json
@@ -60,7 +64,7 @@ class CalendarSearchService:
     """
     Service for semantic calendar event search using LLM matching.
     
-    This service fetches all calendar events and uses GPT to intelligently
+    This service fetches calendar events and uses GPT to intelligently
     match them against user queries, handling typos, translations, and synonyms.
     """
     
@@ -73,31 +77,41 @@ class CalendarSearchService:
         user_query: str,
         user_id: UUID,
         db: Session,
+        date_range: Optional[str] = None,
         max_events: int = 100,
         days_ahead: int = 365,
     ) -> SmartSearchResult:
         """
         Perform semantic search on calendar events using LLM matching.
         
+        Sprint 4.1: Consolidated method with date_range support.
+        
         Args:
             user_query: The user's search query (may contain typos, translations)
             user_id: The user's UUID
             db: Database session
+            date_range: Optional date filter ("today", "tomorrow", "this_week", None=all)
             max_events: Maximum events to fetch from calendar
-            days_ahead: How many days ahead to search
+            days_ahead: How many days ahead to search (only used if date_range=None)
         
         Returns:
             SmartSearchResult with matched events
         
-        Example:
-            result = await service.smart_search("birday", user_id, db)
-            # result.events contains events matching "birthday" in any language
+        Examples:
+            # Search all upcoming events
+            result = await service.smart_search("birthday", user_id, db)
+            
+            # Search only today
+            result = await service.smart_search("meeting", user_id, db, date_range="today")
+            
+            # Search this week
+            result = await service.smart_search("reunion", user_id, db, date_range="this_week")
         """
         query = user_query.strip()
         if not query:
             return SmartSearchResult(events=[], no_match_found=True)
         
-        logger.info(f"Smart search for query: '{query}' for user {user_id}")
+        logger.info(f"Smart search for query: '{query}' for user {user_id}, date_range={date_range}")
         
         # Step 1: Get user's OAuth credentials
         credentials = db.query(OAuthCredential).filter(
@@ -112,14 +126,22 @@ class CalendarSearchService:
                 error="Google Calendar not connected. Please connect your Google account.",
             )
         
-        # Step 2: Create calendar client and fetch all events
+        # Step 2: Create calendar client and fetch events
         try:
             calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
             
-            # Fetch events for the next N days
-            time_min = datetime.now(timezone.utc)
-            time_max = time_min + timedelta(days=days_ahead)
+            # Determine time range based on date_range parameter
+            if date_range:
+                # Use calendar client's date parsing for proper timezone handling
+                user_timezone = await calendar_client.get_user_timezone("primary")
+                time_min, time_max = calendar_client._parse_date_range(date_range, user_timezone)
+                logger.info(f"Date range '{date_range}' parsed to: {time_min} - {time_max}")
+            else:
+                # No date filter - search next N days
+                time_min = datetime.now(timezone.utc)
+                time_max = time_min + timedelta(days=days_ahead)
             
+            # Fetch events for the time range
             all_events = await calendar_client.list_upcoming_events(
                 max_results=max_events,
                 time_min=time_min,
@@ -255,105 +277,6 @@ class CalendarSearchService:
             return SmartSearchResult(
                 events=[],
                 error="Failed to parse search results",
-            )
-    
-    async def smart_search_with_date(
-        self,
-        user_query: str,
-        user_id: UUID,
-        db: Session,
-        date: str,
-    ) -> SmartSearchResult:
-        """
-        Perform semantic search scoped to a specific date.
-        
-        Args:
-            user_query: The user's search query
-            user_id: The user's UUID
-            db: Database session
-            date: Date in YYYY-MM-DD format
-        
-        Returns:
-            SmartSearchResult with matched events for that date
-        """
-        query = user_query.strip()
-        if not query:
-            return SmartSearchResult(events=[], no_match_found=True)
-        
-        logger.info(f"Smart search for '{query}' on date {date}")
-        
-        # Get credentials
-        credentials = db.query(OAuthCredential).filter(
-            OAuthCredential.user_id == user_id,
-            OAuthCredential.provider == "google",
-        ).first()
-        
-        if not credentials or not credentials.access_token:
-            return SmartSearchResult(
-                events=[],
-                error="Google Calendar not connected.",
-            )
-        
-        try:
-            calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
-            
-            # Get user's timezone for accurate date parsing
-            user_timezone = await calendar_client.get_user_timezone()
-            
-            from zoneinfo import ZoneInfo
-            try:
-                tz = ZoneInfo(user_timezone)
-            except Exception:
-                tz = ZoneInfo("UTC")
-            
-            # Parse the date in user's timezone
-            try:
-                date_obj = datetime.strptime(date, "%Y-%m-%d")
-                # Create date boundaries in user's timezone
-                local_start = date_obj.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
-                local_end = local_start + timedelta(days=1)
-                
-                # Convert to UTC for API call
-                day_start = local_start.astimezone(timezone.utc)
-                day_end = local_end.astimezone(timezone.utc)
-                
-                logger.info(f"Date range for {date} in {user_timezone}: {day_start} to {day_end} UTC")
-                
-            except ValueError:
-                return SmartSearchResult(
-                    events=[],
-                    error=f"Invalid date format: {date}",
-                )
-            
-            # Fetch events for that date range
-            day_events = await calendar_client.list_upcoming_events(
-                max_results=50,
-                time_min=day_start,
-                time_max=day_end,
-            )
-            
-            # No need to filter - the date range is already correct for user's timezone
-            filtered_events = day_events
-            
-            if not filtered_events:
-                logger.warning(f"No events found for date {date} in {user_timezone}")
-                
-                return SmartSearchResult(
-                    events=[],
-                    no_match_found=True,
-                    corrected_query=query,
-                )
-            
-            logger.info(f"Found {len(filtered_events)} events for {date}, running LLM match for '{query}'")
-            
-            # Use LLM for semantic matching
-            return await self._match_events_with_llm(query, filtered_events)
-            
-        except APIError as e:
-            logger.error(f"Calendar API error: {e}")
-            return SmartSearchResult(
-                events=[],
-                error=str(e),
             )
 
 

@@ -85,6 +85,18 @@ EXCEPTION - ESCALATE TO COMPLEX_EXECUTION FOR:
 - Conditional scheduling: "if my 2pm is cancelled, then schedule at 3pm"
 Note: Simple "from X to Y" patterns like "change from 2pm to 4pm" are SIMPLE (intent parser handles these)
 
+IMPORTANT - DISPLAY LAYOUT REQUESTS ARE SIMPLE (Sprint 4.0):
+Custom layout/arrangement requests go to the intent parser, NOT to complex execution!
+The intent parser has a DISPLAY_CONTENT intent type that handles these via Claude's Scene Graph.
+Layout keywords: "on the left", "on the right", "in the corner", "split screen", "dashboard"
+Component keywords: "timer", "countdown", "meeting details", "clock", "weather"
+- "Show calendar on the left, clock on the right" → SIMPLE (display_content intent)
+- "Put my meeting on the left, timer on the right" → SIMPLE (display_content intent)
+- "Create a dashboard with calendar and weather" → SIMPLE (display_content intent)
+- "Split the screen between agenda and clock" → SIMPLE (display_content intent)
+- "Show my next meeting with a countdown timer" → SIMPLE (display_content intent)
+These are NOT complex execution - they use the Scene Graph system which Claude handles!
+
 COMPLEX_EXECUTION (route to GPT):
 - Code generation: "Write a script to turn on all TVs at 8am"
 - API integrations: "Search for the movie and play it"
@@ -130,6 +142,24 @@ Output: {"complexity": "complex_reasoning", "is_device_command": false, "should_
 
 Input: "Hello, how are you?"
 Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Casual greeting, can respond directly"}
+
+Input: "What's the weather like in Miami today?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "General question about weather - conversational response with web search, no confirmation needed"}
+
+Input: "Como esta el clima hoy en Miami para ir a la playa?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Weather question in Spanish - conversational response in Spanish with web search, no confirmation needed"}
+
+Input: "What can you do?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "General capabilities question - conversational response, no confirmation needed"}
+
+Input: "I need a template for ABA notes, show it on the screen"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Content GENERATION request - user wants a template CREATED, not a document opened. This is CONVERSATION, not display_content or doc_query"}
+
+Input: "dame una plantilla de notas medicas y muestralo en pantalla"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Spanish content generation - user wants a medical notes template GENERATED. No specific document reference. CONVERSATION intent with optional display"}
+
+Input: "create a checklist for home inspection"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Content generation - creating/generating content is CONVERSATION, not doc_query"}
 
 Input: "Show my birthday on the living room TV"
 Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar display with search filter - this is a SIMPLE device command, not data creation"}
@@ -205,6 +235,33 @@ Output: {"complexity": "simple", "is_device_command": false, "should_respond_dir
 
 Input: "Create a meeting from this planning document"
 Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Extract meeting context from doc - SIMPLE intent parsing"}
+
+Input: "Show calendar on the left with clock in the corner"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Display layout request - DISPLAY_CONTENT intent uses Scene Graph, NOT complex execution"}
+
+Input: "I want to see my next meeting on the left and a timer on the right"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Multi-component layout - Scene Graph handles this via DISPLAY_CONTENT intent"}
+
+Input: "Create a dashboard with my calendar, weather, and clock"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Dashboard layout - Scene Graph system, route to intent parser as SIMPLE"}
+
+Input: "Split the screen between my agenda and a countdown timer"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Split screen with timer - DISPLAY_CONTENT intent, NOT GPT complex execution"}
+
+Input: "Show my next meeting details with a timer countdown"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Meeting + timer layout - Scene Graph components, route as SIMPLE"}
+
+Input: "Analiza el documento de mi meeting de mañana, extrae las 3 frases de mayor impacto y muéstramelas en grande en la pantalla con un countdown hasta la reunión"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Despite 'analiza' and 'extrae', user wants to DISPLAY content on screen. This is display_content intent with Scene Graph (doc_summary + countdown_timer). Scene Service uses Claude to generate layout. Route as SIMPLE."}
+
+Input: "Extract 3 key phrases from tomorrow's board meeting doc and show them big on screen with a countdown"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Extract + display with layout. User wants Scene Graph with doc_summary (content_request for AI extraction) + countdown_timer. This is display_content intent, NOT data processing. Route as SIMPLE."}
+
+Input: "Dame un resumen del documento y muéstralo en la pantalla con la agenda del viernes al lado"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Document summary + multi-component layout (doc_summary + calendar). Scene Graph display request with spatial positioning. Route as SIMPLE display_content intent."}
+
+Input: "Analyze the meeting doc, generate impact statements and display them with a timer"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Analyze + generate + display. Keywords suggest data processing, but 'display them' indicates user wants Scene Graph layout. This is display_content with content_request prop. Route as SIMPLE."}
 """
 
 

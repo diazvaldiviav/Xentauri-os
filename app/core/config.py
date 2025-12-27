@@ -90,8 +90,8 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------------------------
     # Default models for each provider (can be overridden per-request)
     GEMINI_MODEL: str = "gemini-2.5-flash-lite"  # Fast, cheap orchestrator
-    OPENAI_MODEL: str = "gpt-4o"  # Capable model for complex tasks
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"  # Deep reasoning model
+    OPENAI_MODEL: str = "gpt-5.2"  # Capable model for complex tasks
+    ANTHROPIC_MODEL: str = "claude-opus-4-5-20251101"  # Most powerful Claude model
     
     # AI Request timeout in seconds
     AI_REQUEST_TIMEOUT: int = 30

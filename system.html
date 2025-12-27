@@ -485,7 +485,7 @@
 </head>
 <body>
     <h1>🤖 Jarvis System Architecture</h1>
-    <p class="subtitle">Intelligent Screen Control System <span class="status-badge">Sprint 3.9.1 Complete</span></p>
+    <p class="subtitle">Intelligent Screen Control System <span class="status-badge">Sprint 4.1.0 Complete</span></p>
 
     <!-- Main Architecture -->
     <div class="architecture">
@@ -527,7 +527,15 @@
                 <li><span class="check">✓</span> Smart Calendar Search (LLM)</li>
                 <li><span class="check">✓</span> Calendar Event Creation</li>
                 <li><span class="check">✓</span> Calendar Edit & Delete</li>
-                <li><span class="check">✓</span> 648 tests passing</li>
+                <li><span class="check">✓</span> Scene Graph (Dynamic Layouts)</li>
+                <li><span class="check">✓</span> Multi-Action Intents (Sprint 4.0.3)</li>
+                <li><span class="check">✓</span> AI Document Intelligence</li>
+                <li><span class="check">✓</span> Compound Intent Handling</li>
+                <li><span class="check">✓</span> GPT-5.2 + Claude Opus 4.5 (Sprint 4.1.0)</li>
+                <li><span class="check">✓</span> Multilingual Context-Aware Responses</li>
+                <li><span class="check">✓</span> Conversation History Tracking</li>
+                <li><span class="check">✓</span> Real-Time Scene Data (Gemini)</li>
+                <li><span class="check">✓</span> 679 tests passing</li>
                 <li><span class="pending">⏳</span> Fly.io deployment</li>
             </ul>
         </div>
@@ -766,14 +774,14 @@
         </div>
     </div>
 
-    <!-- Command Flow -->
+    <!-- Google Docs Intelligence Flow -->
     <div class="section">
-        <h2 class="section-title">📄 Sprint 4.0: Google Docs Intelligence (Planned)</h2>
+        <h2 class="section-title">📄 Sprint 3.9: Google Docs Intelligence ✅ COMPLETE</h2>
         <div class="flow-container">
             <div class="flow">
                 <div class="flow-step start">
                     <div class="flow-step-title">User Request</div>
-                    <div class="flow-step-desc">"What's in my meeting doc?"</div>
+                    <div class="flow-step-desc">"Create event from this doc"</div>
                 </div>
                 <div class="flow-arrow">→</div>
                 <div class="flow-step process">
@@ -782,60 +790,307 @@
                 </div>
                 <div class="flow-arrow">→</div>
                 <div class="flow-step decision">
-                    <div class="flow-step-title">Find Meeting</div>
-                    <div class="flow-step-desc">Smart calendar search</div>
+                    <div class="flow-step-title">Fetch Document</div>
+                    <div class="flow-step-desc">Google Docs API v1</div>
                 </div>
                 <div class="flow-arrow">→</div>
                 <div class="flow-step process">
-                    <div class="flow-step-title">Extract Links</div>
-                    <div class="flow-step-desc">Docs from event</div>
+                    <div class="flow-step-title">Extract Details</div>
+                    <div class="flow-step-desc">Meeting info via LLM</div>
                 </div>
                 <div class="flow-arrow">→</div>
                 <div class="flow-step process">
-                    <div class="flow-step-title">Fetch & Analyze</div>
-                    <div class="flow-step-desc">Gemini/Claude</div>
+                    <div class="flow-step-title">PendingEvent</div>
+                    <div class="flow-step-desc">Store with doc_url</div>
                 </div>
                 <div class="flow-arrow">→</div>
                 <div class="flow-step end">
-                    <div class="flow-step-title">Summary</div>
-                    <div class="flow-step-desc">Key points & actions</div>
+                    <div class="flow-step-title">Calendar Event</div>
+                    <div class="flow-step-desc">Created + doc linked</div>
                 </div>
             </div>
         </div>
         
-        <!-- Eight sprint phases -->
+        <!-- Sprint 3.9 completed features -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-top: 30px;">
             <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
-                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">4.0.1 OAuth Scope</div>
-                <div style="font-size: 0.85rem; color: #888;">Add documents.readonly scope</div>
-            </div>
-            <div class="endpoint-group" style="border-left: 4px solid #3b82f6; padding: 15px;">
-                <div style="font-weight: 600; color: #3b82f6; margin-bottom: 8px;">4.0.2 Docs Client</div>
-                <div style="font-size: 0.85rem; color: #888;">GoogleDocsClient with error handling</div>
-            </div>
-            <div class="endpoint-group" style="border-left: 4px solid #8b5cf6; padding: 15px;">
-                <div style="font-weight: 600; color: #8b5cf6; margin-bottom: 8px;">4.0.3 Calendar Links</div>
-                <div style="font-size: 0.85rem; color: #888;">attachments + conferenceData fields</div>
-            </div>
-            <div class="endpoint-group" style="border-left: 4px solid #f59e0b; padding: 15px;">
-                <div style="font-weight: 600; color: #f59e0b; margin-bottom: 8px;">4.0.4 DocIntelligence</div>
-                <div style="font-size: 0.85rem; color: #888;">Gemini (&lt;5k) / Claude (complex)</div>
-            </div>
-            <div class="endpoint-group" style="border-left: 4px solid #ef4444; padding: 15px;">
-                <div style="font-weight: 600; color: #ef4444; margin-bottom: 8px;">4.0.5 MeetingLinks</div>
-                <div style="font-size: 0.85rem; color: #888;">Calendar as source of truth</div>
-            </div>
-            <div class="endpoint-group" style="border-left: 4px solid #00d4ff; padding: 15px;">
-                <div style="font-weight: 600; color: #00d4ff; margin-bottom: 8px;">4.0.6 DOC_QUERY</div>
-                <div style="font-size: 0.85rem; color: #888;">New intent + handler</div>
-            </div>
-            <div class="endpoint-group" style="border-left: 4px solid #ec4899; padding: 15px;">
-                <div style="font-weight: 600; color: #ec4899; margin-bottom: 8px;">4.0.7 Prompts</div>
-                <div style="font-size: 0.85rem; color: #888;">Router & parser updates</div>
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ OAuth Scopes</div>
+                <div style="font-size: 0.85rem; color: #888;">CALENDAR_SCOPES + DOCS_SCOPES</div>
             </div>
             <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
-                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">4.0.8 E2E Tests</div>
-                <div style="font-size: 0.85rem; color: #888;">WOW demo moment! 🎉</div>
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ GoogleDocsClient</div>
+                <div style="font-size: 0.85rem; color: #888;">get_document, validate_access</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ DocIntelligenceService</div>
+                <div style="font-size: 0.85rem; color: #888;">LLM analysis, meeting extraction</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ ActionTypes</div>
+                <div style="font-size: 0.85rem; color: #888;">READ/LINK/OPEN/SUMMARIZE/CREATE</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ PendingEvent Extended</div>
+                <div style="font-size: 0.85rem; color: #888;">doc_id, doc_url, source fields</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ ConversationContext</div>
+                <div style="font-size: 0.85rem; color: #888;">TTL 300s, last_event, last_doc</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Intent Prompts</div>
+                <div style="font-size: 0.85rem; color: #888;">English + Spanish examples</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Bug Fixes</div>
+                <div style="font-size: 0.85rem; color: #888;">Duration, context, device_query</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scene Graph Flow (Sprint 4.0) -->
+    <div class="section">
+        <h2 class="section-title">🎨 Sprint 4.0: Scene Graph - Dynamic Display Layouts ✅ COMPLETE</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">User Request</div>
+                    <div class="flow-step-desc">"Calendar on the left with clock"</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Intent Parser</div>
+                    <div class="flow-step-desc">DISPLAY_CONTENT</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">Scene Service</div>
+                    <div class="flow-step-desc">Normalize hints</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Generate Layout</div>
+                    <div class="flow-step-desc">Claude or Default</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Populate Data</div>
+                    <div class="flow-step-desc">Calendar, Clock, etc.</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">Scene Graph</div>
+                    <div class="flow-step-desc">JSON → Raspberry Pi</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scene Graph architecture explanation -->
+        <div style="display: flex; justify-content: space-around; margin-top: 30px; flex-wrap: wrap; gap: 20px;">
+            <div class="endpoint-group" style="flex: 1; min-width: 280px; border-left: 4px solid #7b2cbf;">
+                <div class="endpoint-group-title">🎯 Semantic Layer (Intent)</div>
+                <div style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">What the user wants</div>
+                <div class="endpoint">
+                    <span style="color: #7b2cbf;">FULLSCREEN:</span>
+                    <span>Single component fills screen</span>
+                </div>
+                <div class="endpoint">
+                    <span style="color: #7b2cbf;">SIDEBAR:</span>
+                    <span>Main + sidebar (70/30)</span>
+                </div>
+                <div class="endpoint">
+                    <span style="color: #7b2cbf;">DASHBOARD:</span>
+                    <span>Grid of widgets (2x2)</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group" style="flex: 1; min-width: 280px; border-left: 4px solid #3b82f6;">
+                <div class="endpoint-group-title">⚙️ Technical Layer (Engine)</div>
+                <div style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">How to render it</div>
+                <div class="endpoint">
+                    <span style="color: #3b82f6;">GRID:</span>
+                    <span>CSS Grid for layouts</span>
+                </div>
+                <div class="endpoint">
+                    <span style="color: #3b82f6;">FLEX:</span>
+                    <span>Flexbox single direction</span>
+                </div>
+                <div class="endpoint">
+                    <span style="color: #3b82f6;">ABSOLUTE:</span>
+                    <span>Position overlays</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group" style="flex: 1; min-width: 280px; border-left: 4px solid #10b981;">
+                <div class="endpoint-group-title">📦 Embedded Data Pattern</div>
+                <div style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">Pi just renders, no API calls</div>
+                <div class="endpoint">
+                    <span style="color: #10b981;">Backend:</span>
+                    <span>Fetches all data</span>
+                </div>
+                <div class="endpoint">
+                    <span style="color: #10b981;">Scene:</span>
+                    <span>Contains embedded data</span>
+                </div>
+                <div class="endpoint">
+                    <span style="color: #10b981;">Pi:</span>
+                    <span>Renders JSON directly</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Component Registry -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 30px;">
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">📅 Calendar (5)</div>
+                <div style="font-size: 0.85rem; color: #888;">day, week, month, widget, agenda</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">🕐 Time (2)</div>
+                <div style="font-size: 0.85rem; color: #888;">clock_digital, clock_analog</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">🌤️ Weather (1)</div>
+                <div style="font-size: 0.85rem; color: #888;">weather_current</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">🔧 Utility (4)</div>
+                <div style="font-size: 0.85rem; color: #888;">text, spacer, image, web_embed</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">🎭 5 Default Templates</div>
+                <div style="font-size: 0.85rem; color: #888;">fullscreen, sidebar, agenda, dashboard, clock</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">🤖 Claude Generation</div>
+                <div style="font-size: 0.85rem; color: #888;">Custom layouts via LLM</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Multi-Action Intent Flow (Sprint 4.0.3) -->
+    <div class="section">
+        <h2 class="section-title">🔗 Sprint 4.0.3: Multi-Action Intent Support ✅ COMPLETE</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">User Request</div>
+                    <div class="flow-step-desc">"Clear screen AND show calendar"</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Intent Parser</div>
+                    <div class="flow-step-desc">Detect multi-action</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">Extract Actions</div>
+                    <div class="flow-step-desc">sequential_actions[]</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Execute Primary</div>
+                    <div class="flow-step-desc">clear_content</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Execute Sequential</div>
+                    <div class="flow-step-desc">show_calendar</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">Both Complete</div>
+                    <div class="flow-step-desc">actions_executed: 2</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sprint 4.0.3 completed features -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 30px;">
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ SequentialAction Model</div>
+                <div style="font-size: 0.85rem; color: #888;">action, device_name, parameters, content_type</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Detection Rules</div>
+                <div style="font-size: 0.85rem; color: #888;">Spanish: y, después, también | English: and, then, also</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Compound doc_query</div>
+                <div style="font-size: 0.85rem; color: #888;">also_display + display_device fields</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ AI Document Intelligence</div>
+                <div style="font-size: 0.85rem; color: #888;">content_request + content_type props</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ New Components (5)</div>
+                <div style="font-size: 0.85rem; color: #888;">meeting_detail, countdown_timer, doc_summary, doc_preview, event_countdown</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Response Format</div>
+                <div style="font-size: 0.85rem; color: #888;">actions_executed[], commands_sent count</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sprint 4.1.0: Intelligent Conversations & Real-Time Data -->
+    <div class="section">
+        <h2 class="section-title">🧠 Sprint 4.1.0: Intelligent Conversations & Real-Time Data ✅ COMPLETE</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">User Request</div>
+                    <div class="flow-step-desc">"Muéstrame el clima"</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Intent Parser</div>
+                    <div class="flow-step-desc">DISPLAY_CONTENT</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">Gemini Web Search</div>
+                    <div class="flow-step-desc">Fetch real-time data</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Claude Layout</div>
+                    <div class="flow-step-desc">Embed data in scene</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">Scene Graph</div>
+                    <div class="flow-step-desc">is_placeholder: false</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sprint 4.1.0 completed features -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 30px;">
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ AI Model Upgrades</div>
+                <div style="font-size: 0.85rem; color: #888;">GPT-5.2 (Responses API) + Claude Opus 4.5</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Multilingual Responses</div>
+                <div style="font-size: 0.85rem; color: #888;">Auto-detects and responds in user's language</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Conversation History</div>
+                <div style="font-size: 0.85rem; color: #888;">Multi-turn context across all AI models</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Follow-up Support</div>
+                <div style="font-size: 0.85rem; color: #888;">"sí, hazlo" triggers pending actions</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Real-Time Scene Data</div>
+                <div style="font-size: 0.85rem; color: #888;">Gemini fetches weather, news via web search</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Content vs Doc Detection</div>
+                <div style="font-size: 0.85rem; color: #888;">"Create template" → CONVERSATION, not DOC_QUERY</div>
             </div>
         </div>
     </div>
@@ -1357,13 +1612,71 @@
                     <div class="service-method">confirm_pending(user_id) → Success/Error</div>
                 </div>
             </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">🎨</span>
+                    SceneService
+                </div>
+                <div class="service-desc">Dynamic display layout generation (Sprint 4.0+)</div>
+                <div class="service-methods">
+                    <div class="service-method">generate_scene(hints, info_type) → SceneGraph</div>
+                    <div class="service-method">normalize_layout_hints(hints) → LayoutHint[]</div>
+                    <div class="service-method">populate_scene_data(scene, db) → SceneGraph</div>
+                    <div class="service-method">_generate_custom_content() → AI content (4.0.3)</div>
+                    <div class="service-method">Uses Claude for layouts, Gemini for content</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">🔗</span>
+                    MeetingLinkService
+                </div>
+                <div class="service-desc">Links documents to calendar events (Sprint 4.0.3)</div>
+                <div class="service-methods">
+                    <div class="service-method">find_meeting_with_doc(query, user) → (event, doc_url)</div>
+                    <div class="service-method">Semantic search for meetings</div>
+                    <div class="service-method">Extracts doc URLs from event descriptions</div>
+                    <div class="service-method">Supports typos, translations, abbreviations</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">🧩</span>
+                    ComponentRegistry
+                </div>
+                <div class="service-desc">17 components for Scene Graph (Sprint 4.0.3)</div>
+                <div class="service-methods">
+                    <div class="service-method">get_component(type) → ComponentDef</div>
+                    <div class="service-method">validate_component(type, props) → bool</div>
+                    <div class="service-method">to_prompt_context() → str (for Claude)</div>
+                    <div class="service-method">+5 new: meeting_detail, countdown_timer, doc_*</div>
+                </div>
+            </div>
+
+            <div class="service-card">
+                <div class="service-name">
+                    <span class="service-icon">💬</span>
+                    ConversationContextService
+                </div>
+                <div class="service-desc">Multi-turn conversation tracking (Sprint 4.1.0)</div>
+                <div class="service-methods">
+                    <div class="service-method">add_conversation_turn(user_id, msg, response)</div>
+                    <div class="service-method">get_conversation_history(user_id) → List</div>
+                    <div class="service-method">set_pending_content_request(user_id, request)</div>
+                    <div class="service-method">get_pending_content_request(user_id) → Dict</div>
+                    <div class="service-method">Enables follow-ups: "sí, hazlo" → executes</div>
+                </div>
+            </div>
         </div>
     </div>
 
     <!-- Stats -->
     <div class="stats">
         <div class="stat">
-            <div class="stat-value">3.9.1</div>
+            <div class="stat-value">4.1.0</div>
             <div class="stat-label">Sprints Complete</div>
         </div>
         <div class="stat">
@@ -1375,20 +1688,24 @@
             <div class="stat-label">AI Models</div>
         </div>
         <div class="stat">
-            <div class="stat-value">11</div>
+            <div class="stat-value">15</div>
             <div class="stat-label">Core Services</div>
         </div>
         <div class="stat">
-            <div class="stat-value">648</div>
+            <div class="stat-value">679</div>
             <div class="stat-label">Tests Passing</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">17</div>
+            <div class="stat-label">Scene Components</div>
         </div>
     </div>
 
     <footer>
-        <p>Jarvis System Architecture • Sprint 3.9.1 Complete • December 17, 2025</p>
+        <p>Jarvis System Architecture • Sprint 4.1.0 Complete • December 27, 2025</p>
         <p style="margin-top: 10px; font-size: 0.9rem;">
-            Current: Sprint 4.0 - Calendar + Google Docs Intelligence 📄<br>
-            Completed: AI Router, Calendar (Display/Search/Create/Edit/Delete), Bug Fixes ✅
+            Next: Sprint 4.2 - Raspberry Pi Agent 🍓<br>
+            Completed: AI Router, Calendar CRUD, Google Docs, Scene Graph, Multi-Action Intents, Intelligent Conversations, Real-Time Data ✅
         </p>
     </footer>
 </body>

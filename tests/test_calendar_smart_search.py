@@ -443,12 +443,12 @@ class TestSmartSearchWithMockedLLM:
             assert len(result.events) == 2
 
 
-class TestSmartSearchWithDate:
-    """Test smart search scoped to a specific date."""
+class TestSmartSearchWithDateRange:
+    """Test smart search with date_range parameter (Sprint 4.1 consolidated API)."""
     
     @pytest.mark.asyncio
-    async def test_search_with_valid_date(self, mock_db, mock_credentials, mock_events):
-        """Test search scoped to a specific date."""
+    async def test_search_with_date_range(self, mock_db, mock_credentials, mock_events):
+        """Test search scoped to a date range (Sprint 4.1 consolidated API)."""
         mock_db.query.return_value.filter.return_value.first.return_value = mock_credentials
         
         llm_response = MagicMock()
@@ -473,36 +473,69 @@ class TestSmartSearchWithDate:
         ) as mock_openai:
             mock_client = MagicMock()
             mock_client.list_upcoming_events = AsyncMock(return_value=[mock_events[1]])
+            mock_client.get_user_timezone = AsyncMock(return_value="America/New_York")
+            mock_client._parse_date_range = MagicMock(return_value=(
+                MagicMock(), MagicMock()
+            ))
             mock_client_class.return_value = mock_client
             
             mock_openai.generate_json = AsyncMock(return_value=llm_response)
             
             service = CalendarSearchService()
-            result = await service.smart_search_with_date(
+            # Sprint 4.1: Use date_range parameter instead of separate method
+            result = await service.smart_search(
                 user_query="meeting",
                 user_id=uuid4(),
                 db=mock_db,
-                date="2025-12-12",
+                date_range="today",
             )
             
             assert len(result.events) == 1
             assert "Meeting" in result.events[0].get_display_title()
     
     @pytest.mark.asyncio
-    async def test_search_with_invalid_date(self, mock_db, mock_credentials):
-        """Test search with invalid date format."""
+    async def test_search_with_this_week_range(self, mock_db, mock_credentials, mock_events):
+        """Test search scoped to this_week date range."""
         mock_db.query.return_value.filter.return_value.first.return_value = mock_credentials
         
-        service = CalendarSearchService()
-        result = await service.smart_search_with_date(
-            user_query="meeting",
-            user_id=uuid4(),
-            db=mock_db,
-            date="invalid-date",
-        )
+        llm_response = MagicMock()
+        llm_response.success = True
+        llm_response.content = json.dumps({
+            "matched_events": [
+                {
+                    "event_title": "Team Meeting",
+                    "match_reason": "exact match",
+                    "confidence": 0.95
+                }
+            ],
+            "no_match_found": False,
+            "corrected_query": "meeting"
+        })
         
-        assert result.error is not None
-        assert "Invalid date" in result.error
+        with patch(
+            'app.services.calendar_search_service.GoogleCalendarClient'
+        ) as mock_client_class, patch(
+            'app.services.calendar_search_service.openai_provider'
+        ) as mock_openai:
+            mock_client = MagicMock()
+            mock_client.list_upcoming_events = AsyncMock(return_value=[mock_events[1]])
+            mock_client.get_user_timezone = AsyncMock(return_value="America/New_York")
+            mock_client._parse_date_range = MagicMock(return_value=(
+                MagicMock(), MagicMock()
+            ))
+            mock_client_class.return_value = mock_client
+            
+            mock_openai.generate_json = AsyncMock(return_value=llm_response)
+            
+            service = CalendarSearchService()
+            result = await service.smart_search(
+                user_query="meeting",
+                user_id=uuid4(),
+                db=mock_db,
+                date_range="this_week",
+            )
+            
+            assert len(result.events) == 1
 
 
 class TestLLMErrorHandling:

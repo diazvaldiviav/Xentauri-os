@@ -1,9 +1,9 @@
 # Jarvis Project Context
 
-> **Last Updated:** December 20, 2025
-> **Current Sprint:** Sprint 3.9 - Google Docs Intelligence ✅ COMPLETE
+> **Last Updated:** December 27, 2025
+> **Current Sprint:** Sprint 4.1.0 - Intelligent Conversations & Real-Time Data ✅ COMPLETE
 > **Tech Debt Cleanup:** ✅ Complete (301 tests, 84% router reduction)
-> **Status:** ✅ Ready for Sprint 4 (Raspberry Pi Agent)
+> **Status:** ✅ Ready for Sprint 4.2 (Raspberry Pi Agent)
 
 Jarvis is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
 
@@ -108,7 +108,62 @@ Jarvis is an intelligent screen control system that lets users operate multiple 
 | Null handling fix in parser (device_name) | ✅ Done |
 | validate_access method for GoogleDocsClient | ✅ Done |
 
-### Sprint 4: Raspberry Pi Agent (Next)
+### Sprint 4.0: Scene Graph - Dynamic Display Layouts ✅ COMPLETE (December 22, 2025)
+| Task | Status |
+|------|--------|
+| Scene Graph schemas (LayoutIntent, LayoutEngine, ComponentPriority) | ✅ Done |
+| SceneComponent, SceneGraph, LayoutSpec Pydantic models | ✅ Done |
+| ComponentRegistry with 17 components (12 MVP + 5 Sprint 4.0.3) | ✅ Done |
+| Default scene templates (fullscreen, sidebar, dashboard, agenda, clock) | ✅ Done |
+| SceneService with Claude integration | ✅ Done |
+| normalize_layout_hints() for natural language parsing | ✅ Done |
+| populate_scene_data() for calendar/clock/weather data | ✅ Done |
+| Scene prompts for Claude generation | ✅ Done |
+| DisplayContentIntent schema | ✅ Done |
+| _handle_display_content handler in IntentService | ✅ Done |
+| Intent parser integration for display_content | ✅ Done |
+| Embedded data pattern (no separate endpoints) | ✅ Done |
+| 31 tests for Scene Graph | ✅ Done |
+
+### Sprint 4.0.3: Multi-Action Intent Support ✅ COMPLETE (December 22, 2025)
+| Task | Status |
+|------|--------|
+| SequentialAction model for chained actions | ✅ Done |
+| sequential_actions field in DeviceCommand | ✅ Done |
+| Multi-action detection rules in intent_prompts.py | ✅ Done |
+| _extract_sequential_actions() in parser.py | ✅ Done |
+| _execute_sequential_actions() in intent_service.py | ✅ Done |
+| Compound doc_query + display (also_display, display_device) | ✅ Done |
+| AI Document Intelligence (content_request, content_type) | ✅ Done |
+| _generate_custom_content() using Gemini | ✅ Done |
+| New components: meeting_detail, countdown_timer, doc_summary, doc_preview | ✅ Done |
+| Router fix for DISPLAY_CONTENT classification | ✅ Done |
+| Spanish support in Device Mapper | ✅ Done |
+| WebSocket reconnection improvements in Simulator | ✅ Done |
+| Default styling fallbacks (prompt + service + renderer) | ✅ Done |
+| Document fetching from meetings via meeting_link_service | ✅ Done |
+
+### Sprint 4.1.0: Intelligent Conversations & Real-Time Data ✅ COMPLETE (December 27, 2025)
+| Task | Status |
+|------|--------|
+| AI Model Upgrades (GPT-5.2, Claude Opus 4.5) | ✅ Done |
+| Multilingual & Context-Aware Responses | ✅ Done |
+| Universal Multilingual Rule in all prompts | ✅ Done |
+| UnifiedContext with user personalization | ✅ Done |
+| Conversation History Tracking (multi-turn) | ✅ Done |
+| Pending Content Request handling (follow-up support) | ✅ Done |
+| Content Generation vs Document Detection | ✅ Done |
+| Dynamic Scene Graph Data via Gemini Web Search | ✅ Done |
+| Real-time weather data in scene components | ✅ Done |
+| Location extraction from user requests | ✅ Done |
+| Calendar Queries with date_range filtering | ✅ Done |
+| Smart Search consolidated (DRY refactor) | ✅ Done |
+| _generate_calendar_response() for multilingual responses | ✅ Done |
+| Intent prompts updated for content generation | ✅ Done |
+| Router prompts updated for SIMPLE classification | ✅ Done |
+| Scene data preservation in _parse_scene_response | ✅ Done |
+
+### Sprint 4.2: Raspberry Pi Agent (Next)
 - Agent project structure (Python)
 - WebSocket client to connect to cloud
 - Pairing flow implementation
@@ -156,7 +211,8 @@ Jarvis_Cloud/
 │   │   ├── pending_event_service.py   # Pending event creation (Sprint 3.8, TTL 120s)
 │   │   ├── pending_edit_service.py    # Pending edit/delete operations (Sprint 3.9, TTL 120s)
 │   │   ├── doc_intelligence_service.py # Google Docs AI analysis (Sprint 3.9)
-│   │   └── conversation_context_service.py # Conversation context tracking (Sprint 3.9, TTL 300s)
+│   │   ├── conversation_context_service.py # Conversation context tracking (Sprint 3.9, TTL 300s)
+│   │   └── meeting_link_service.py      # Document-meeting linking (Sprint 4.0.3)
 │   ├── schemas/
 │   │   ├── auth.py          # Request/response schemas for auth
 │   │   ├── user.py          # UserOut schema
@@ -175,15 +231,22 @@ Jarvis_Cloud/
 │   │   ├── router/          # AI Orchestration
 │   │   │   └── orchestrator.py  # Routes requests to models
 │   │   ├── intent/          # Natural Language Understanding
-│   │   │   ├── schemas.py   # Intent data structures
+│   │   │   ├── schemas.py   # Intent data structures (incl. DisplayContentIntent)
 │   │   │   ├── parser.py    # LLM-based intent extraction
 │   │   │   └── device_mapper.py # Fuzzy device name matching
+│   │   ├── scene/           # Scene Graph Module (Sprint 4.0)
+│   │   │   ├── __init__.py  # Module exports
+│   │   │   ├── schemas.py   # SceneGraph, LayoutSpec, SceneComponent models
+│   │   │   ├── registry.py  # ComponentRegistry (17 components)
+│   │   │   ├── defaults.py  # Default scene templates (5 presets)
+│   │   │   └── service.py   # SceneService (generation + data population)
 │   │   ├── prompts/         # Prompt Templates (Sprint 3.6)
 │   │   │   ├── base_prompt.py      # Shared templates for all models
 │   │   │   ├── execution_prompts.py # GPT-4o execution prompts
 │   │   │   ├── router_prompts.py   # Routing decision prompts
 │   │   │   ├── intent_prompts.py   # Intent extraction prompts
-│   │   │   └── doc_prompts.py      # Google Docs analysis prompts (Sprint 3.9)
+│   │   │   ├── doc_prompts.py      # Google Docs analysis prompts (Sprint 3.9)
+│   │   │   └── scene_prompts.py    # Scene generation prompts (Sprint 4.0)
 │   │   ├── schemas/         # AI Response Schemas (Sprint 3.6)
 │   │   │   ├── __init__.py  # Schema exports
 │   │   │   └── action_response.py  # Structured GPT-4o responses
@@ -334,9 +397,9 @@ Jarvis_Cloud/
 | HTTP Client | httpx | 0.27.2 |
 | Testing | Pytest | 8.3.3 |
 | Deployment | Fly.io | - |
-| AI - Gemini | google-generativeai | 0.8.3 |
-| AI - OpenAI | openai | 1.55.3 |
-| AI - Claude | anthropic | 0.39.0 |
+| AI - Gemini | google-generativeai | 0.8.3 (gemini-2.5-flash-preview-04-17) |
+| AI - OpenAI | openai | 1.55.3 (GPT-5.2, Responses API) |
+| AI - Claude | anthropic | 0.39.0 (Claude Opus 4.5) |
 
 ---
 
@@ -872,6 +935,137 @@ environments/
 - Configured PostgreSQL with Docker
 - All code files have detailed comments for learning
 - API running locally on port 8000
+
+### December 22, 2025 - Sprint 4.0 Complete (Scene Graph - Dynamic Display Layouts)
+- **Scene Graph Architecture:**
+  - New `app/ai/scene/` module for dynamic display layouts
+  - Semantic vs Technical layers: LayoutIntent (fullscreen, sidebar, dashboard) vs LayoutEngine (grid, flex, absolute)
+  - Embedded Data Pattern: Backend fetches all data, Pi just renders
+  - ComponentPriority system for responsive behavior (primary/secondary/tertiary)
+- **Scene Graph Schemas (`app/ai/scene/schemas.py`):**
+  - `SceneGraph` - Main output model with layout, components, global_style, metadata
+  - `SceneComponent` - Individual UI widget with type, position, props, data
+  - `LayoutSpec` - Combines semantic intent with technical engine config
+  - `ComponentPosition` - Grid/Flex/Absolute positioning properties
+  - `ComponentStyle` - Visual styling (background, text_color, border_radius)
+  - `LayoutHint` - Parsed hints from natural language ("calendar left")
+  - Helper methods: `get_primary_component()`, `filter_by_priority()`, `get_component_by_id()`
+- **Component Registry (`app/ai/scene/registry.py`):**
+  - `ComponentRegistry` singleton with 17 components (12 MVP + 5 Sprint 4.0.3)
+  - Calendar: calendar_day, calendar_week, calendar_month, calendar_widget, calendar_agenda
+  - Time: clock_digital, clock_analog
+  - Weather: weather_current
+  - Utility: text_block, spacer, image_display, web_embed
+  - `to_prompt_context()` generates Claude-friendly component documentation
+  - `validate_component()` and `get_required_data_keys()` for validation
+- **Default Scene Templates (`app/ai/scene/defaults.py`):**
+  - `CALENDAR_FULLSCREEN` - Single component fills screen
+  - `CALENDAR_SIDEBAR` - Calendar left (70%) + clock right (30%)
+  - `CALENDAR_AGENDA` - Agenda list with clock overlay
+  - `DASHBOARD` - 2x2 grid with calendar, clock, weather, text
+  - `CLOCK_FULLSCREEN` - Large digital clock
+  - `get_default_scene()` factory function
+- **Scene Service (`app/ai/scene/service.py`):**
+  - `SceneService` main service class
+  - `generate_scene()` - Creates SceneGraph from layout_hints
+  - `normalize_layout_hints()` - Parses natural language to LayoutHint objects
+  - `populate_scene_data()` - Fetches calendar/weather data and embeds in components
+  - Uses `anthropic_provider.generate_json()` for Claude generation (DRY)
+  - Supports both default templates and custom Claude-generated layouts
+- **Scene Prompts (`app/ai/prompts/scene_prompts.py`):**
+  - System prompt with Scene Graph schema and examples
+  - Component registry documentation injection
+  - User prompt builder with layout hints and preferences
+- **Intent Integration:**
+  - `DisplayContentIntent` schema in `app/ai/intent/schemas.py`
+  - Fields: info_type, layout_type, layout_hints, device_name
+  - `_handle_display_content()` handler in IntentService
+  - Intent parser updated for DISPLAY_CONTENT type
+- **DRY Compliance:**
+  - SceneService reuses `anthropic_provider.generate_json()`
+  - No duplicate Claude API implementation
+  - Follows existing ActionRegistry pattern for ComponentRegistry
+- **Tests:**
+  - `test_scene_graph.py` - 31 tests for Scene Graph functionality
+  - Schema validation, registry operations, default templates
+  - Service methods and data population
+
+### December 27, 2025 - Sprint 4.1.0 Complete (Intelligent Conversations & Real-Time Data)
+- **AI Model Upgrades:**
+  - OpenAI: Migrated from GPT-4o to GPT-5.2 (Responses API)
+  - Anthropic: Migrated from Claude Sonnet 4.5 to Claude Opus 4.5
+  - Updated `app/ai/providers/openai_provider.py` for new Responses API
+- **Multilingual & Context-Aware System:**
+  - `UNIVERSAL_MULTILINGUAL_RULE` in all AI prompts
+  - Responses match user's language automatically (Spanish, English, etc.)
+  - `UnifiedContext` includes user name, device count, connected services
+  - `build_assistant_system_prompt(context)` for personalized prompts
+- **Conversation History Tracking:**
+  - `ConversationContextService` extended with `conversation_history` list
+  - `add_conversation_turn()` saves user/assistant exchanges
+  - `get_conversation_history()` retrieves full conversation
+  - `ConversationContext` dataclass includes history field
+  - Multi-turn conversations work across all AI models
+- **Follow-up Intent Support:**
+  - `set_pending_content_request()` stores pending generation requests
+  - `get_pending_content_request()` retrieves for follow-ups
+  - Detects "sí", "hazlo", "do it", "adelante" as confirmations
+  - No more stuck confirmation loops!
+- **Content Generation vs Document Detection:**
+  - Updated `intent_prompts.py` with explicit rules and 8 new examples
+  - "Necesito un template" → CONVERSATION (generates content)
+  - "Resume el documento de..." → DOC_QUERY (references document)
+  - Updated `router_prompts.py` for SIMPLE classification of content requests
+- **Dynamic Scene Graph Data via Gemini:**
+  - `_fetch_realtime_data_for_scene()` uses Gemini web search
+  - Real-time weather data embedded in scene components
+  - `_extract_location_from_request()` parses locations from text
+  - `is_placeholder: false` when real data is available
+  - Fixed `_parse_scene_response()` to preserve Claude's data field
+- **Calendar Queries Improvements:**
+  - `_generate_calendar_response()` for context-aware, multilingual responses
+  - `smart_search()` consolidated with `date_range` parameter (DRY)
+  - Removed `smart_search_with_date()` duplication
+  - All calendar responses now respect user's language
+- **Bug Fixes:**
+  - Fixed indentation error in `_handle_doc_query()`
+  - Fixed `SceneMetadata.refresh_seconds` validation error
+  - Fixed scene component data being overwritten with `{}`
+  - Fixed location extraction regex for multi-word places
+
+### December 22, 2025 - Sprint 4.0.3 Complete (Multi-Action Intent Support)
+- **Multi-Action Intent Support:**
+  - `SequentialAction` model in `app/ai/intent/schemas.py`
+  - `sequential_actions: List[SequentialAction]` field in `DeviceCommand`
+  - Allows chaining actions: "clear screen AND show calendar"
+  - Detection rules for Spanish/English connectors (y, and, then, después)
+  - `_extract_sequential_actions()` in parser.py
+  - `_execute_sequential_actions()` in intent_service.py
+  - Response includes `actions_executed[]` and `commands_sent` count
+- **Compound Intent Handling (doc_query + display):**
+  - `also_display: bool` field in `DocQueryIntent`
+  - `display_device: Optional[str]` for target device
+  - "Dame un resumen y ábreme el documento en pantalla" → summarize + display
+  - Handler in `_handle_doc_query()` sends show_content command
+- **AI Document Intelligence for Scene Graph:**
+  - `content_request` prop for custom AI-generated content
+  - `content_type` prop: impact_phrases, script, key_points, action_items, summary, agenda
+  - `_generate_custom_content()` method using Gemini
+  - `formatGeneratedContent()` JavaScript renderer with markdown support
+- **New Scene Graph Components:**
+  - `meeting_detail` - Meeting info with attendees, location, links
+  - `countdown_timer` - Countdown to target time
+  - `doc_summary` - Document summary with AI-generated content
+  - `doc_preview` - Document preview with key points
+  - `event_countdown` - Countdown to next calendar event
+- **Bug Fixes & Improvements:**
+  - Router fix: DISPLAY_CONTENT classified as SIMPLE (not complex_execution)
+  - Spanish support in Device Mapper (translations + stop words)
+  - Default styling fallbacks in prompts, service, and renderer
+  - Document fetching via `meeting_link_service.find_meeting_with_doc()`
+  - WebSocket reconnection with exponential backoff
+  - Manual reconnect button in simulator (press 'R')
+  - Fixed JavaScript regex escaping in formatGeneratedContent()
 
 ### December 20, 2025 - Sprint 3.9 Complete (Google Docs Intelligence)
 - **Google Docs Client:**

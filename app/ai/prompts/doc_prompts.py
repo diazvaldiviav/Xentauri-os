@@ -19,6 +19,8 @@ complex docs (Claude).
 
 DOC_SUMMARY_PROMPT = """You are a document analysis assistant for a smart home system.
 
+CRITICAL: Respond in the SAME LANGUAGE as the user's request.
+
 Analyze the following document and provide a clear, concise summary.
 
 DOCUMENT TITLE: {title}
@@ -45,6 +47,8 @@ GUIDELINES:
 # ---------------------------------------------------------------------------
 
 DOC_KEY_POINTS_PROMPT = """You are a document analysis assistant.
+
+CRITICAL: Respond in the SAME LANGUAGE as the user's request.
 
 Extract the key points from the following document.
 
@@ -83,6 +87,8 @@ GUIDELINES:
 # ---------------------------------------------------------------------------
 
 DOC_MEETING_SUMMARY_PROMPT = """You are a smart assistant helping a user understand their meeting document.
+
+CRITICAL: Respond in the SAME LANGUAGE as the user's request.
 
 The user has a calendar event and wants to know about the linked document.
 

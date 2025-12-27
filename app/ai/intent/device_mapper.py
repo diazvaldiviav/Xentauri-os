@@ -56,8 +56,11 @@ class DeviceMapper:
     # Minimum similarity score to consider a match
     MIN_MATCH_SCORE = 0.6
     
-    # Common words to ignore in matching
-    STOP_WORDS = {"the", "my", "a", "an", "in", "on", "at"}
+    # Common words to ignore in matching (English + Spanish)
+    STOP_WORDS = {
+        "the", "my", "a", "an", "in", "on", "at",  # English
+        "de", "la", "el", "mi", "del", "en", "un", "una",  # Spanish
+    }
     
     def __init__(self):
         """Initialize the device mapper."""
@@ -158,6 +161,7 @@ class DeviceMapper:
         - Convert to lowercase
         - Remove extra whitespace
         - Remove stop words
+        - Translate Spanish terms to English
         - Sort words for word-order independence
         """
         # Lowercase and split into words
@@ -166,15 +170,51 @@ class DeviceMapper:
         # Remove stop words
         words = [w for w in words if w not in self.STOP_WORDS]
         
-        # Remove common suffixes/prefixes that users might omit
-        # e.g., "TV" vs "Television"
+        # English synonyms - e.g., "TV" vs "Television"
         word_map = {
             "television": "tv",
             "telly": "tv",
             "monitor": "display",
             "screen": "display",
         }
+        
+        # Spanish to English translations for common room/device terms
+        spanish_translations = {
+            # Device terms
+            "pantalla": "display",
+            "televisor": "tv",
+            "tele": "tv",
+            "televisión": "tv",
+            # Room terms
+            "sala": "living room",
+            "salón": "living room",
+            "salon": "living room",
+            "cuarto": "room",
+            "habitación": "room",
+            "habitacion": "room",
+            "dormitorio": "bedroom",
+            "recámara": "bedroom",
+            "recamara": "bedroom",
+            "cocina": "kitchen",
+            "oficina": "office",
+            "estudio": "office",
+            "baño": "bathroom",
+            "bano": "bathroom",
+        }
+        
+        # Apply English word mappings first
         words = [word_map.get(w, w) for w in words]
+        
+        # Apply Spanish translations
+        translated = []
+        for w in words:
+            if w in spanish_translations:
+                translation = spanish_translations[w]
+                if translation:  # Non-empty translation
+                    translated.extend(translation.split())
+            else:
+                translated.append(w)
+        words = translated
         
         # Join back
         return " ".join(words)

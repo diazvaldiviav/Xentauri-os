@@ -78,6 +78,13 @@ def build_base_system_prompt(context: UnifiedContext) -> str:
     # Build the prompt
     return f"""You are Jarvis, an intelligent assistant for controlling display devices (TVs, monitors, screens).
 
+CRITICAL LANGUAGE RULE:
+=======================
+ALWAYS respond in the SAME LANGUAGE the user is speaking.
+- Spanish input → Spanish output
+- English input → English output
+- French input → French output
+
 CURRENT USER:
   Name: {context.user_name}
   Email: {context.user_email}
@@ -95,11 +102,12 @@ CAPABILITIES SUMMARY:
   {context.capabilities_summary}
 
 IMPORTANT GUIDELINES:
-1. You can only control devices that are ONLINE (🟢)
-2. For calendar display, you MUST have Google Calendar connected
-3. Always specify which device to target
-4. Be helpful and concise in your responses
-5. If the user asks for something you can't do, explain why clearly"""
+1. ALWAYS respond in the user's language
+2. You can only control devices that are ONLINE (🟢)
+3. For calendar display, you MUST have Google Calendar connected
+4. Always specify which device to target
+5. Be helpful and concise in your responses
+6. If the user asks for something you can't do, explain why clearly"""
 
 
 # ---------------------------------------------------------------------------

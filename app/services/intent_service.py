@@ -79,7 +79,9 @@ from app.ai.intent.schemas import (
     CalendarCreateIntent,
     CalendarEditIntent,
     DocQueryIntent,
+    DisplayContentIntent,
     ConversationIntent,
+    SequentialAction,  # Sprint 4.0.3: Multi-action support
 )
 from app.ai.router.orchestrator import ai_router, TaskComplexity
 from app.ai.monitoring import ai_monitor
@@ -101,6 +103,7 @@ class IntentResultType(str, Enum):
     CALENDAR_QUERY = "calendar_query"
     CALENDAR_EDIT = "calendar_edit"  # Sprint 3.9
     DOC_QUERY = "doc_query"          # Sprint 3.9
+    DISPLAY_CONTENT = "display_content"  # Sprint 4.0: Scene Graph
     CONVERSATION = "conversation"
     COMPLEX_EXECUTION = "complex_execution"
     COMPLEX_REASONING = "complex_reasoning"
@@ -382,6 +385,8 @@ class IntentService:
                 request_id=request_id,
                 intent=intent,
                 devices=devices,
+                user_id=user_id,
+                original_text=text,
                 start_time=start_time,
             )
         
@@ -391,6 +396,7 @@ class IntentService:
                 intent=intent,
                 user_id=user_id,
                 start_time=start_time,
+                original_text=text,
                 db=db,
             )
         
@@ -421,10 +427,21 @@ class IntentService:
                 db=db,
             )
         
+        elif isinstance(intent, DisplayContentIntent):
+            return await self._handle_display_content(
+                request_id=request_id,
+                intent=intent,
+                user_id=user_id,
+                devices=devices,
+                start_time=start_time,
+                db=db,
+            )
+        
         elif isinstance(intent, ConversationIntent):
             return await self._handle_conversation(
                 request_id=request_id,
                 intent=intent,
+                user_id=user_id,
                 original_text=text,
                 start_time=start_time,
             )
@@ -497,7 +514,7 @@ class IntentService:
         
         # Content display actions
         if action_registry.is_content_action(action):
-            return await self._execute_content_action(
+            primary_result = await self._execute_content_action(
                 request_id=request_id,
                 device=device,
                 action=action,
@@ -506,16 +523,29 @@ class IntentService:
                 confidence=intent.confidence,
                 start_time=start_time,
             )
+        else:
+            # Standard device commands
+            primary_result = await self._execute_device_command(
+                request_id=request_id,
+                device=device,
+                action=action,
+                parameters=intent.parameters,
+                confidence=intent.confidence,
+                start_time=start_time,
+            )
         
-        # Standard device commands
-        return await self._execute_device_command(
-            request_id=request_id,
-            device=device,
-            action=action,
-            parameters=intent.parameters,
-            confidence=intent.confidence,
-            start_time=start_time,
-        )
+        # Sprint 4.0.3: Process sequential actions if present
+        if intent.sequential_actions and primary_result.success:
+            primary_result = await self._execute_sequential_actions(
+                primary_result=primary_result,
+                sequential_actions=intent.sequential_actions,
+                devices=devices,
+                user_id=user_id,
+                primary_device=device,
+                start_time=start_time,
+            )
+        
+        return primary_result
     
     # -----------------------------------------------------------------------
     # DEVICE QUERY HANDLER
@@ -579,33 +609,82 @@ class IntentService:
         request_id: str,
         intent: SystemQuery,
         devices: List[Device],
+        user_id: UUID,
+        original_text: str,
         start_time: float,
     ) -> IntentResult:
-        """Handle system query intents."""
+        """
+        Handle system queries with multilingual, context-aware responses.
         
-        processing_time = (time.time() - start_time) * 1000
+        Sprint 4.1: Now uses Gemini to generate natural responses in the user's language.
+        """
+        from app.ai.providers.gemini import gemini_provider
+        from app.ai.context import build_unified_context
+        from app.db.session import SessionLocal
+        
         action = self._get_action_value(intent.action) or "help"
         
+        # Build context
+        db = SessionLocal()
+        try:
+            context = await build_unified_context(user_id=user_id, db=db)
+        finally:
+            db.close()
+        
+        # System prompt with multilingual rule
+        system_prompt = f"""You are Jarvis, a helpful assistant.
+
+CRITICAL: ALWAYS respond in the SAME LANGUAGE the user is speaking.
+- Spanish input → Spanish output
+- English input → English output
+- French input → French output
+
+USER SETUP:
+- Name: {context.user_name}
+- Devices: {context.device_count} total, {len(context.online_devices)} online
+- Calendar: {"Connected" if context.has_google_calendar else "Not connected"}
+- Docs: {"Connected" if context.has_google_docs else "Not connected"}
+
+Respond naturally and concisely (1-3 sentences)."""
+        
+        # Build action-specific prompts
         if action == "list_devices":
             if not devices:
-                message = "You don't have any devices set up yet. Add a device to get started!"
+                user_prompt = f'User asked to list devices: "{original_text}"\n\nThey have none. Explain kindly and suggest adding one. Respond in their language.'
             else:
-                device_list = []
-                for d in devices:
-                    status = "🟢" if d.is_online else "🔴"
-                    device_list.append(f"{status} {d.name}")
-                message = "Your devices:\n" + "\n".join(device_list)
+                device_list = "\n".join([f"- {d.name} ({'online' if d.is_online else 'offline'})" for d in devices])
+                user_prompt = f'''User asked to list devices: "{original_text}"
+
+Their devices:
+{device_list}
+
+Present with emojis (🟢 online, 🔴 offline) in the SAME language as the user's request.'''
         
         elif action == "help":
-            message = """I can help you control your devices! Try:
-• "Turn on the [device name]"
-• "Switch [device] to HDMI 2"
-• "What devices do I have?"
-• "Is the [device] on?"
-• "Volume up on [device]"
-"""
+            device_examples = [d.device_name for d in context.online_devices[:2]] if context.online_devices else ["your TV", "your screen"]
+            user_prompt = f'''User asked for help: "{original_text}"
+
+Their setup:
+- {context.device_count} device(s): {", ".join(device_examples)}
+- Calendar: {"available" if context.has_google_calendar else "not connected"}
+- Docs: {"available" if context.has_google_docs else "not connected"}
+
+Provide 3-5 example commands customized to their setup.
+Respond in the SAME language as their request.'''
+        
         else:
-            message = "How can I help you with your devices?"
+            user_prompt = f'User said: "{original_text}"\n\nRespond helpfully in their language.'
+        
+        # Generate response
+        response = await gemini_provider.generate(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            temperature=0.7,
+            max_tokens=400,
+        )
+        
+        processing_time = (time.time() - start_time) * 1000
+        message = response.content.strip() if response.success else "How can I help with your devices?"
         
         return IntentResult(
             success=True,
@@ -627,6 +706,7 @@ class IntentService:
         intent: CalendarQueryIntent,
         user_id: UUID,
         start_time: float,
+        original_text: str = "",
         db: Session = None,
     ) -> IntentResult:
         """
@@ -639,6 +719,7 @@ class IntentService:
         - "When is my birthday?" → find_event
         
         Sprint 3.9: Uses smart semantic search for typos/translations/synonyms.
+        Sprint 4.1: Returns context-aware, multilingual responses.
         """
         from app.services.calendar_search_service import calendar_search_service
         from app.models.oauth_credential import OAuthCredential
@@ -673,13 +754,14 @@ class IntentService:
                     request_id=request_id,
                 )
             
-            # Route to appropriate query method using SMART SEARCH
+            # Route to appropriate query method using SMART SEARCH (Sprint 4.1: multilingual)
             if action == "find_event":
                 # Find a specific event (e.g., "when is my birthday?")
                 message = await self._smart_find_event(
                     search_term=search_term,
                     user_id=user_id,
                     db=db,
+                    original_text=original_text,
                 )
             elif action == "next_event":
                 # Find the next event matching a term (e.g., "what's my next meeting?")
@@ -687,6 +769,7 @@ class IntentService:
                     search_term=search_term,
                     user_id=user_id,
                     db=db,
+                    original_text=original_text,
                 )
             elif action == "count_events":
                 # Count events (e.g., "how many events today?")
@@ -695,6 +778,7 @@ class IntentService:
                     search_term=search_term,
                     user_id=user_id,
                     db=db,
+                    original_text=original_text,
                 )
             elif action == "list_events":
                 # List events (e.g., "list my events for tomorrow")
@@ -703,6 +787,7 @@ class IntentService:
                     search_term=search_term,
                     user_id=user_id,
                     db=db,
+                    original_text=original_text,
                 )
             else:
                 # Fallback to count
@@ -711,6 +796,7 @@ class IntentService:
                     search_term=search_term,
                     user_id=user_id,
                     db=db,
+                    original_text=original_text,
                 )
             
             processing_time = (time.time() - start_time) * 1000
@@ -747,17 +833,165 @@ class IntentService:
                 db.close()
     
     # -----------------------------------------------------------------------
-    # SMART CALENDAR QUERY HELPERS (Sprint 3.9)
+    # SMART CALENDAR QUERY HELPERS (Sprint 3.9 + Sprint 4.1 Multilingual)
     # -----------------------------------------------------------------------
+    
+    async def _generate_calendar_response(
+        self,
+        template_type: str,
+        user_request: str,
+        user_id: UUID,
+        db: Session,
+        **kwargs
+    ) -> str:
+        """
+        Generate calendar response with FULL CONTEXT awareness and multilingual support.
+        
+        Sprint 4.1: Uses UnifiedContext to personalize responses based on:
+        - User's name
+        - Connected services
+        - Device setup
+        - Language preference (auto-detected from user_request)
+        
+        Args:
+            template_type: Type of response (no_events, count, list, find, not_found, next)
+            user_request: Original user request (for language detection)
+            user_id: User's ID
+            db: Database session
+            **kwargs: Template-specific parameters
+        
+        Returns:
+            Natural, context-aware response in user's language
+        """
+        from app.ai.providers.gemini import gemini_provider
+        from app.ai.context import build_unified_context
+        
+        # Build context
+        context = await build_unified_context(user_id=user_id, db=db)
+        
+        # Build system prompt with context
+        system_prompt = f"""You are Jarvis, {context.user_name}'s intelligent assistant.
+
+CRITICAL: ALWAYS respond in the SAME LANGUAGE the user is speaking.
+- Spanish input → Spanish output
+- English input → English output
+- French input → French output
+
+USER SETUP:
+- Name: {context.user_name}
+- Google Calendar: {"✓ Connected" if context.has_google_calendar else "✗ Not connected"}
+- Devices: {len(context.online_devices)} online
+
+Be natural, concise, and friendly. Respond in the user's language (1-3 sentences)."""
+        
+        # Build user prompt based on template type
+        if template_type == "no_events":
+            search_term = kwargs.get('search_term', 'any')
+            period = kwargs.get('period', '')
+            prompt = f'''User asked: "{user_request}"
+
+They have NO events matching "{search_term}" {period}.
+
+Respond naturally in the SAME language. Be encouraging.'''
+        
+        elif template_type == "count":
+            count = kwargs.get('count', 0)
+            search = kwargs.get('search_term', 'events')
+            period = kwargs.get('period', '')
+            prompt = f'''User asked: "{user_request}"
+
+They have {count} "{search}" event(s) {period}.
+
+Tell them the count naturally. Respond in their language.'''
+        
+        elif template_type == "list":
+            events = kwargs.get('events', [])
+            search = kwargs.get('search_term', '')
+            period = kwargs.get('period', '')
+            
+            event_details = "\n".join([
+                f"- {e.get_time_display()} - {e.get_display_title()}"
+                for e in events[:10]
+            ])
+            
+            showing_count = len(events[:10])
+            total_count = len(events)
+            
+            prompt = f'''User asked: "{user_request}"
+
+Here are their {search} events {period}:
+{event_details}
+
+Present this list with bullet points. 
+{f"Note: Showing {showing_count} of {total_count} total events" if total_count > 10 else ""}
+
+Respond in the SAME language they asked in.'''
+        
+        elif template_type == "find":
+            event = kwargs.get('event')
+            title = event.get_display_title() if event else ''
+            date_str = kwargs.get('date_str', '')
+            time_str = kwargs.get('time_str', '')
+            relative = kwargs.get('relative', '')
+            
+            prompt = f'''User asked: "{user_request}"
+
+Their '{title}' event is on {date_str} at {time_str}{relative}.
+
+Tell them when it is naturally. Respond in their language.'''
+        
+        elif template_type == "next":
+            event = kwargs.get('event')
+            title = event.get_display_title() if event else ''
+            time_str = kwargs.get('time_str', '')
+            relative = kwargs.get('relative', '')
+            search_term = kwargs.get('search_term', '')
+            
+            prompt = f'''User asked: "{user_request}"
+
+Their next {search_term if search_term else "event"} is '{title}' at {time_str} {relative}.
+
+Tell them when it is naturally. Respond in their language.'''
+        
+        elif template_type == "not_found":
+            search = kwargs.get('search_term', '')
+            prompt = f'''User asked: "{user_request}"
+
+Couldn't find any '{search}' events.
+
+Tell them we couldn't find it. Be helpful and suggest they check the event name. Respond in their language.'''
+        
+        elif template_type == "need_search":
+            prompt = f'''User asked: "{user_request}"
+
+They need to specify what event they're looking for.
+
+Ask them politely what event they want to find. Respond in their language.'''
+        
+        else:
+            prompt = f'User said: "{user_request}"\n\nRespond helpfully in their language.'
+        
+        # Generate response with Gemini
+        response = await gemini_provider.generate(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=0.7,
+            max_tokens=200,
+        )
+        
+        return response.content.strip() if response.success else "I couldn't process that request."
     
     async def _smart_find_event(
         self,
         search_term: str,
         user_id: UUID,
         db: Session,
+        original_text: str = "",
     ) -> str:
         """
         Find a specific event using smart semantic search.
+        
+        Sprint 4.1: Now returns context-aware, multilingual responses.
         
         Handles typos, translations, and synonyms:
         - "birthday" matches "Cumpleaños de Victor"
@@ -767,7 +1001,12 @@ class IntentService:
         from app.services.calendar_search_service import calendar_search_service
         
         if not search_term:
-            return "What event are you looking for? Try 'When is my [event name]?'"
+            return await self._generate_calendar_response(
+                template_type="need_search",
+                user_request=original_text or "find event",
+                user_id=user_id,
+                db=db,
+            )
         
         # Use smart search for semantic matching
         result = await calendar_search_service.smart_search(
@@ -781,7 +1020,13 @@ class IntentService:
         
         if result.no_match_found or not result.events:
             corrected = result.corrected_query or search_term
-            return f"I couldn't find any '{corrected}' events on your calendar."
+            return await self._generate_calendar_response(
+                template_type="not_found",
+                user_request=original_text or search_term,
+                user_id=user_id,
+                db=db,
+                search_term=corrected,
+            )
         
         # Return the first (nearest) matching event
         event = result.events[0]
@@ -817,9 +1062,27 @@ class IntentService:
             else:
                 relative = ""
             
-            return f"Your '{title}' is on {date_str} at {time_str}{relative}."
+            return await self._generate_calendar_response(
+                template_type="find",
+                user_request=original_text or search_term,
+                user_id=user_id,
+                db=db,
+                event=event,
+                date_str=date_str,
+                time_str=time_str,
+                relative=relative,
+            )
         elif event.start and event.start.date:
-            return f"Your '{title}' is on {event.start.date}."
+            return await self._generate_calendar_response(
+                template_type="find",
+                user_request=original_text or search_term,
+                user_id=user_id,
+                db=db,
+                event=event,
+                date_str=event.start.date,
+                time_str="all day",
+                relative="",
+            )
         
         return f"Found '{title}' on your calendar."
     
@@ -828,8 +1091,13 @@ class IntentService:
         search_term: str,
         user_id: UUID,
         db: Session,
+        original_text: str = "",
     ) -> str:
-        """Find the next event matching a term using smart search."""
+        """
+        Find the next event matching a term using smart search.
+        
+        Sprint 4.1: Now returns context-aware, multilingual responses.
+        """
         from app.services.calendar_search_service import calendar_search_service
         
         # Use smart search - it already returns events sorted by time
@@ -844,12 +1112,16 @@ class IntentService:
             return result.error
         
         if result.no_match_found or not result.events:
-            if search_term:
-                return f"You don't have any upcoming {search_term} events."
-            return "You don't have any upcoming events."
+            return await self._generate_calendar_response(
+                template_type="no_events",
+                user_request=original_text or f"next {search_term or 'event'}",
+                user_id=user_id,
+                db=db,
+                search_term=search_term or "upcoming",
+                period="",
+            )
         
         event = result.events[0]
-        title = event.get_display_title()
         time_str = event.get_time_display()
         
         # Sprint 3.9: Store event in conversation context for "this event" references
@@ -876,13 +1148,27 @@ class IntentService:
             else:
                 relative = f"on {start_dt.strftime('%B %d')}"
             
-            if search_term:
-                return f"Your next {search_term} is '{title}' at {time_str} {relative}."
-            return f"Your next event is '{title}' at {time_str} {relative}."
+            return await self._generate_calendar_response(
+                template_type="next",
+                user_request=original_text or f"next {search_term or 'event'}",
+                user_id=user_id,
+                db=db,
+                event=event,
+                time_str=time_str,
+                relative=relative,
+                search_term=search_term,
+            )
         
-        if search_term:
-            return f"Your next {search_term} is '{title}' at {time_str}."
-        return f"Your next event is '{title}' at {time_str}."
+        return await self._generate_calendar_response(
+            template_type="next",
+            user_request=original_text or f"next {search_term or 'event'}",
+            user_id=user_id,
+            db=db,
+            event=event,
+            time_str=time_str,
+            relative="",
+            search_term=search_term,
+        )
     
     async def _smart_count_events(
         self,
@@ -890,18 +1176,24 @@ class IntentService:
         search_term: str,
         user_id: UUID,
         db: Session,
+        original_text: str = "",
     ) -> str:
-        """Count events using smart search for semantic matching."""
+        """
+        Count events using smart search for semantic matching.
+        
+        Sprint 4.1: Now returns context-aware, multilingual responses.
+        """
         from app.services.calendar_search_service import calendar_search_service
         from app.environments.google.calendar.client import GoogleCalendarClient
         from app.models.oauth_credential import OAuthCredential
         
-        # If there's a search term, use smart search
+        # If there's a search term, use smart search with date filtering
         if search_term:
             result = await calendar_search_service.smart_search(
                 user_query=search_term,
                 user_id=user_id,
                 db=db,
+                date_range=date_range,  # CRITICAL: Pass date_range to filter!
             )
             
             if result.error:
@@ -912,24 +1204,74 @@ class IntentService:
             corrected = result.corrected_query or search_term
             
             if count == 0:
-                return f"You don't have any {corrected} events scheduled{period}."
-            elif count == 1:
-                event = result.events[0]
-                return f"You have 1 {corrected} event{period}: {event.get_display_title()} at {event.get_time_display()}."
+                return await self._generate_calendar_response(
+                    template_type="no_events",
+                    user_request=original_text or f"count {search_term}",
+                    user_id=user_id,
+                    db=db,
+                    search_term=corrected,
+                    period=period,
+                )
             else:
-                return f"You have {count} {corrected} events scheduled{period}."
+                return await self._generate_calendar_response(
+                    template_type="count",
+                    user_request=original_text or f"count {search_term}",
+                    user_id=user_id,
+                    db=db,
+                    count=count,
+                    search_term=corrected,
+                    period=period,
+                )
         
-        # No search term - just count all events for the period
+        # No search term - fetch events and use multilingual generator
         credentials = db.query(OAuthCredential).filter(
             OAuthCredential.user_id == user_id,
             OAuthCredential.provider == "google",
         ).first()
         
         if not credentials:
-            return "Please connect your Google Calendar first."
+            return await self._generate_calendar_response(
+                template_type="not_found",
+                user_request=original_text or "count events",
+                user_id=user_id,
+                db=db,
+                search_term="Google Calendar connection",
+            )
         
+        # Fetch events using the calendar client with proper date filtering
         calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
-        return await calendar_client.get_event_count_text(date_range=date_range)
+        user_timezone = await calendar_client.get_user_timezone("primary")
+        time_min, time_max = calendar_client._parse_date_range(date_range, user_timezone)
+        
+        events = await calendar_client.list_upcoming_events(
+            calendar_id="primary",
+            time_min=time_min,
+            time_max=time_max,
+            max_results=100,
+        )
+        
+        count = len(events)
+        period = self._get_period_text(date_range)
+        
+        if count == 0:
+            return await self._generate_calendar_response(
+                template_type="no_events",
+                user_request=original_text or "count events",
+                user_id=user_id,
+                db=db,
+                search_term="",
+                period=period,
+            )
+        else:
+            return await self._generate_calendar_response(
+                template_type="count",
+                user_request=original_text or "count events",
+                user_id=user_id,
+                db=db,
+                count=count,
+                search_term="",
+                period=period,
+            )
     
     async def _smart_list_events(
         self,
@@ -937,18 +1279,24 @@ class IntentService:
         search_term: str,
         user_id: UUID,
         db: Session,
+        original_text: str = "",
     ) -> str:
-        """List events using smart search for semantic matching."""
+        """
+        List events using smart search for semantic matching.
+        
+        Sprint 4.1: Now returns context-aware, multilingual responses.
+        """
         from app.services.calendar_search_service import calendar_search_service
         from app.environments.google.calendar.client import GoogleCalendarClient
         from app.models.oauth_credential import OAuthCredential
         
-        # If there's a search term, use smart search
+        # If there's a search term, use smart search with date filtering
         if search_term:
             result = await calendar_search_service.smart_search(
                 user_query=search_term,
                 user_id=user_id,
                 db=db,
+                date_range=date_range,  # CRITICAL: Pass date_range to filter!
             )
             
             if result.error:
@@ -958,36 +1306,73 @@ class IntentService:
             corrected = result.corrected_query or search_term
             
             if not result.events:
-                return f"You don't have any {corrected} events scheduled{period}."
+                return await self._generate_calendar_response(
+                    template_type="no_events",
+                    user_request=original_text or f"list {search_term}",
+                    user_id=user_id,
+                    db=db,
+                    search_term=corrected,
+                    period=period,
+                )
             
-            # Build header
-            header = f"Your {corrected} events{period}:"
-            
-            # Build event list
-            event_lines = []
-            for event in result.events[:10]:  # Limit to 10 for text response
-                time_str = event.get_time_display()
-                title = event.get_display_title()
-                event_lines.append(f"• {time_str} - {title}")
-            
-            text = header + "\n" + "\n".join(event_lines)
-            
-            if len(result.events) > 10:
-                text += f"\n\n(Showing first 10 of {len(result.events)} events)"
-            
-            return text
+            return await self._generate_calendar_response(
+                template_type="list",
+                user_request=original_text or f"list {search_term}",
+                user_id=user_id,
+                db=db,
+                events=result.events,
+                search_term=corrected,
+                period=period,
+            )
         
-        # No search term - list all events for the period
+        # No search term - fetch events and use multilingual generator
         credentials = db.query(OAuthCredential).filter(
             OAuthCredential.user_id == user_id,
             OAuthCredential.provider == "google",
         ).first()
         
         if not credentials:
-            return "Please connect your Google Calendar first."
+            return await self._generate_calendar_response(
+                template_type="not_found",
+                user_request=original_text or "list events",
+                user_id=user_id,
+                db=db,
+                search_term="Google Calendar connection",
+            )
         
+        # Fetch events using the calendar client with proper date filtering
         calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
-        return await calendar_client.get_events_list_text(date_range=date_range)
+        user_timezone = await calendar_client.get_user_timezone("primary")
+        time_min, time_max = calendar_client._parse_date_range(date_range, user_timezone)
+        
+        events = await calendar_client.list_upcoming_events(
+            calendar_id="primary",
+            time_min=time_min,
+            time_max=time_max,
+            max_results=100,
+        )
+        
+        period = self._get_period_text(date_range)
+        
+        if not events:
+            return await self._generate_calendar_response(
+                template_type="no_events",
+                user_request=original_text or "list events",
+                user_id=user_id,
+                db=db,
+                search_term="",
+                period=period,
+            )
+        
+        return await self._generate_calendar_response(
+            template_type="list",
+            user_request=original_text or "list events",
+            user_id=user_id,
+            db=db,
+            events=events,
+            search_term="",
+            period=period,
+        )
     
     def _get_period_text(self, date_range: str) -> str:
         """Get human-readable period description for messages."""
@@ -1021,21 +1406,173 @@ class IntentService:
         self,
         request_id: str,
         intent: ConversationIntent,
+        user_id: UUID,
         original_text: str,
         start_time: float,
     ) -> IntentResult:
-        """Handle conversational intents."""
+        """
+        Handle conversational intents with context-aware, multilingual responses.
+        
+        Sprint 4.1: Uses Gemini with context awareness, conversation history,
+        and Google Search grounding for intelligent, personalized answers.
+        
+        Features:
+        - Maintains conversation history across turns
+        - Handles follow-up confirmations like "si", "hazlo", "do it"
+        - Uses web search for real-time information
+        - Responds in the user's language
+        """
+        from app.ai.providers.gemini import gemini_provider
+        from app.ai.prompts.assistant_prompts import (
+            build_assistant_system_prompt,
+            build_assistant_prompt,
+        )
+        from app.ai.context import build_unified_context
+        from app.db.session import SessionLocal
+        from app.services.conversation_context_service import conversation_context_service
+        
+        # Build context
+        db = SessionLocal()
+        try:
+            context = await build_unified_context(user_id=user_id, db=db)
+        finally:
+            db.close()
+        
+        # Sprint 4.1: Get conversation history for context
+        conversation_history = conversation_context_service.get_conversation_summary(str(user_id))
+        pending_content = conversation_context_service.get_pending_content_request(str(user_id))
+        
+        # Build prompts with context and conversation history
+        system_prompt = build_assistant_system_prompt(context)
+        
+        # Check if this is a follow-up/confirmation to previous request
+        follow_up_keywords = [
+            'si', 'sí', 'yes', 'ok', 'okay', 'hazlo', 'do it', 'adelante',
+            'proceed', 'confirma', 'confirmo', 'confirm', 'solo', 'just',
+            'redactalo', 'redáctalo', 'escribelo', 'escríbelo', 'write it',
+            'generate it', 'crealo', 'créalo', 'create it', 'muéstramelo',
+            'muestramelo', 'show it', 'go ahead', 'sure', 'claro',
+        ]
+        
+        is_follow_up = (
+            pending_content and 
+            any(kw in original_text.lower() for kw in follow_up_keywords)
+        )
+        
+        # Build user prompt with conversation context
+        if is_follow_up and pending_content:
+            # User is confirming a previous content generation request
+            logger.info(
+                f"[{request_id}] Follow-up detected for pending content: "
+                f"{pending_content['type']} - {pending_content['request'][:50]}..."
+            )
+            user_prompt = f"""The user previously asked for: {pending_content['request']}
+
+Now they're confirming with: "{original_text}"
+
+Please fulfill their original request and generate the content they asked for.
+Respond in the same language they used originally.
+"""
+            # Clear the pending content after fulfilling
+            conversation_context_service.clear_pending_content(str(user_id))
+        elif conversation_history:
+            # Include conversation history for context
+            user_prompt = f"""CONVERSATION HISTORY:
+{conversation_history}
+
+CURRENT REQUEST:
+{original_text}
+
+Respond to the current request, using the conversation history for context if relevant.
+ALWAYS respond in the same language as the user's current request."""
+        else:
+            user_prompt = build_assistant_prompt(original_text, context)
+        
+        # Determine if web search is needed
+        search_keywords = [
+            'weather', 'temperature', 'forecast', 'clima', 'tiempo',
+            'time', 'clock', 'timezone', 'hora',
+            'news', 'latest', 'today', 'noticias',
+            'score', 'game', 'match', 'partido',
+            'stock', 'price', 'precio',
+            'current', 'now', 'hoy', 'ahora',
+        ]
+        
+        use_search = any(keyword in original_text.lower() for keyword in search_keywords)
+        
+        # Detect if this is a content generation request to save for follow-up
+        content_gen_keywords = [
+            'template', 'plantilla', 'nota', 'notes', 'checklist',
+            'lista', 'resumen', 'summary', 'tutorial', 'tips',
+            'redacta', 'crea', 'create', 'hazme', 'dame', 'give me',
+            'necesito', 'i need', 'generate', 'genera',
+        ]
+        is_content_request = any(kw in original_text.lower() for kw in content_gen_keywords)
+        
+        # Generate intelligent response
+        if use_search:
+            response = await gemini_provider.generate_with_grounding(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                use_search=True,
+                temperature=0.8,
+                max_tokens=1024,  # Increased for content generation
+            )
+        else:
+            response = await gemini_provider.generate(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=0.8,
+                max_tokens=1024,  # Increased for content generation
+            )
         
         processing_time = (time.time() - start_time) * 1000
-        action = self._get_action_value(intent.action) or "greeting"
+
+        if not response.success:
+            # Fallback: Generate error message in user's language WITHOUT grounding
+            try:
+                error_response = await gemini_provider.generate(
+                    prompt=f"User said: '{original_text}'\n\nRespond with a brief, friendly apology that you're having trouble right now. Ask them to rephrase or try again.",
+                    system_prompt=system_prompt,
+                    temperature=0.7,
+                    max_tokens=100,
+                )
+                if error_response.success:
+                    message = error_response.content.strip()
+                else:
+                    message = "Lo siento, estoy teniendo problemas procesando eso. ¿Podrías reformular? / I apologize, I'm having trouble processing that. Could you rephrase?"
+            except Exception as e:
+                logger.error(f"Error generating fallback message: {e}")
+                message = "Lo siento, estoy teniendo problemas procesando eso. ¿Podrías reformular? / I apologize, I'm having trouble processing that. Could you rephrase?"
+        else:
+            message = response.content.strip()
         
-        responses = {
-            "greeting": "Hello! I'm Jarvis, your display control assistant. How can I help?",
-            "thanks": "You're welcome! Let me know if you need anything else.",
-            "question": "That's an interesting question! I'm specialized in controlling displays.",
-        }
+        # Sprint 4.1: Save conversation turn for future context
+        conversation_context_service.add_conversation_turn(
+            user_id=str(user_id),
+            user_message=original_text,
+            assistant_response=message,
+            intent_type="conversation",
+        )
         
-        message = responses.get(action, "I'm here to help you control your displays.")
+        # If this was a content generation request, save it for potential follow-up
+        # (only if the response seems like it's asking for confirmation)
+        if is_content_request and not is_follow_up:
+            # Detect if AI is asking for clarification/confirmation
+            clarification_indicators = [
+                '?', '¿', 'could you', 'podrías', 'would you like',
+                'te gustaría', 'quieres que', 'do you want', 'should i',
+                'more details', 'más detalles', 'clarify', 'especifica',
+            ]
+            if any(ind in message.lower() for ind in clarification_indicators):
+                # AI is asking for more info, save the request for follow-up
+                conversation_context_service.set_pending_content_request(
+                    user_id=str(user_id),
+                    content_request=original_text,
+                    content_type="content_generation",
+                )
+        
+        action = self._get_action_value(intent.action) or "general_conversation"
         
         return IntentResult(
             success=True,
@@ -1046,6 +1583,12 @@ class IntentService:
             response=message,
             processing_time_ms=processing_time,
             request_id=request_id,
+            data={
+                'grounded': response.metadata.get('grounded', False) if response.metadata else False,
+                'sources': response.metadata.get('sources', []) if response.metadata else [],
+                'conversation_context_used': bool(conversation_history),
+                'was_follow_up': is_follow_up,
+            } if response.success else None,
         )
     
     # -----------------------------------------------------------------------
@@ -1452,6 +1995,146 @@ class IntentService:
             message=message,
             processing_time_ms=processing_time,
             request_id=request_id,
+        )
+    
+    # -----------------------------------------------------------------------
+    # SEQUENTIAL ACTIONS (Sprint 4.0.3 - Multi-Action Support)
+    # -----------------------------------------------------------------------
+    
+    async def _execute_sequential_actions(
+        self,
+        primary_result: IntentResult,
+        sequential_actions: List[SequentialAction],
+        devices: List[Device],
+        user_id: UUID,
+        primary_device: Device,
+        start_time: float,
+    ) -> IntentResult:
+        """
+        Execute sequential actions after a primary action.
+        
+        Sprint 4.0.3: Allows users to chain multiple actions in a single request,
+        e.g., "clear the screen AND show my calendar".
+        
+        Args:
+            primary_result: Result from the primary action
+            sequential_actions: List of additional actions to execute
+            devices: Available devices for the user
+            user_id: User's UUID
+            primary_device: The device from the primary action
+            start_time: Start time for total processing time calculation
+            
+        Returns:
+            Updated IntentResult with all actions executed
+        """
+        actions_executed = [
+            {
+                "action": primary_result.action,
+                "success": primary_result.success,
+                "command_id": primary_result.command_id,
+                "device": primary_result.device.name if primary_result.device else None,
+            }
+        ]
+        
+        all_messages = [primary_result.message] if primary_result.message else []
+        total_commands_sent = 1 if primary_result.command_sent else 0
+        all_success = primary_result.success
+        
+        logger.info(
+            f"Executing {len(sequential_actions)} sequential actions after '{primary_result.action}'"
+        )
+        
+        for seq_action in sequential_actions:
+            try:
+                # Resolve device: use specified device_name or inherit from primary
+                target_device = primary_device
+                if seq_action.device_name:
+                    matched_device, _ = device_mapper.match(seq_action.device_name, devices)
+                    if matched_device:
+                        target_device = matched_device
+                    else:
+                        logger.warning(
+                            f"Device '{seq_action.device_name}' not found for sequential action, "
+                            f"using primary device '{primary_device.name}'"
+                        )
+                
+                action_name = seq_action.action
+                params = seq_action.parameters or {}
+                
+                # Execute based on action type
+                if action_registry.is_content_action(action_name):
+                    action_result = await self._execute_content_action(
+                        request_id=primary_result.request_id,
+                        device=target_device,
+                        action=action_name,
+                        user_id=user_id,
+                        parameters=params,
+                        confidence=primary_result.confidence,
+                        start_time=start_time,
+                    )
+                else:
+                    action_result = await self._execute_device_command(
+                        request_id=primary_result.request_id,
+                        device=target_device,
+                        action=action_name,
+                        parameters=params,
+                        confidence=primary_result.confidence,
+                        start_time=start_time,
+                    )
+                
+                actions_executed.append({
+                    "action": action_name,
+                    "success": action_result.success,
+                    "command_id": action_result.command_id,
+                    "device": target_device.name,
+                })
+                
+                if action_result.message:
+                    all_messages.append(action_result.message)
+                
+                if action_result.command_sent:
+                    total_commands_sent += 1
+                
+                if not action_result.success:
+                    all_success = False
+                    logger.warning(
+                        f"Sequential action '{action_name}' failed: {action_result.message}"
+                    )
+                else:
+                    logger.info(f"Sequential action '{action_name}' succeeded on '{target_device.name}'")
+                    
+            except Exception as e:
+                logger.error(f"Error executing sequential action '{seq_action.action}': {e}")
+                actions_executed.append({
+                    "action": seq_action.action,
+                    "success": False,
+                    "error": str(e),
+                })
+                all_messages.append(f"Failed: {seq_action.action} - {str(e)}")
+                all_success = False
+        
+        # Build combined response
+        processing_time = (time.time() - start_time) * 1000
+        combined_message = " → ".join(all_messages) if all_messages else "Actions executed"
+        
+        # Update primary result with combined info
+        return IntentResult(
+            success=all_success,
+            intent_type=primary_result.intent_type,
+            confidence=primary_result.confidence,
+            device=primary_result.device,
+            action=primary_result.action,
+            parameters=primary_result.parameters,
+            data={
+                **(primary_result.data or {}),
+                "actions_executed": actions_executed,
+                "commands_sent": total_commands_sent,
+            },
+            command_sent=total_commands_sent > 0,
+            command_id=primary_result.command_id,  # Primary command ID
+            message=combined_message,
+            processing_time_ms=processing_time,
+            request_id=primary_result.request_id,
         )
     
     # -----------------------------------------------------------------------
@@ -3251,12 +3934,16 @@ class IntentService:
         2. OPEN_DOC: Open a document linked to an event
         3. READ_DOC: Read/analyze document content
         4. SUMMARIZE_MEETING_DOC: Summarize document linked to meeting
+        
+        Sprint 4.0.2: Compound intent support
+        If intent.also_display is True, ALSO sends show_content command to device.
         """
         action = intent.action
+        result: Optional[IntentResult] = None
         
         # Route based on action type
         if action == ActionType.LINK_DOC:
-            return await self._handle_link_doc(
+            result = await self._handle_link_doc(
                 request_id=request_id,
                 intent=intent,
                 user_id=user_id,
@@ -3264,7 +3951,7 @@ class IntentService:
                 db=db,
             )
         elif action == ActionType.OPEN_DOC:
-            return await self._handle_open_doc(
+            result = await self._handle_open_doc(
                 request_id=request_id,
                 intent=intent,
                 user_id=user_id,
@@ -3272,7 +3959,7 @@ class IntentService:
                 db=db,
             )
         elif action == ActionType.READ_DOC:
-            return await self._handle_read_doc(
+            result = await self._handle_read_doc(
                 request_id=request_id,
                 intent=intent,
                 user_id=user_id,
@@ -3280,7 +3967,7 @@ class IntentService:
                 db=db,
             )
         elif action == ActionType.SUMMARIZE_MEETING_DOC:
-            return await self._handle_summarize_meeting_doc(
+            result = await self._handle_summarize_meeting_doc(
                 request_id=request_id,
                 intent=intent,
                 user_id=user_id,
@@ -3288,7 +3975,7 @@ class IntentService:
                 db=db,
             )
         elif action == ActionType.CREATE_EVENT_FROM_DOC:
-            return await self._handle_create_event_from_doc(
+            result = await self._handle_create_event_from_doc(
                 request_id=request_id,
                 intent=intent,
                 user_id=user_id,
@@ -3304,6 +3991,125 @@ class IntentService:
                 processing_time_ms=processing_time,
                 request_id=request_id,
             )
+        
+        # Sprint 4.0.2: Handle compound intent (also_display)
+        # If user wants BOTH a text response AND to display the doc on screen
+        if result and result.success and getattr(intent, 'also_display', False):
+            doc_url = result.data.get("doc_url") if result.data else None
+            
+            if doc_url:
+                # Get available devices
+                devices = self._get_user_devices(db, user_id)
+                target_device = None
+                
+                # Try to match the display_device name if provided
+                display_device_name = getattr(intent, 'display_device', None)
+                if display_device_name and devices:
+                    target_device, _ = device_mapper.match(display_device_name, devices)
+                
+                # If no match or no device specified, use first online device
+                if not target_device:
+                    online_devices = [d for d in devices if d.is_online]
+                    if len(online_devices) == 1:
+                        target_device = online_devices[0]
+                    elif len(online_devices) > 1:
+                        # Multiple devices - could pick first or leave it
+                        target_device = online_devices[0]
+                
+                if target_device and target_device.is_online:
+                    # Decision: Display summary (Scene Graph) or full document (iframe)?
+                    cmd_result = None
+                    display_type = "document"
+                    
+                    if action == ActionType.SUMMARIZE_MEETING_DOC:
+                        # CASE 1: SUMMARY → Scene Graph with doc_summary component
+                        from uuid import uuid4
+                        from app.ai.scene.schemas import (
+                            SceneGraph, SceneComponent, LayoutSpec, LayoutIntent,
+                            LayoutEngine, ComponentPriority, ComponentPosition,
+                            ComponentStyle, GlobalStyle, SceneMetadata
+                        )
+                        from app.environments.google.docs import GoogleDocsClient
+                        
+                        # Build simple scene with doc_summary
+                        doc_id = GoogleDocsClient.extract_doc_id(doc_url)
+                        scene = SceneGraph(
+                            scene_id=str(uuid4()),
+                            target_devices=[str(target_device.id)],
+                            layout=LayoutSpec(
+                                intent=LayoutIntent.FULLSCREEN,
+                                engine=LayoutEngine.FLEX,
+                            ),
+                            components=[
+                                SceneComponent(
+                                    id="doc_summary_main",
+                                    type="doc_summary",
+                                    priority=ComponentPriority.PRIMARY,
+                                    position=ComponentPosition(flex=1),
+                                    props={},
+                                    data={
+                                        "doc_id": doc_id,
+                                        "title": result.data.get("title", "Document Summary") if result.data else "Document Summary",
+                                        "summary": result.message,  # LLM-generated summary
+                                        "url": doc_url,
+                                    },
+                                    style=ComponentStyle(
+                                        background="#1a1a2e",
+                                        text_color="#ffffff",
+                                        border_radius="12px",
+                                        padding="24px",
+                                    ),
+                                ),
+                            ],
+                            global_style=GlobalStyle(
+                                background="#0f0f23",
+                                font_family="Inter",
+                            ),
+                            metadata=SceneMetadata(
+                                user_request=f"Display summary: {result.data.get('title', 'document') if result.data else 'document'}",
+                                generated_by="intent_service",
+                                # refresh_seconds defaults to 300 (5 min)
+                            ),
+                        )
+                        
+                        # Send scene to device
+                        scene_dict = scene.model_dump(mode="json")
+                        cmd_result = await command_service.display_scene(
+                            device_id=target_device.id,
+                            scene=scene_dict,
+                        )
+                        display_type = "summary"
+                        
+                    elif action in [ActionType.READ_DOC, ActionType.OPEN_DOC]:
+                        # CASE 2: FULL DOCUMENT → iframe
+                        cmd_result = await command_service.show_content(
+                            device_id=target_device.id,
+                            url=doc_url,
+                        )
+                        display_type = "document"
+                    
+                    else:
+                        # Other doc_query actions don't support display
+                        logger.info(f"Action {action} does not support also_display")
+                    
+                    if cmd_result and cmd_result.success:
+                        logger.info(f"Compound intent: Also displayed {display_type} on {target_device.name}")
+                        result.command_sent = True
+                        result.command_id = cmd_result.command_id
+                        result.device = target_device
+                        
+                        # Update message to indicate both actions completed
+                        original_message = result.message or ""
+                        display_label = "Summary" if display_type == "summary" else "Document"
+                        result.message = f"{original_message}\n\n📺 {display_label} also displayed on {target_device.name}."
+                    elif cmd_result:
+                        # Display failed but doc query succeeded - log but don't fail
+                        logger.warning(f"Compound intent: Display failed on {target_device.name}: {cmd_result.error}")
+                else:
+                    # No device available - log but don't fail the doc query
+                    logger.info("Compound intent: also_display requested but no device available")
+        
+        return result
 
     async def _handle_link_doc(
         self,
@@ -3380,17 +4186,59 @@ class IntentService:
                     request_id=request_id,
                 )
             
-            # For now, we can't actually link the doc (requires event update API)
-            # But we can provide helpful information
+            # Get OAuth credentials (following _handle_confirm_edit pattern)
+            from app.models.oauth_credential import OAuthCredential
+            from app.environments.google.calendar.client import GoogleCalendarClient
+            from app.environments.google.calendar.schemas import EventUpdateRequest
+            
+            credentials = db.query(OAuthCredential).filter(
+                OAuthCredential.user_id == user_id,
+                OAuthCredential.provider == "google",
+            ).first()
+            
+            if not credentials or not credentials.access_token:
+                processing_time = (time.time() - start_time) * 1000
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.ERROR,
+                    message="Please connect your Google Calendar first.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            # Create calendar client
+            client = GoogleCalendarClient(access_token=credentials.access_token)
+            
+            # Build new description - append doc URL to existing description
             doc_id = meeting_link_service.extract_doc_id_from_url(doc_url)
+            existing_description = meeting_result.event.description or ""
+            doc_link_text = f"\n\n📄 Linked Document: {doc_url}"
+            new_description = existing_description + doc_link_text
+            
+            # Create EventUpdateRequest - only update description
+            update_request = EventUpdateRequest(description=new_description)
+            
+            # Call update_event
+            await client.update_event(meeting_result.event.id, update_request)
+            
+            logger.info(
+                f"Document linked to event",
+                extra={
+                    "user_id": str(user_id)[:8],
+                    "event_id": meeting_result.event.id,
+                    "doc_id": doc_id,
+                }
+            )
+            
             processing_time = (time.time() - start_time) * 1000
             
             return IntentResult(
                 success=True,
                 intent_type=IntentResultType.DOC_QUERY,
+                confidence=intent.confidence,
                 action="link_doc",
-                message=f"Found meeting '{meeting_result.event.summary}'. Document linking requires calendar API update support.",
-                response=f"To link documents, add the doc URL to the meeting description in Google Calendar.",
+                message=f"✓ Document linked to '{meeting_result.event.summary}'",
+                response=f"I've added the document link to your '{meeting_result.event.summary}' event.",
                 data={"doc_url": doc_url, "doc_id": doc_id, "event_id": meeting_result.event.id},
                 processing_time_ms=processing_time,
                 request_id=request_id,
@@ -3523,6 +4371,7 @@ class IntentService:
                             return IntentResult(
                                 success=True,
                                 intent_type=IntentResultType.DOC_QUERY,
+                                confidence=intent.confidence,
                                 action="open_doc",
                                 device=device,
                                 command_sent=True,
@@ -3605,6 +4454,7 @@ class IntentService:
                         return IntentResult(
                             success=True,
                             intent_type=IntentResultType.DOC_QUERY,
+                            confidence=intent.confidence,
                             action="open_doc",
                             device=device,
                             command_sent=True,
@@ -3634,6 +4484,7 @@ class IntentService:
                     return IntentResult(
                         success=True,
                         intent_type=IntentResultType.DOC_QUERY,
+                        confidence=intent.confidence,
                         action="open_doc",
                         message=f"Found document for '{meeting_result.event.summary}'. Which device should I display it on?",
                         response=f"Available devices: {device_names}. Say 'show on [device name]' to display.",
@@ -3652,6 +4503,7 @@ class IntentService:
             return IntentResult(
                 success=True,
                 intent_type=IntentResultType.DOC_QUERY,
+                confidence=intent.confidence,
                 action="open_doc",
                 message=f"Opening document for '{meeting_result.event.summary}'.",
                 response=f"Here's the meeting document: {doc_url}",
@@ -3750,6 +4602,7 @@ class IntentService:
                 return IntentResult(
                     success=True,
                     intent_type=IntentResultType.DOC_QUERY,
+                    confidence=intent.confidence,
                     action="read_doc",
                     message=summary_result.summary,
                     response=summary_result.summary,
@@ -3912,6 +4765,7 @@ class IntentService:
                 return IntentResult(
                     success=True,
                     intent_type=IntentResultType.DOC_QUERY,
+                    confidence=intent.confidence,
                     action="summarize_meeting_doc",
                     message=summary_result.summary,
                     response=summary_result.summary,
@@ -4091,6 +4945,7 @@ class IntentService:
             return IntentResult(
                 success=False,
                 intent_type=IntentResultType.DOC_QUERY,
+                confidence=intent.confidence,
                 action="create_event_from_doc",
                 message=f"I found the document '{doc_content.title}' but couldn't find the {missing}. When should this meeting be scheduled?",
                 data={
@@ -4145,6 +5000,7 @@ class IntentService:
             return IntentResult(
                 success=True,
                 intent_type=IntentResultType.DOC_QUERY,
+                confidence=intent.confidence,
                 action="create_event_from_doc",
                 message=f"Created event '{details.event_title}' on {date_str} at {time_str}.",
                 response=f"I've created the meeting '{details.event_title}' for {date_str} at {time_str} and linked the document.",
@@ -4167,6 +5023,314 @@ class IntentService:
                 success=False,
                 intent_type=IntentResultType.ERROR,
                 message=f"Failed to create event: {str(e)}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+
+    # ---------------------------------------------------------------------------
+    # DISPLAY CONTENT (SCENE GRAPH) HANDLING
+    # ---------------------------------------------------------------------------
+
+    async def _fetch_realtime_data_for_scene(
+        self,
+        user_request: str,
+        layout_hints: list,
+    ) -> Dict[str, Any]:
+        """
+        Use Gemini with web search to fetch real-time data for scene components.
+        
+        Sprint 4.1: This method detects what type of real-time data is needed 
+        (weather, news, etc.) and uses Gemini's grounding capability to fetch it 
+        BEFORE calling Claude for scene generation.
+        
+        Args:
+            user_request: Original user request
+            layout_hints: Parsed layout hints
+        
+        Returns:
+            Dict with component_type → data mapping
+            Example: {"weather_current": {"temperature": 25, "condition": "snow"}}
+        """
+        from app.ai.providers.gemini import gemini_provider
+        import json
+        
+        realtime_data = {}
+        
+        # Check if user wants weather data
+        weather_keywords = ["clima", "weather", "temperatura", "temperature", "tiempo"]
+        if any(keyword in user_request.lower() for keyword in weather_keywords):
+            # Extract location from request
+            location = self._extract_location_from_request(user_request)
+            if not location:
+                location = "current location"  # Default
+            
+            # Use Gemini with web search to fetch weather
+            prompt = f"""Get current weather for {location}.
+
+Return ONLY a JSON object with this exact structure (no explanation, no markdown):
+{{
+  "temperature": <number in Fahrenheit>,
+  "condition": "<clear|cloudy|partly_cloudy|rain|snow|thunderstorm|fog>",
+  "humidity": <number 0-100>,
+  "wind_speed": <number in mph>,
+  "location": "{location}"
+}}"""
+            
+            try:
+                response = await gemini_provider.generate_with_grounding(
+                    prompt=prompt,
+                    system_prompt="You are a weather data extractor. Return ONLY valid JSON with no markdown formatting.",
+                    use_search=True,
+                    temperature=0.1,
+                    max_tokens=200,
+                )
+                
+                if response.success:
+                    # Clean response - remove markdown code blocks if present
+                    content = response.content.strip()
+                    if content.startswith("```"):
+                        # Remove markdown code blocks
+                        lines = content.split("\n")
+                        content = "\n".join(
+                            line for line in lines 
+                            if not line.startswith("```")
+                        ).strip()
+                    
+                    weather_data = json.loads(content)
+                    weather_data["is_placeholder"] = False  # Mark as real data
+                    weather_data["fetched_via"] = "gemini_grounding"
+                    realtime_data["weather_current"] = weather_data
+                    logger.info(
+                        f"Fetched real weather for {location}: "
+                        f"{weather_data.get('temperature')}°F, {weather_data.get('condition')}"
+                    )
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse weather JSON from Gemini: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch weather data via Gemini: {e}")
+                # Don't fail - Claude will use placeholder if needed
+        
+        # Future extensibility: Add similar blocks for news, stocks, etc.
+        # if any(kw in user_request.lower() for kw in ["news", "noticias"]):
+        #     realtime_data["news_feed"] = await self._fetch_news_via_gemini(user_request)
+        
+        return realtime_data
+    
+    def _extract_location_from_request(self, user_request: str) -> Optional[str]:
+        """
+        Extract location from user request.
+        
+        Examples:
+            "clima de Alaska" → "Alaska"
+            "weather in Miami" → "Miami"
+            "temperatura en New York" → "New York"
+            "show weather for London" → "London"
+        """
+        import re
+        
+        # Spanish patterns - greedy capture up to end of sentence or punctuation
+        spanish_match = re.search(
+            r'(?:clima|tiempo|temperatura)\s+(?:de|en)\s+([A-Za-z][A-Za-z\s]*[A-Za-z])',
+            user_request,
+            re.IGNORECASE
+        )
+        if spanish_match:
+            # Clean up - remove trailing common words
+            location = spanish_match.group(1).strip()
+            # Remove common trailing words that aren't part of place names
+            location = re.sub(r'\s+(en|on|the|la|el|para|for).*$', '', location, flags=re.IGNORECASE)
+            return location.strip()
+        
+        # English patterns - greedy capture
+        english_match = re.search(
+            r'(?:weather|climate|temperature)\s+(?:in|for|of)\s+([A-Za-z][A-Za-z\s]*[A-Za-z])',
+            user_request,
+            re.IGNORECASE
+        )
+        if english_match:
+            location = english_match.group(1).strip()
+            # Remove common trailing words
+            location = re.sub(r'\s+(on|the|screen|tv|display|pantalla).*$', '', location, flags=re.IGNORECASE)
+            return location.strip()
+        
+        # Try to find capitalized place names after show/display
+        place_match = re.search(
+            r'(?:show|display|muestra|mostrar)\s+.*?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+            user_request
+        )
+        if place_match:
+            return place_match.group(1).strip()
+        
+        return None
+
+    async def _handle_display_content(
+        self,
+        request_id: str,
+        intent: DisplayContentIntent,
+        user_id: UUID,
+        devices: List[Device],
+        start_time: float,
+        db: Session,
+    ) -> IntentResult:
+        """
+        Handle display content intents by generating and sending scene graphs.
+        
+        Sprint 4.0: Scene Graph implementation for creative device layouts.
+        
+        Flow:
+        1. Resolve target device (from intent.device_name or first online device)
+        2. Detect default scene type or use custom layout
+        3. Normalize layout hints to LayoutHint objects
+        4. Generate scene via SceneService
+        5. Send scene to device via WebSocket
+        6. Return result with component summary
+        """
+        from app.ai.scene.service import scene_service
+        from app.ai.scene.defaults import detect_default_scene_type
+        
+        logger.info(
+            f"[{request_id}] Handling display content intent",
+            extra={
+                "info_type": intent.info_type,
+                "layout_type": intent.layout_type,
+                "layout_hints": intent.layout_hints,
+                "device_name": intent.device_name,
+            }
+        )
+        
+        try:
+            # Resolve target device
+            target_device = None
+            if intent.device_name:
+                target_device, match_confidence = device_mapper.match(intent.device_name, devices)
+                if not target_device:
+                    processing_time = (time.time() - start_time) * 1000
+                    alternatives = device_mapper.match_all(intent.device_name, devices, limit=3)
+                    suggestion = ""
+                    if alternatives:
+                        names = [f'"{d.name}"' for d, _ in alternatives]
+                        suggestion = f" Did you mean: {', '.join(names)}?"
+                    
+                    return IntentResult(
+                        success=False,
+                        intent_type=IntentResultType.DISPLAY_CONTENT,
+                        message=f"I couldn't find a device matching '{intent.device_name}'.{suggestion}",
+                        processing_time_ms=processing_time,
+                        request_id=request_id,
+                    )
+            else:
+                # Use first online device with display capability
+                target_device = next((d for d in devices if d.is_online), None)
+            
+            if not target_device:
+                processing_time = (time.time() - start_time) * 1000
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.DISPLAY_CONTENT,
+                    message="No display device available. Please connect a device first.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            # Check if device is online
+            if not target_device.is_online:
+                processing_time = (time.time() - start_time) * 1000
+                return IntentResult(
+                    success=False,
+                    intent_type=IntentResultType.DISPLAY_CONTENT,
+                    device=target_device,
+                    message=f"'{target_device.name}' is currently offline.",
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+            
+            # Detect default scene type for optimized generation
+            default_type = detect_default_scene_type(
+                info_type=intent.info_type,
+                layout_hints=intent.layout_hints,
+            )
+            logger.info(f"[{request_id}] Detected default scene type: {default_type}")
+            
+            # Normalize layout hints to structured LayoutHint objects
+            normalized_hints = scene_service.normalize_layout_hints(intent.layout_hints)
+            
+            # Sprint 4.1: Fetch real-time data BEFORE calling Claude for scene generation
+            realtime_data = await self._fetch_realtime_data_for_scene(
+                user_request=intent.original_text,
+                layout_hints=intent.layout_hints,
+            )
+            if realtime_data:
+                logger.info(f"[{request_id}] Fetched real-time data for: {list(realtime_data.keys())}")
+            
+            # Generate scene via SceneService (now with real-time data)
+            logger.info(f"[{request_id}] Generating scene with {len(normalized_hints)} layout hints")
+            scene = await scene_service.generate_scene(
+                layout_hints=normalized_hints,
+                info_type=intent.info_type,
+                target_devices=[str(target_device.id)],
+                user_id=str(user_id),
+                user_request=intent.original_text,
+                db=db,
+                realtime_data=realtime_data,  # NEW: Pass real-time data
+            )
+            
+            # Send scene to device via WebSocket
+            scene_dict = scene.model_dump(mode="json")
+            
+            # Send scene to device using the display_scene command
+            result = await command_service.display_scene(
+                device_id=target_device.id,
+                scene=scene_dict,
+            )
+            
+            if not result.success:
+                raise Exception(f"Failed to send scene to device: {result.error}")
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            # Track command for monitoring (same as _execute_content_action)
+            ai_monitor.track_command(
+                request_id=request_id,
+                device_id=target_device.id,
+                device_name=target_device.name,
+                action="display_scene",
+                command_id=result.command_id,
+                success=result.success,
+                error=result.error,
+            )
+            
+            # Build user-friendly response with component summary
+            component_summary = ", ".join(
+                [c.type for c in scene.components[:3]]
+            )
+            if len(scene.components) > 3:
+                component_summary += f" and {len(scene.components) - 3} more"
+            
+            return IntentResult(
+                success=True,
+                intent_type=IntentResultType.DISPLAY_CONTENT,
+                confidence=intent.confidence,
+                device=target_device,
+                message=f"I've updated {target_device.name} with {component_summary}.",
+                data={
+                    "scene_id": scene.scene_id,
+                    "scene": scene_dict,
+                    "target_device": str(target_device.id),
+                    "layout_intent": scene.layout.intent.value,
+                },
+                command_sent=result.success,
+                command_id=result.command_id,
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+                
+        except Exception as e:
+            logger.error(f"[{request_id}] Failed to handle display content: {e}", exc_info=True)
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.ERROR,
+                message=f"Failed to update display: {str(e)}",
                 processing_time_ms=processing_time,
                 request_id=request_id,
             )

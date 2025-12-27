@@ -40,6 +40,9 @@ class CommandType:
     # Content display commands (Sprint 3.5)
     SHOW_CONTENT = "show_content"  # Display a URL on screen
     CLEAR_CONTENT = "clear_content"  # Clear displayed content
+    
+    # Scene graph display (Sprint 4.0)
+    DISPLAY_SCENE = "display_scene"  # Display a scene graph layout
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +201,20 @@ class CommandService:
     async def clear_content(self, device_id: UUID) -> CommandResult:
         """Clear the currently displayed content."""
         return await self.send_command(device_id, CommandType.CLEAR_CONTENT)
+    
+    async def display_scene(self, device_id: UUID, scene: dict) -> CommandResult:
+        """
+        Display a scene graph layout on the device screen.
+        
+        Args:
+            device_id: Target device
+            scene: Scene graph JSON containing layout and components
+        """
+        return await self.send_command(
+            device_id,
+            CommandType.DISPLAY_SCENE,
+            {"scene": scene}
+        )
 
 
 # ---------------------------------------------------------------------------

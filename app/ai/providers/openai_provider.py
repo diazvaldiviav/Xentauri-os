@@ -109,29 +109,28 @@ class OpenAIProvider(AIProvider):
             )
         
         try:
-            # Build messages array
-            messages = []
+            # Combine system prompt and user prompt into single input
+            input_text = prompt
             if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
+                input_text = f"{system_prompt}\n\n{prompt}"
             
-            # Make the API request
-            response = await self._client.chat.completions.create(
+            # Make the API request with new responses API
+            response = await self._client.responses.create(
                 model=self.model,
-                messages=messages,
+                input=input_text,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_output_tokens=max_tokens,
             )
             
             latency_ms = self._measure_latency(start_time)
             
-            # Extract content
-            content = response.choices[0].message.content or ""
-            
-            # Extract usage
+            # Extract content from new response format
+            content = response.output_text or ""
+
+            # Extract usage (Responses API uses input_tokens/output_tokens)
             usage = TokenUsage(
-                prompt_tokens=response.usage.prompt_tokens if response.usage else 0,
-                completion_tokens=response.usage.completion_tokens if response.usage else 0,
+                prompt_tokens=response.usage.input_tokens if response.usage else 0,
+                completion_tokens=response.usage.output_tokens if response.usage else 0,
             )
             
             logger.info(f"OpenAI request completed in {latency_ms:.0f}ms, tokens: {usage.total_tokens}")
@@ -183,25 +182,24 @@ class OpenAIProvider(AIProvider):
             )
         
         try:
-            # Build messages with JSON instruction
-            messages = []
+            # Combine system prompt with JSON instruction
             system_content = system_prompt or ""
             system_content += "\n\nYou must respond with valid JSON only, no explanation."
-            messages.append({"role": "system", "content": system_content})
-            messages.append({"role": "user", "content": prompt})
-            
-            # Use JSON response format
-            response = await self._client.chat.completions.create(
+            input_text = f"{system_content}\n\n{prompt}"
+
+            # Call responses API (JSON mode via prompt instructions)
+            # Note: Responses API doesn't use response_format like Chat Completions
+            # Instead, we rely on explicit instructions in the prompt
+            response = await self._client.responses.create(
                 model=self.model,
-                messages=messages,
+                input=input_text,
                 temperature=0.2,  # Low temperature for consistency
-                max_tokens=1024,
-                response_format={"type": "json_object"},
+                max_output_tokens=1024,
             )
             
             latency_ms = self._measure_latency(start_time)
             
-            content = response.choices[0].message.content or "{}"
+            content = response.output_text or "{}"
             
             # Validate JSON
             try:
@@ -214,11 +212,12 @@ class OpenAIProvider(AIProvider):
                     latency_ms=latency_ms
                 )
             
+            # Extract usage (Responses API uses input_tokens/output_tokens)
             usage = TokenUsage(
-                prompt_tokens=response.usage.prompt_tokens if response.usage else 0,
-                completion_tokens=response.usage.completion_tokens if response.usage else 0,
+                prompt_tokens=response.usage.input_tokens if response.usage else 0,
+                completion_tokens=response.usage.output_tokens if response.usage else 0,
             )
-            
+
             logger.info(f"OpenAI JSON request completed in {latency_ms:.0f}ms")
             
             return AIResponse(

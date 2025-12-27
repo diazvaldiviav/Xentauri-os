@@ -20,12 +20,35 @@ logger = logging.getLogger("jarvis.conversation")
 
 
 @dataclass
+class ConversationTurn:
+    """
+    A single turn in the conversation (user message + assistant response).
+    
+    Sprint 4.1: Enables multi-turn conversation memory.
+    """
+    user_message: str
+    assistant_response: str
+    intent_type: Optional[str] = None
+    timestamp: Optional[datetime] = None
+    
+    def to_dict(self) -> Dict:
+        return {
+            "user": self.user_message,
+            "assistant": self.assistant_response[:200] if self.assistant_response else None,
+            "intent": self.intent_type,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+        }
+
+
+@dataclass
 class UserConversationState:
     """
     State for a single user's conversation.
     
     Tracks recent event, document, and search references
     to enable context-aware intent parsing.
+    
+    Sprint 4.1: Now includes conversation history for multi-turn awareness.
     """
     # Event context - last calendar event referenced/displayed
     last_event_title: Optional[str] = None
@@ -44,6 +67,21 @@ class UserConversationState:
     last_search_type: Optional[str] = None  # "calendar" or "doc"
     last_search_timestamp: Optional[datetime] = None
     
+    # Sprint 4.1: Conversation history for multi-turn context
+    conversation_history: list = None  # List[ConversationTurn]
+    last_user_request: Optional[str] = None  # Most recent user message
+    last_assistant_response: Optional[str] = None  # Most recent AI response
+    last_intent_type: Optional[str] = None  # Type of the last intent
+    last_conversation_timestamp: Optional[datetime] = None
+    
+    # Pending content generation (for follow-ups like "si, hazlo")
+    pending_content_request: Optional[str] = None  # What user asked to generate
+    pending_content_type: Optional[str] = None  # "template", "notes", "checklist", etc.
+    
+    def __post_init__(self):
+        if self.conversation_history is None:
+            self.conversation_history = []
+    
     def to_dict(self) -> Dict:
         """Convert state to dictionary for logging/debugging."""
         return {
@@ -60,6 +98,13 @@ class UserConversationState:
                 "term": self.last_search_term,
                 "type": self.last_search_type,
             } if self.last_search_term else None,
+            "conversation": {
+                "last_user": self.last_user_request[:100] if self.last_user_request else None,
+                "last_assistant": self.last_assistant_response[:100] if self.last_assistant_response else None,
+                "last_intent": self.last_intent_type,
+                "pending_content": self.pending_content_request,
+                "history_length": len(self.conversation_history),
+            } if self.last_user_request else None,
         }
 
 
@@ -245,6 +290,168 @@ class ConversationContextService:
             UserConversationState or None
         """
         return self._contexts.get(user_id)
+    
+    # -------------------------------------------------------------------------
+    # CONVERSATION HISTORY (Sprint 4.1)
+    # -------------------------------------------------------------------------
+    
+    def add_conversation_turn(
+        self,
+        user_id: str,
+        user_message: str,
+        assistant_response: str,
+        intent_type: Optional[str] = None,
+    ) -> None:
+        """
+        Add a conversation turn to the history.
+        
+        Sprint 4.1: Tracks multi-turn conversations for context awareness.
+        
+        Args:
+            user_id: User identifier
+            user_message: What the user said
+            assistant_response: What the AI responded
+            intent_type: The intent type that was processed
+        """
+        context = self._get_or_create(user_id)
+        
+        # Create turn
+        turn = ConversationTurn(
+            user_message=user_message,
+            assistant_response=assistant_response,
+            intent_type=intent_type,
+            timestamp=datetime.now(timezone.utc),
+        )
+        
+        # Add to history (keep last 10 turns max)
+        context.conversation_history.append(turn)
+        if len(context.conversation_history) > 10:
+            context.conversation_history = context.conversation_history[-10:]
+        
+        # Update last turn fields
+        context.last_user_request = user_message
+        context.last_assistant_response = assistant_response
+        context.last_intent_type = intent_type
+        context.last_conversation_timestamp = datetime.now(timezone.utc)
+        
+        logger.debug(
+            f"Conversation turn added for user {user_id[:8]}... "
+            f"intent={intent_type}, history_len={len(context.conversation_history)}"
+        )
+    
+    def set_pending_content_request(
+        self,
+        user_id: str,
+        content_request: str,
+        content_type: str = "general",
+    ) -> None:
+        """
+        Set a pending content generation request.
+        
+        Sprint 4.1: Tracks when user asks for generated content
+        so follow-ups like "si, hazlo" can continue the generation.
+        
+        Args:
+            user_id: User identifier
+            content_request: What the user wants generated
+            content_type: Type of content (template, notes, checklist, etc.)
+        """
+        context = self._get_or_create(user_id)
+        context.pending_content_request = content_request
+        context.pending_content_type = content_type
+        logger.info(
+            f"Pending content set for user {user_id[:8]}... "
+            f"type={content_type}, request='{content_request[:50]}...'"
+        )
+    
+    def get_pending_content_request(self, user_id: str) -> Optional[Dict]:
+        """
+        Get pending content generation request if still valid.
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            Dict with request and type if valid, None otherwise
+        """
+        context = self._contexts.get(user_id)
+        if not context or not context.pending_content_request:
+            return None
+        
+        # Check TTL based on last conversation
+        if context.last_conversation_timestamp:
+            age = (datetime.now(timezone.utc) - context.last_conversation_timestamp).total_seconds()
+            if age > self._ttl:
+                return None
+        
+        return {
+            "request": context.pending_content_request,
+            "type": context.pending_content_type,
+        }
+    
+    def clear_pending_content(self, user_id: str) -> None:
+        """Clear pending content request after it's been fulfilled."""
+        context = self._contexts.get(user_id)
+        if context:
+            context.pending_content_request = None
+            context.pending_content_type = None
+            logger.debug(f"Pending content cleared for user {user_id[:8]}...")
+    
+    def get_conversation_history(
+        self,
+        user_id: str,
+        max_turns: int = 5,
+    ) -> list:
+        """
+        Get recent conversation history for context.
+        
+        Args:
+            user_id: User identifier
+            max_turns: Maximum number of turns to return
+            
+        Returns:
+            List of ConversationTurn dicts
+        """
+        context = self._contexts.get(user_id)
+        if not context or not context.conversation_history:
+            return []
+        
+        # Return most recent turns
+        recent = context.conversation_history[-max_turns:]
+        return [turn.to_dict() for turn in recent]
+    
+    def get_conversation_summary(self, user_id: str) -> Optional[str]:
+        """
+        Get a summary of recent conversation for AI prompts.
+        
+        Sprint 4.1: Provides formatted conversation history for AI context.
+        
+        Returns:
+            Formatted string with recent conversation or None
+        """
+        context = self._contexts.get(user_id)
+        if not context or not context.conversation_history:
+            return None
+        
+        # Check TTL
+        if context.last_conversation_timestamp:
+            age = (datetime.now(timezone.utc) - context.last_conversation_timestamp).total_seconds()
+            if age > self._ttl:
+                return None
+        
+        # Format last 3 turns for context
+        recent_turns = context.conversation_history[-3:]
+        lines = []
+        for turn in recent_turns:
+            lines.append(f"User: {turn.user_message}")
+            if turn.assistant_response:
+                # Truncate long responses
+                response = turn.assistant_response[:150]
+                if len(turn.assistant_response) > 150:
+                    response += "..."
+                lines.append(f"Assistant: {response}")
+        
+        return "\n".join(lines)
     
     def _get_or_create(self, user_id: str) -> UserConversationState:
         """Get or create context for user."""

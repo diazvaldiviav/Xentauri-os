@@ -90,7 +90,7 @@ class IntentResponse(BaseModel):
     """
     Response schema for the /intent endpoint.
     
-    Example:
+    Example (single action):
     {
         "success": true,
         "intent_type": "device_command",
@@ -99,16 +99,36 @@ class IntentResponse(BaseModel):
         "command_sent": true,
         "message": "Displaying calendar on Living Room TV"
     }
+    
+    Example (multi-action, Sprint 4.0.3):
+    {
+        "success": true,
+        "intent_type": "device_command",
+        "action": "clear_content",
+        "command_sent": true,
+        "data": {
+            "actions_executed": [
+                {"action": "clear_content", "success": true, "command_id": "xxx"},
+                {"action": "show_calendar", "success": true, "command_id": "yyy"}
+            ],
+            "commands_sent": 2
+        },
+        "message": "Cleared Living Room TV → Displaying calendar"
+    }
     """
     success: bool = Field(description="Whether the request was processed successfully")
     intent_type: str = Field(description="Type of intent detected")
     confidence: float = Field(description="Confidence score 0-1")
     device: Optional[Dict[str, Any]] = Field(default=None, description="Target device info")
-    action: Optional[str] = Field(default=None, description="Action performed")
+    action: Optional[str] = Field(default=None, description="Primary action performed")
     parameters: Optional[Dict[str, Any]] = Field(default=None, description="Action parameters")
-    command_sent: bool = Field(default=False, description="Whether command was sent")
-    command_id: Optional[str] = Field(default=None, description="Command ID if sent")
-    message: str = Field(description="Human-readable response message")
+    data: Optional[Dict[str, Any]] = Field(
+        default=None, 
+        description="Additional data (for multi-action: actions_executed[], commands_sent)"
+    )
+    command_sent: bool = Field(default=False, description="Whether any command was sent")
+    command_id: Optional[str] = Field(default=None, description="Primary command ID if sent")
+    message: str = Field(description="Human-readable response message (chained with → for multi-action)")
     response: Optional[str] = Field(default=None, description="AI response for conversations")
     processing_time_ms: Optional[float] = Field(default=None, description="Processing time")
     request_id: Optional[str] = Field(default=None, description="Request tracking ID")

@@ -179,6 +179,7 @@ class ConversationContext:
     "this event", "that doc", "the meeting".
     
     Sprint 3.9: Multi-turn conversation context awareness.
+    Sprint 4.1: Extended with full conversation history.
     
     When a user asks "is there a doc for this event?" after viewing
     an event, this context helps resolve "this event" to the actual event.
@@ -202,6 +203,17 @@ class ConversationContext:
     last_search_type: Optional[str] = None  # "calendar", "doc", "general"
     last_search_timestamp: Optional[datetime] = None
     
+    # Sprint 4.1: Conversation history for multi-turn context
+    last_user_request: Optional[str] = None
+    last_assistant_response: Optional[str] = None
+    last_intent_type: Optional[str] = None
+    last_conversation_timestamp: Optional[datetime] = None
+    conversation_history: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Pending content generation (for follow-ups like "si, hazlo")
+    pending_content_request: Optional[str] = None
+    pending_content_type: Optional[str] = None
+    
     def has_recent_event(self, max_age_seconds: int = 300) -> bool:
         """Check if there's a recent event in context (within TTL)."""
         if not self.last_event_timestamp:
@@ -214,6 +226,13 @@ class ConversationContext:
         if not self.last_doc_timestamp:
             return False
         age = (datetime.now(timezone.utc) - self.last_doc_timestamp).total_seconds()
+        return age < max_age_seconds
+    
+    def has_recent_conversation(self, max_age_seconds: int = 300) -> bool:
+        """Check if there's a recent conversation in context (within TTL)."""
+        if not self.last_conversation_timestamp:
+            return False
+        age = (datetime.now(timezone.utc) - self.last_conversation_timestamp).total_seconds()
         return age < max_age_seconds
     
     def to_dict(self) -> Dict[str, Any]:
@@ -235,6 +254,13 @@ class ConversationContext:
                 "term": self.last_search_term,
                 "type": self.last_search_type,
             } if self.last_search_term else None,
+            "conversation": {
+                "last_user": self.last_user_request[:100] if self.last_user_request else None,
+                "last_assistant": self.last_assistant_response[:100] if self.last_assistant_response else None,
+                "last_intent": self.last_intent_type,
+                "pending_content": self.pending_content_request,
+                "is_recent": self.has_recent_conversation(),
+            } if self.last_user_request else None,
         }
 
 
@@ -688,26 +714,48 @@ def _build_conversation_context(user_id: str) -> Optional[ConversationContext]:
     Build conversation context from the conversation_context_service.
     
     Sprint 3.9: Multi-turn conversation context awareness.
+    Sprint 4.1: Extended with conversation history.
     
-    Retrieves the last referenced event, document, and search from
-    the in-memory cache for context-aware intent parsing.
+    Retrieves the last referenced event, document, search, and conversation
+    from the in-memory cache for context-aware intent parsing.
+    
+    Returns:
+        ConversationContext if user has conversation history, None otherwise.
     """
     from app.services.conversation_context_service import conversation_context_service
     
-    # Get context from service
+    # Get context from service (may be None for new users)
     ctx = conversation_context_service.get_context(user_id)
+    
+    # Return None if user has no conversation context yet
+    if ctx is None:
+        return None
+    
+    # Get conversation history
+    history = conversation_context_service.get_conversation_history(user_id, max_turns=5)
     
     # Build dataclass from service context
     return ConversationContext(
+        # Event context
         last_event_title=ctx.last_event_title,
         last_event_id=ctx.last_event_id,
         last_event_date=ctx.last_event_date,
         last_event_timestamp=ctx.last_event_timestamp,
+        # Doc context
         last_doc_id=ctx.last_doc_id,
         last_doc_url=ctx.last_doc_url,
         last_doc_title=ctx.last_doc_title,
         last_doc_timestamp=ctx.last_doc_timestamp,
+        # Search context
         last_search_term=ctx.last_search_term,
         last_search_type=ctx.last_search_type,
         last_search_timestamp=ctx.last_search_timestamp,
+        # Sprint 4.1: Conversation context
+        last_user_request=ctx.last_user_request,
+        last_assistant_response=ctx.last_assistant_response,
+        last_intent_type=ctx.last_intent_type,
+        last_conversation_timestamp=ctx.last_conversation_timestamp,
+        conversation_history=history,
+        pending_content_request=ctx.pending_content_request,
+        pending_content_type=ctx.pending_content_type,
     )

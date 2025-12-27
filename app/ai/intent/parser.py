@@ -40,8 +40,10 @@ from app.ai.intent.schemas import (
     CalendarCreateIntent,
     CalendarEditIntent,
     DocQueryIntent,
+    DisplayContentIntent,
     ConversationIntent,
     ParsedCommand,
+    SequentialAction,  # Sprint 4.0.3: Multi-action support
 )
 
 logger = logging.getLogger("jarvis.ai.intent")
@@ -191,6 +193,9 @@ class IntentParser:
         elif intent_type == "doc_query":
             return self._create_doc_query(data, original_text, confidence, reasoning)
         
+        elif intent_type == "display_content":
+            return self._create_display_content_intent(data, original_text, confidence, reasoning)
+        
         elif intent_type == "conversation":
             return self._create_conversation_intent(data, original_text, confidence, reasoning)
         
@@ -216,6 +221,9 @@ class IntentParser:
         if action_str in ("show_calendar", "show_content") and parameters:
             parameters = self._resolve_parameters_dates(parameters, original_text)
         
+        # Sprint 4.0.3: Extract sequential actions for multi-action requests
+        sequential_actions = self._extract_sequential_actions(data, original_text)
+        
         return DeviceCommand(
             confidence=confidence,
             original_text=original_text,
@@ -223,6 +231,7 @@ class IntentParser:
             device_name=device_name,
             action=action,
             parameters=parameters if parameters else None,
+            sequential_actions=sequential_actions,
         )
     
     def _resolve_parameters_dates(self, parameters: Dict, original_text: str) -> Dict:
@@ -259,6 +268,52 @@ class IntentParser:
                 parameters["date"] = yesterday.strftime("%Y-%m-%d")
         
         return parameters
+    
+    def _extract_sequential_actions(
+        self, data: Dict[str, Any], original_text: str
+    ) -> list[SequentialAction]:
+        """
+        Extract sequential actions from parsed AI response.
+        
+        Sprint 4.0.3: Multi-action support allows users to chain actions like
+        "clear the screen AND show my calendar".
+        
+        The AI returns a sequential_actions array that we convert to SequentialAction objects.
+        """
+        raw_actions = data.get("sequential_actions", [])
+        
+        if not raw_actions or not isinstance(raw_actions, list):
+            return []
+        
+        sequential_actions = []
+        for action_data in raw_actions:
+            if not isinstance(action_data, dict):
+                logger.warning(f"Skipping invalid sequential action: {action_data}")
+                continue
+            
+            action_str = action_data.get("action", "")
+            if not action_str:
+                logger.warning(f"Skipping sequential action without 'action' field: {action_data}")
+                continue
+            
+            # Resolve parameters dates if needed
+            params = action_data.get("parameters")
+            if params and action_str in ("show_calendar", "show_content"):
+                params = self._resolve_parameters_dates(params, original_text)
+            
+            seq_action = SequentialAction(
+                action=action_str,
+                device_name=action_data.get("device_name"),
+                parameters=params,
+                content_type=action_data.get("content_type"),
+            )
+            sequential_actions.append(seq_action)
+            logger.debug(f"Extracted sequential action: {seq_action.action} → {seq_action.device_name}")
+        
+        if sequential_actions:
+            logger.info(f"Multi-action request detected: {len(sequential_actions)} sequential actions")
+        
+        return sequential_actions
     
     def _create_device_query(
         self,
@@ -318,6 +373,44 @@ class IntentParser:
             action=action,
         )
     
+    def _create_display_content_intent(
+        self,
+        data: Dict[str, Any],
+        original_text: str,
+        confidence: float,
+        reasoning: Optional[str],
+    ) -> DisplayContentIntent:
+        """
+        Create a DisplayContentIntent for scene-based display requests.
+        
+        Sprint 4.0: Handles requests for custom layouts like
+        "calendar on the left with clock in the corner".
+        """
+        # Extract classification fields
+        info_type = data.get("info_type", "calendar")
+        output_type = data.get("output_type", "display")
+        layout_type = data.get("layout_type", "default")
+        
+        # Extract layout hints (list of strings like "calendar left", "clock corner")
+        layout_hints = data.get("layout_hints", [])
+        if isinstance(layout_hints, str):
+            # Handle single hint as string
+            layout_hints = [layout_hints] if layout_hints else []
+        
+        # Extract target device if specified
+        device_name = data.get("device_name")
+        
+        return DisplayContentIntent(
+            confidence=confidence,
+            original_text=original_text,
+            reasoning=reasoning,
+            info_type=info_type,
+            output_type=output_type,
+            layout_type=layout_type,
+            layout_hints=layout_hints,
+            device_name=device_name,
+        )
+
     def _create_calendar_query(
         self,
         data: Dict[str, Any],
@@ -488,6 +581,7 @@ class IntentParser:
         Create a DocQueryIntent for document-related queries.
         
         Sprint 3.9: Handles read_doc, link_doc, open_doc, summarize_meeting_doc actions.
+        Sprint 4.0.2: Supports compound intents with also_display flag.
         """
         action_str = data.get("action", "summarize_meeting_doc").lower()
         action = self._map_action(action_str)
@@ -503,6 +597,10 @@ class IntentParser:
         # Extract query details
         question = data.get("question")
         device_name = data.get("device_name")
+        
+        # Sprint 4.0.2: Compound intent support
+        also_display = data.get("also_display", False)
+        display_device = data.get("display_device")
         
         # Try to extract doc ID from URL if present
         if doc_url and not doc_id:
@@ -523,6 +621,8 @@ class IntentParser:
             meeting_time=meeting_time,
             question=question,
             device_name=device_name,
+            also_display=also_display,
+            display_device=display_device,
         )
     
     def _extract_google_doc_id(self, text: str) -> Optional[str]:
@@ -998,6 +1098,9 @@ class IntentParser:
             "open_doc": ActionType.OPEN_DOC,
             "summarize_meeting_doc": ActionType.SUMMARIZE_MEETING_DOC,
             "create_event_from_doc": ActionType.CREATE_EVENT_FROM_DOC,
+            # Display Content actions (Sprint 4.0 - Scene Graph)
+            "display_scene": ActionType.DISPLAY_SCENE,
+            "refresh_display": ActionType.REFRESH_DISPLAY,
         }
         return action_map.get(action_str, ActionType.STATUS)
     
