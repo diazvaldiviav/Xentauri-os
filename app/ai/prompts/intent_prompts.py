@@ -2103,6 +2103,28 @@ Output: {
   "reasoning": "'that event' refers to 'Client Call' from previous assistant response. Extract and use as search_term."
 }
 
+Input: "oh rayos y despues de ese evento tengo algo pendiente es que quiero ir a la playa"
+Context:
+Last user message: tengo algun evento hoy?
+Last assistant response: Sí, tienes 1 evento hoy: Reunión con el equipo a las 3:00 PM
+Last intent type: calendar_query
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.9,
+  "action": "count_events",
+  "date_range": "today_after",
+  "search_term": null,
+  "original_text": "oh rayos y despues de ese evento tengo algo pendiente es que quiero ir a la playa",
+  "reasoning": "Complex request: User wants to know if they have events AFTER 'ese evento' (Reunion con el equipo). Ignore conversational parts like 'oh rayos' and 'quiero ir a la playa'. Focus on the calendar query. Use date_range=today_after to check events after 3pm."
+}
+
+CRITICAL RULES FOR COMPLEX/LONG REQUESTS:
+1. Ignore conversational filler: "oh rayos", "wow", "que pena", "es que", etc.
+2. Extract ONLY the core action/query
+3. Keep reasoning field concise (< 150 chars) to avoid unterminated string errors
+4. If request has multiple parts, prioritize the main intent
+5. NEVER let reasoning field cause JSON syntax errors
+
 CRITICAL: If NO conversation context is available, fallback to generic term extraction:
 - "ese evento" → search_term: "evento" (fallback)
 - "esa reunión" → search_term: "reunión" (fallback)

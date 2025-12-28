@@ -90,7 +90,8 @@ class IntentParser:
         start_time = time.time()
         logger.info(f"Parsing intent: {text[:50]}...")
         
-        # Build context string with devices AND pending operation state (Bug Fix: Sprint 3.9.1)
+        # Build context string with devices, pending operations, conversation history, and generated content
+        # Sprint 4.2 FIX: Include conversation context for memory-aware parsing
         context_parts = []
         if context:
             # Add device context
@@ -124,6 +125,55 @@ class IntentParser:
                 
                 if pending_lines:
                     context_parts.append("Pending operation state:\n" + "\n".join(pending_lines))
+            
+            # Sprint 4.2: Add conversation history context
+            if "conversation_context" in context and context["conversation_context"]:
+                conv_ctx = context["conversation_context"]
+                conv_lines = []
+                
+                # Add recent conversation if available
+                if conv_ctx.get("conversation"):
+                    conv = conv_ctx["conversation"]
+                    if conv.get("last_user") and conv.get("is_recent"):
+                        conv_lines.append(f"Last user message: {conv['last_user']}")
+                    if conv.get("last_assistant") and conv.get("is_recent"):
+                        conv_lines.append(f"Last assistant response: {conv['last_assistant'][:150]}...")
+                    if conv.get("last_intent"):
+                        conv_lines.append(f"Last intent type: {conv['last_intent']}")
+                
+                if conv_lines:
+                    context_parts.append("Recent conversation:\n" + "\n".join(conv_lines))
+            
+            # Sprint 4.2: Add generated content context (CRITICAL for "show that note" references)
+            if "generated_content" in context and context["generated_content"]:
+                gen_content = context["generated_content"]
+                from datetime import datetime, timezone
+                
+                # Calculate how long ago the content was generated
+                timestamp = gen_content.get("timestamp")
+                if timestamp:
+                    if isinstance(timestamp, datetime):
+                        elapsed = (datetime.now(timezone.utc) - timestamp).total_seconds()
+                    else:
+                        elapsed = 0
+                    minutes_ago = int(elapsed / 60)
+                else:
+                    minutes_ago = 0
+                
+                content_preview = gen_content.get("content", "")[:200]
+                content_type = gen_content.get("type", "content")
+                content_title = gen_content.get("title", "Untitled")
+                
+                gen_context = f"""RECENTLY GENERATED CONTENT IN MEMORY ({minutes_ago} min ago):
+Type: {content_type}
+Title: {content_title}
+Preview: {content_preview}...
+
+IMPORTANT: If user references "that note", "the template", "what you created", "ese informe", "esa nota" etc., 
+this refers to the content above (in WORKING MEMORY), NOT Google Docs.
+Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
+                
+                context_parts.append(gen_context)
         
         context_str = ""
         if context_parts:
@@ -153,10 +203,31 @@ class IntentParser:
             intent = self._create_intent(intent_data, text)
             logger.info(f"Parsed intent in {processing_time:.0f}ms: {intent.intent_type}")
             return intent
-            
+
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse intent JSON: {e}")
-            return self._create_unknown_intent(text, str(e))
+            logger.debug(f"Raw Gemini response: {response.content[:500]}...")
+
+            # Sprint 4.3.1: Try to clean common JSON errors
+            try:
+                import re
+                cleaned_content = response.content
+
+                # Remove trailing commas
+                cleaned_content = re.sub(r',(\s*[}\]])', r'\1', cleaned_content)
+
+                # Fix unterminated strings - add closing quotes before newlines followed by }
+                cleaned_content = re.sub(r'(["\'])\s*\n\s*}', r'\1}', cleaned_content)
+
+                # Try parsing again
+                intent_data = json.loads(cleaned_content)
+                intent = self._create_intent(intent_data, text)
+                logger.info(f"Recovered from JSON error with cleanup")
+                return intent
+            except Exception as retry_error:
+                logger.error(f"JSON cleanup failed: {retry_error}")
+                return self._create_unknown_intent(text, str(e))
+
         except Exception as e:
             logger.error(f"Intent creation failed: {e}")
             return self._create_unknown_intent(text, str(e))
