@@ -931,13 +931,17 @@ Respond naturally in the SAME language. Be encouraging.'''
             search = kwargs.get('search_term', 'events')
             period = kwargs.get('period', '')
 
-            # More explicit prompt to prevent hallucination
+            # Sprint 4.3.3: ANTI-HALLUCINATION - Use strict templates to prevent number hallucination
             if count == 0:
                 prompt = f'''User asked: "{user_request}"
 
-IMPORTANT: They have ZERO (0) "{search}" events {period}.
+FACT: Event count = 0 (ZERO)
 
-Tell them they have NO events matching their query. Respond in their language.'''
+You MUST respond with:
+- Spanish: "No tienes eventos{' de ' + search if search else ''} {period}"
+- English: "You have no {search + ' ' if search else ''}events {period}"
+
+Use the EXACT number from FACT. DO NOT invent numbers. Respond in their language.'''
             elif count == 1:
                 # If we have the event details, include them
                 event = kwargs.get('event')
@@ -946,23 +950,37 @@ Tell them they have NO events matching their query. Respond in their language.''
                     time_str = event.get_time_display()
                     prompt = f'''User asked: "{user_request}"
 
-IMPORTANT: They have EXACTLY ONE (1) event {period}.
-Event Details: "{title}" at {time_str}
+FACT: Event count = 1 (ONE)
+FACT: Event title = "{title}"
+FACT: Event time = {time_str}
 
-Tell them they have 1 event AND mention the event name and time. Respond in their language.'''
+You MUST respond with:
+- Spanish: "Sí, tienes 1 evento {period}: {title} a las {time_str}"
+- English: "Yes, you have 1 event {period}: {title} at {time_str}"
+
+Use EXACTLY 1 event. DO NOT say 100 or any other number. Respond in their language.'''
                 else:
                     # Fallback if no event object provided
                     prompt = f'''User asked: "{user_request}"
 
-IMPORTANT: They have EXACTLY ONE (1) "{search}" event {period}.
+FACT: Event count = 1 (ONE)
 
-Tell them they have 1 event. Respond in their language.'''
+You MUST respond with:
+- Spanish: "Sí, tienes 1 evento{' de ' + search if search else ''} {period}"
+- English: "Yes, you have 1 {search + ' ' if search else ''}event {period}"
+
+Use EXACTLY the number 1. DO NOT say 100 or any other number. Respond in their language.'''
             else:
+                # Sprint 4.3.3: Strict format for multiple events to prevent hallucination
                 prompt = f'''User asked: "{user_request}"
 
-IMPORTANT: They have EXACTLY {count} "{search}" events {period}.
+FACT: Event count = {count}
 
-Tell them the COUNT ({count} events). Respond in their language.'''
+You MUST respond with the EXACT count from FACT above:
+- Spanish: "Sí, tienes {count} eventos{' de ' + search if search else ''} {period}"
+- English: "Yes, you have {count} {search + ' ' if search else ''}events {period}"
+
+CRITICAL: Use EXACTLY {count}, not 100, not 10, EXACTLY {count}. Respond in their language.'''
         
         elif template_type == "list":
             events = kwargs.get('events', [])
