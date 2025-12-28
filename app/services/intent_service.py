@@ -823,7 +823,16 @@ Respond in the SAME language as their request.'''
                 )
             
             processing_time = (time.time() - start_time) * 1000
-            
+
+            # Sprint 4.3.0: Save calendar query response to conversation context
+            from app.services.conversation_context_service import conversation_context_service
+            conversation_context_service.add_conversation_turn(
+                user_id=str(user_id),
+                user_message=original_text,
+                assistant_response=message,
+                intent_type="calendar_query",
+            )
+
             return IntentResult(
                 success=True,
                 intent_type=IntentResultType.CALENDAR_QUERY,
@@ -4345,7 +4354,19 @@ IMPORTANT INSTRUCTIONS:
                 else:
                     # No device available - log but don't fail the doc query
                     logger.info("Compound intent: also_display requested but no device available")
-        
+
+        # Sprint 4.3.0: Save doc query response to conversation context
+        if result and result.success and result.message:
+            from app.services.conversation_context_service import conversation_context_service
+            # Reconstruct original user message from intent
+            user_message = getattr(intent, 'original_text', f"Doc query: {action}")
+            conversation_context_service.add_conversation_turn(
+                user_id=str(user_id),
+                user_message=user_message,
+                assistant_response=result.message,
+                intent_type="doc_query",
+            )
+
         return result
 
     async def _handle_link_doc(
@@ -5540,16 +5561,26 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
                     device_id=target_device.id,
                     scene=scene_dict,
                 )
-                
+
                 processing_time = (time.time() - start_time) * 1000
-                
+
+                memory_message = f"Showing {generated_content['type']}: {content_title} on {target_device.name}"
+
+                # Sprint 4.3.0: Save display content (from memory) response to conversation context
+                conversation_context_service.add_conversation_turn(
+                    user_id=str(user_id),
+                    user_message=intent.original_text or "Display generated content",
+                    assistant_response=memory_message,
+                    intent_type="display_content",
+                )
+
                 return IntentResult(
                     success=result.success,
                     intent_type=IntentResultType.DISPLAY_CONTENT,
                     confidence=0.95,
                     device=target_device,
                     action="display_scene",
-                    message=f"Showing {generated_content['type']}: {content_title} on {target_device.name}",
+                    message=memory_message,
                     command_sent=result.success,
                     command_id=result.command_id,
                     processing_time_ms=processing_time,
@@ -5716,13 +5747,23 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
             )
             if len(scene.components) > 3:
                 component_summary += f" and {len(scene.components) - 3} more"
-            
+
+            response_message = f"I've updated {target_device.name} with {component_summary}."
+
+            # Sprint 4.3.0: Save display content response to conversation context
+            conversation_context_service.add_conversation_turn(
+                user_id=str(user_id),
+                user_message=intent.original_text or "Display content request",
+                assistant_response=response_message,
+                intent_type="display_content",
+            )
+
             return IntentResult(
                 success=True,
                 intent_type=IntentResultType.DISPLAY_CONTENT,
                 confidence=intent.confidence,
                 device=target_device,
-                message=f"I've updated {target_device.name} with {component_summary}.",
+                message=response_message,
                 data={
                     "scene_id": scene.scene_id,
                     "scene": scene_dict,
