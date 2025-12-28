@@ -437,6 +437,32 @@ def build_scene_generation_prompt(
             conversation_section += f"  Content:\n{sanitized_content}\n"
             conversation_section += "\nIMPORTANT: Use a text_block component to display this generated content! Include the content in the 'props.content' and 'data.content' fields.\n"
         
+        # Sprint 4.3.2: Include last event context (for "mi plan", "my meeting", etc.)
+        if conversation_context.get("last_event"):
+            event = conversation_context["last_event"]
+            conversation_section += "\n*** RECENTLY CREATED/REFERENCED EVENT (CRITICAL) ***\n"
+            conversation_section += f"  Title: {event.get('title', 'Unknown')}\n"
+            if event.get('id'):
+                conversation_section += f"  Event ID: {event['id']}\n"
+            if event.get('date'):
+                conversation_section += f"  Date: {event['date']}\n"
+            conversation_section += "\n⚠️ IMPORTANT: When user refers to 'mi plan', 'my plan', 'my meeting', 'ese evento', etc.,\n"
+            conversation_section += "they are referring to THIS event. Use the event_id above in meeting_detail component props:\n"
+            conversation_section += f'{{ "type": "meeting_detail", "props": {{ "event_id": "{event.get("id", "")}" }} }}\n'
+            conversation_section += "OR use meeting_search with the exact event title:\n"
+            conversation_section += f'{{ "type": "meeting_detail", "props": {{ "meeting_search": "{event.get("title", "")}" }} }}\n\n'
+
+        # Sprint 4.3.2: Include last doc context
+        if conversation_context.get("last_doc"):
+            doc = conversation_context["last_doc"]
+            conversation_section += "\n*** RECENTLY REFERENCED DOCUMENT ***\n"
+            conversation_section += f"  Title: {doc.get('title', 'Unknown')}\n"
+            if doc.get('id'):
+                conversation_section += f"  Doc ID: {doc['id']}\n"
+            if doc.get('url'):
+                conversation_section += f"  URL: {doc['url']}\n"
+            conversation_section += "\nWhen user refers to 'that document', use doc_id prop in doc_summary/doc_preview.\n\n"
+
         # Include last assistant response (useful context)
         if conversation_context.get("last_response") and not conversation_context.get("generated_content"):
             conversation_section += f"\nLast AI Response:\n{conversation_context['last_response'][:800]}\n"

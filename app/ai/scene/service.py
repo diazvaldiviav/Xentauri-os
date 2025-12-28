@@ -788,22 +788,23 @@ class SceneService:
     ) -> Dict[str, Any]:
         """
         Fetch details for a single meeting/event.
-        
-        Can fetch by event_id or get the next upcoming event.
+
+        Can fetch by event_id, meeting_search, or get the next upcoming event.
+        Sprint 4.3.2: Added meeting_search support to find events by title/keywords.
         """
         from app.models.oauth_credential import OAuthCredential
         from app.environments.google.calendar.client import GoogleCalendarClient
-        
+
         credentials = db.query(OAuthCredential).filter(
             OAuthCredential.user_id == user_id,
             OAuthCredential.provider == "google",
         ).first()
-        
+
         if not credentials:
             return {"error": "Google Calendar not connected"}
-        
+
         calendar_client = GoogleCalendarClient(access_token=credentials.access_token)
-        
+
         # If specific event_id provided, fetch that event
         event_id = props.get("event_id")
         if event_id:
@@ -813,7 +814,31 @@ class SceneService:
             except Exception as e:
                 logger.error(f"Failed to fetch event {event_id}: {e}")
                 return {"error": str(e)}
-        
+
+        # Sprint 4.3.2: If meeting_search provided, search for event by title/keywords
+        meeting_search = props.get("meeting_search")
+        if meeting_search:
+            try:
+                from app.services.calendar_search_service import calendar_search_service
+                from uuid import UUID
+
+                # Use smart_search to find the event
+                search_result = await calendar_search_service.smart_search(
+                    user_query=meeting_search,
+                    user_id=UUID(user_id),
+                    db=db,
+                    max_events=1,
+                )
+
+                if search_result.events:
+                    return self._format_event_detail(search_result.events[0])
+                else:
+                    logger.warning(f"No event found for meeting_search: {meeting_search}")
+                    return {"error": f"No event found matching '{meeting_search}'"}
+            except Exception as e:
+                logger.error(f"Failed to search for meeting '{meeting_search}': {e}")
+                return {"error": str(e)}
+
         # Otherwise, get next upcoming event
         try:
             now = datetime.now(timezone.utc)

@@ -356,12 +356,13 @@ class ComponentRegistry:
         self.register(ComponentDefinition(
             id="meeting_detail",
             name="Meeting Detail Card",
-            description="Single meeting/event with full details including title, time, attendees, description, location, and linked documents",
+            description="Single meeting/event with full details including title, time, attendees, description, location, and linked documents. Use event_id or meeting_search props to specify which event to display. Sprint 4.3.2: Supports meeting_search for finding events by title/keywords.",
             category=ComponentCategory.CALENDAR,
             required_props=set(),
-            optional_props={"show_attendees", "show_description", "show_location", "show_links"},
+            optional_props={"show_attendees", "show_description", "show_location", "show_links", "event_id", "meeting_search"},
             data_schema={
-                "event_id": "Google Calendar event ID",
+                "event_id": "Google Calendar event ID (use in props to fetch specific event)",
+                "meeting_search": "Search query to find event by title/keywords (use in props, e.g., 'South Beach plan')",
                 "title": "Event title/summary",
                 "start_time": "ISO datetime for event start",
                 "end_time": "ISO datetime for event end",
@@ -375,6 +376,7 @@ class ComponentRegistry:
                 "Show my next meeting",
                 "Display the team standup details",
                 "Show meeting info on the left",
+                "Show my plan for South Beach",
             ],
         ))
         

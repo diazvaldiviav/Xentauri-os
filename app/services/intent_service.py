@@ -5702,7 +5702,19 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
             context_state = conversation_context_service.get_context(str(user_id))
             if context_state and context_state.last_assistant_response:
                 conversation_context_dict["last_response"] = context_state.last_assistant_response
-            
+
+            # Sprint 4.3.2: Include last event context (for "mi plan", "my meeting", etc.)
+            last_event = conversation_context_service.get_last_event(str(user_id))
+            if last_event:
+                conversation_context_dict["last_event"] = last_event
+                logger.info(f"[{request_id}] Including last event in scene context: {last_event.get('title')}")
+
+            # Sprint 4.3.2: Include last doc context
+            last_doc = conversation_context_service.get_last_doc(str(user_id))
+            if last_doc:
+                conversation_context_dict["last_doc"] = last_doc
+                logger.info(f"[{request_id}] Including last doc in scene context: {last_doc.get('title')}")
+
             # Generate scene via SceneService (now with real-time data AND conversation context)
             logger.info(f"[{request_id}] Generating scene with {len(normalized_hints)} layout hints")
             scene = await scene_service.generate_scene(
