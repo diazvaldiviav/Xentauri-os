@@ -2000,6 +2000,113 @@ Output: {
   "original_text": "Analyze the meeting doc, generate impact statements and display them with a timer",
   "reasoning": "Analyze + generate + display. The 'display them' keyword indicates this is a layout request, not pure analysis. Uses doc_summary with content_request='Generate impact statements' + countdown_timer."
 }
+
+CRITICAL - USING CONVERSATION CONTEXT TO RESOLVE ANAPHORIC REFERENCES (Sprint 4.2.7):
+======================================================================================
+When user uses pronouns or references like "ese evento", "esa reunión", "that meeting",
+"it", "this", etc., you MUST use the conversation context to resolve what they're referring to.
+
+The context includes:
+- Last user message: What the user previously asked
+- Last assistant response: What Jarvis previously answered
+- Last intent type: What intent was previously processed
+
+DETECTION RULE:
+If user says "ese/esa/that/this/it" + noun (evento, reunión, meeting, event), check the
+conversation context to find what event/meeting was previously mentioned.
+
+IMPORTANT: Use the event NAME from the previous conversation, NOT the generic word.
+- If last assistant said "Tienes un evento: Reunión con el equipo"
+- And user asks "a que hora se acaba ese evento?"
+- Then search_term should be "Reunión con el equipo" (NOT "evento"!)
+
+Context Format Example:
+Recent conversation:
+Last user message: tengo algun evento hoy?
+Last assistant response: Sí, revisé tu calendario y tienes un evento hoy: "Reunión con el equipo" a las 3:00 PM.
+Last intent type: calendar_query
+
+Input: "a que hora se acaba ese evento?"
+Context:
+Last user message: tengo algun evento hoy?
+Last assistant response: Sí, revisé tu calendario y tienes un evento hoy: "Reunión con el equipo" a las 3:00 PM.
+Last intent type: calendar_query
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "action": "find_event",
+  "date_range": "today",
+  "search_term": "Reunión con el equipo",
+  "original_text": "a que hora se acaba ese evento?",
+  "reasoning": "User referencing 'ese evento' from previous turn. Context shows event was 'Reunión con el equipo'. Use that as search_term."
+}
+
+Input: "muéstrame esa reunión en pantalla"
+Context:
+Last user message: que evento tengo hoy?
+Last assistant response: Tienes 1 evento hoy: Team Meeting a las 3:00 PM
+Last intent type: calendar_query
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "action": "find_event",
+  "device_name": "pantalla",
+  "date_range": "today",
+  "search_term": "Team Meeting",
+  "original_text": "muéstrame esa reunión en pantalla",
+  "reasoning": "'esa reunión' refers to 'Team Meeting' from previous response. Extract event name from context."
+}
+
+Input: "a que hora termina?"
+Context:
+Last user message: tengo algun evento hoy?
+Last assistant response: Sí, tienes un evento hoy: "Daily Standup" a las 9:00 AM.
+Last intent type: calendar_query
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.92,
+  "action": "find_event",
+  "date_range": "today",
+  "search_term": "Daily Standup",
+  "original_text": "a que hora termina?",
+  "reasoning": "User asking about end time without explicit event name. Context shows 'Daily Standup' was just discussed. Use it as search_term."
+}
+
+Input: "cancela esa reunión"
+Context:
+Last user message: que evento tengo mañana?
+Last assistant response: Tienes "Product Review" mañana a las 2:00 PM.
+Last intent type: calendar_query
+Output: {
+  "intent_type": "calendar_edit",
+  "confidence": 0.95,
+  "action": "delete_existing_event",
+  "search_term": "Product Review",
+  "date_filter": "tomorrow",
+  "original_text": "cancela esa reunión",
+  "reasoning": "'esa reunión' = 'Product Review' from previous turn. User wants to delete it."
+}
+
+Input: "show that event on screen"
+Context:
+Last user message: do I have any events today?
+Last assistant response: Yes, you have 1 event today: "Client Call" at 11:00 AM
+Last intent type: calendar_query
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "action": "find_event",
+  "device_name": "screen",
+  "date_range": "today",
+  "search_term": "Client Call",
+  "original_text": "show that event on screen",
+  "reasoning": "'that event' refers to 'Client Call' from previous assistant response. Extract and use as search_term."
+}
+
+CRITICAL: If NO conversation context is available, fallback to generic term extraction:
+- "ese evento" → search_term: "evento" (fallback)
+- "esa reunión" → search_term: "reunión" (fallback)
+But ALWAYS prefer context resolution when available!
 """
 
 # ---------------------------------------------------------------------------
