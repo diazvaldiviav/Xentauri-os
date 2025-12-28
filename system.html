@@ -485,7 +485,7 @@
 </head>
 <body>
     <h1>🤖 Jarvis System Architecture</h1>
-    <p class="subtitle">Intelligent Screen Control System <span class="status-badge">Sprint 4.1.0 Complete</span></p>
+    <p class="subtitle">Intelligent Screen Control System <span class="status-badge">Sprint 4.4.0 Complete</span></p>
 
     <!-- Main Architecture -->
     <div class="architecture">
@@ -535,6 +535,10 @@
                 <li><span class="check">✓</span> Multilingual Context-Aware Responses</li>
                 <li><span class="check">✓</span> Conversation History Tracking</li>
                 <li><span class="check">✓</span> Real-Time Scene Data (Gemini)</li>
+                <li><span class="check">✓</span> Prompt Optimization (76% reduction, Sprint 4.4.0)</li>
+                <li><span class="check">✓</span> Scene Generation Improvements (Sprint 4.4.0)</li>
+                <li><span class="pending">⏳</span> Intelligent Execution (Sprint 4.5.0 Planned)</li>
+                <li><span class="pending">⏳</span> Context Memory Enhancement (Sprint 4.5.0 Planned)</li>
                 <li><span class="check">✓</span> 679 tests passing</li>
                 <li><span class="pending">⏳</span> Fly.io deployment</li>
             </ul>
@@ -1091,6 +1095,144 @@
             <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
                 <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Content vs Doc Detection</div>
                 <div style="font-size: 0.85rem; color: #888;">"Create template" → CONVERSATION, not DOC_QUERY</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sprint 4.4.0: Prompt Coordination & Context Harmonization -->
+    <div class="section">
+        <h2 class="section-title">📝 Sprint 4.4.0: Prompt Coordination & Context Harmonization ✅ COMPLETE</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">Problem</div>
+                    <div class="flow-step-desc">Prompt overload causing errors</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Analysis</div>
+                    <div class="flow-step-desc">2191 lines, 137 examples</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">Optimization</div>
+                    <div class="flow-step-desc">Reduce to 18 examples</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Fix Conflicts</div>
+                    <div class="flow-step-desc">JSON placeholders</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">508 Lines</div>
+                    <div class="flow-step-desc">76% reduction ✅</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sprint 4.4.0 completed features -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 30px;">
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Intent Prompts</div>
+                <div style="font-size: 0.85rem; color: #888;">2191 → 508 lines (76% reduction)</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Examples Reduced</div>
+                <div style="font-size: 0.85rem; color: #888;">137 → 18 examples (2 per intent)</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Scene Prompts Fixed</div>
+                <div style="font-size: 0.85rem; color: #888;">.format() → .replace() for JSON</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Spatial Keywords</div>
+                <div style="font-size: 0.85rem; color: #888;">Left, right, top, bottom detection</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Content Detection</div>
+                <div style="font-size: 0.85rem; color: #888;">Returns None → forces Claude generation</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #10b981; padding: 15px;">
+                <div style="font-weight: 600; color: #10b981; margin-bottom: 8px;">✅ Contradiction Resolved</div>
+                <div style="font-size: 0.85rem; color: #888;">CONVERSATION vs DISPLAY_CONTENT</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sprint 4.5.0: Intelligent Execution & Context Memory (Planned) -->
+    <div class="section">
+        <h2 class="section-title">🎯 Sprint 4.5.0: Intelligent Execution & Context Memory (PLANNED)</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">Problem #1</div>
+                    <div class="flow-step-desc">Search not executing</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Root Cause</div>
+                    <div class="flow-step-desc">Missing keywords</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">Solution</div>
+                    <div class="flow-step-desc">Add Spanish keywords</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">95% Success</div>
+                    <div class="flow-step-desc">Immediate execution</div>
+                </div>
+            </div>
+            <div class="flow" style="margin-top: 20px;">
+                <div class="flow-step start">
+                    <div class="flow-step-title">Problem #2</div>
+                    <div class="flow-step-desc">Context not saved</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">Root Cause</div>
+                    <div class="flow-step-desc">Weather not detected</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">Solution</div>
+                    <div class="flow-step-desc">Anaphoric resolution</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">95% Success</div>
+                    <div class="flow-step-desc">"Muéstramelo" works</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sprint 4.5.0 planned features -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 30px;">
+            <div class="endpoint-group" style="border-left: 4px solid #f59e0b; padding: 15px;">
+                <div style="font-weight: 600; color: #f59e0b; margin-bottom: 8px;">⏳ Search Keywords</div>
+                <div style="font-size: 0.85rem; color: #888;">Add: últimas, actualizaciones, reciente</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #f59e0b; padding: 15px;">
+                <div style="font-weight: 600; color: #f59e0b; margin-bottom: 8px;">⏳ Execution Enforcement</div>
+                <div style="font-size: 0.85rem; color: #888;">Prompts: MUST execute, don't ask</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #f59e0b; padding: 15px;">
+                <div style="font-weight: 600; color: #f59e0b; margin-bottom: 8px;">⏳ Weather Detection</div>
+                <div style="font-size: 0.85rem; color: #888;">Save weather as generated_content</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #f59e0b; padding: 15px;">
+                <div style="font-weight: 600; color: #f59e0b; margin-bottom: 8px;">⏳ Anaphoric Resolution</div>
+                <div style="font-size: 0.85rem; color: #888;">"Eso", "that", "it" → last response</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #f59e0b; padding: 15px;">
+                <div style="font-weight: 600; color: #f59e0b; margin-bottom: 8px;">⏳ Intent Parser Update</div>
+                <div style="font-size: 0.85rem; color: #888;">Resolve "muéstramelo" references</div>
+            </div>
+            <div class="endpoint-group" style="border-left: 4px solid #f59e0b; padding: 15px;">
+                <div style="font-weight: 600; color: #f59e0b; margin-bottom: 8px;">⏳ Real-World Tests</div>
+                <div style="font-size: 0.85rem; color: #888;">ABA search, clima → muéstramelo</div>
             </div>
         </div>
     </div>
@@ -1676,7 +1818,7 @@
     <!-- Stats -->
     <div class="stats">
         <div class="stat">
-            <div class="stat-value">4.1.0</div>
+            <div class="stat-value">4.4.0</div>
             <div class="stat-label">Sprints Complete</div>
         </div>
         <div class="stat">
@@ -1702,10 +1844,10 @@
     </div>
 
     <footer>
-        <p>Jarvis System Architecture • Sprint 4.1.0 Complete • December 27, 2025</p>
+        <p>Jarvis System Architecture • Sprint 4.4.0 Complete • December 28, 2025</p>
         <p style="margin-top: 10px; font-size: 0.9rem;">
-            Next: Sprint 4.2 - Raspberry Pi Agent 🍓<br>
-            Completed: AI Router, Calendar CRUD, Google Docs, Scene Graph, Multi-Action Intents, Intelligent Conversations, Real-Time Data ✅
+            Next: Sprint 4.5.0 - Intelligent Execution & Context Memory ⏳<br>
+            Completed: AI Router, Calendar CRUD, Google Docs, Scene Graph, Multi-Action Intents, Intelligent Conversations, Real-Time Data, Prompt Optimization ✅
         </p>
     </footer>
 </body>

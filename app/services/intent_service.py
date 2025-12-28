@@ -1792,11 +1792,13 @@ IMPORTANT INSTRUCTIONS:
         # Build prompt and call AI
         if task_type == "execution":
             # Sprint 4.2.9: Pass conversation history to executor (GPT) for context awareness
-            prompt = build_execution_prompt(unified_context, text, conversation_history) if unified_context else text
+            # Sprint 4.4.0: Pass routing_decision for router analysis injection (GAP #7)
+            prompt = build_execution_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
             system_prompt = "You are a smart display execution assistant. Return valid JSON."
         else:
             # Sprint 4.2.8: Pass conversation history to reasoner (Claude) for context awareness
-            prompt = build_reasoner_prompt(unified_context, text, conversation_history) if unified_context else text
+            # Sprint 4.4.0: Pass routing_decision for router analysis injection (GAP #7)
+            prompt = build_reasoner_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
             system_prompt = "You are a strategic advisor for smart home systems."
         
         response = await ai_provider.generate(prompt=prompt, system_prompt=system_prompt)
@@ -5670,9 +5672,11 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
                 )
             
             # Detect default scene type for optimized generation
+            # Sprint 4.4.0: Pass user_request to detect generation keywords
             default_type = detect_default_scene_type(
                 info_type=intent.info_type,
                 layout_hints=intent.layout_hints,
+                user_request=intent.original_text,  # Pass original text for keyword detection
             )
             logger.info(f"[{request_id}] Detected default scene type: {default_type}")
             
@@ -5789,6 +5793,14 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
                 user_message=intent.original_text or "Display content request",
                 assistant_response=response_message,
                 intent_type="display_content",
+            )
+
+            # Sprint 4.4.0 - GAP #8: Save scene metadata for assistant awareness
+            conversation_context_service.set_last_scene(
+                user_id=str(user_id),
+                scene_id=scene.scene_id,
+                components=[c.type for c in scene.components],
+                layout_intent=scene.layout.intent.value,
             )
 
             return IntentResult(

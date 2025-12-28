@@ -389,30 +389,62 @@ _SCENE_TEMPLATES = {
 def detect_default_scene_type(
     info_type: str,
     layout_hints: Optional[List[str]] = None,
-) -> DefaultSceneType:
+    user_request: Optional[str] = None,
+) -> Optional[DefaultSceneType]:
     """
     Detect which default scene type to use based on intent data.
-    
+
+    Sprint 4.4.0: Now returns None when custom generation is needed
+    (e.g., when user requests generated content, not just display).
+    Also analyzes the original user_request for generation keywords.
+
     This function analyzes the info_type and layout_hints from a
     DisplayContentIntent to determine the appropriate default scene.
-    
+
     Args:
         info_type: Content type (calendar, weather, mixed)
         layout_hints: List of layout hints from user request
-        
+        user_request: Original user request text (Sprint 4.4.0)
+
     Returns:
-        Most appropriate DefaultSceneType
-        
+        Most appropriate DefaultSceneType, or None if Claude should generate
+
     Examples:
         detect_default_scene_type("calendar", []) → CALENDAR_FULLSCREEN
         detect_default_scene_type("calendar", ["sidebar"]) → CALENDAR_SIDEBAR
         detect_default_scene_type("mixed", ["dashboard"]) → DASHBOARD
+        detect_default_scene_type("calendar", ["left", "right"], "crea plan") → None (needs Claude)
     """
     hints_lower = [h.lower() for h in (layout_hints or [])]
     info_lower = info_type.lower() if info_type else "calendar"
-    
+
     # Join all hints for pattern matching
     hints_text = " ".join(hints_lower)
+
+    # Sprint 4.4.0 - CRITICAL: Detect content generation keywords
+    # Check BOTH layout_hints AND original user_request
+    # (keywords might be in request but not extracted as layout hints)
+    generation_keywords = [
+        "crea", "genera", "create", "generate", "make", "build",
+        "plan", "ideas", "suggestions", "checklist", "summary",
+        "resume", "resumen", "list", "outline",
+    ]
+
+    # Check layout hints
+    has_generation_in_hints = any(kw in hints_text for kw in generation_keywords)
+
+    # Check original user request (if provided)
+    has_generation_in_request = False
+    if user_request:
+        request_lower = user_request.lower()
+        has_generation_in_request = any(kw in request_lower for kw in generation_keywords)
+
+    has_generation_request = has_generation_in_hints or has_generation_in_request
+
+    if has_generation_request:
+        source = "hints" if has_generation_in_hints else "user_request"
+        logger.info(f"Detected content generation keywords in {source}. Skipping defaults, will use Claude.")
+        return None  # Force Claude generation
     
     # Check for dashboard keywords
     if "dashboard" in hints_text:

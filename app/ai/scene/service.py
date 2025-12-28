@@ -474,20 +474,37 @@ class SceneService:
     ) -> SceneGraph:
         """
         Get a fallback scene when Claude generation fails.
-        
+
+        Sprint 4.4.0: If detect_default_scene_type returns None (content generation needed),
+        we raise an exception instead of using a default - custom layouts MUST use Claude.
+
         Uses default scenes from the defaults module.
         """
         from app.ai.scene.defaults import (
             detect_default_scene_type,
             get_default_scene_template,
+            DefaultSceneType,
         )
-        
+
         # Convert hints to strings for detection
         hint_strings = [h.raw_hint or h.component for h in layout_hints]
-        
-        # Detect best default scene
-        scene_type = detect_default_scene_type(info_type, hint_strings)
-        
+
+        # Detect best default scene (Sprint 4.4.0: pass user_request for generation keyword detection)
+        scene_type = detect_default_scene_type(
+            info_type=info_type,
+            layout_hints=hint_strings,
+            user_request=user_request,
+        )
+
+        # Sprint 4.4.0: If None is returned, content generation is needed - no fallback allowed
+        if scene_type is None:
+            logger.error(f"Cannot use fallback for custom content generation request: {user_request[:100]}")
+            raise Exception(
+                "This request requires custom content generation (Claude). "
+                "Fallback defaults cannot handle generated content like plans, summaries, etc. "
+                "The Claude generation must succeed for this request."
+            )
+
         # Get template
         return get_default_scene_template(
             scene_type=scene_type,

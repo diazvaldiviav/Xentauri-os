@@ -15,7 +15,7 @@ Usage:
         SCENE_SYSTEM_PROMPT,
         build_scene_generation_prompt,
     )
-    
+
     response = await anthropic_provider.generate_json(
         prompt=build_scene_generation_prompt(user_request, hints, info_type),
         system_prompt=SCENE_SYSTEM_PROMPT.format(
@@ -24,6 +24,13 @@ Usage:
         ),
     )
 """
+
+# Sprint 4.4.0 - GAP #2: Import shared helpers for consistent context injection
+from app.ai.prompts.helpers import (
+    inject_generated_content_context,
+    inject_last_event_context,
+    inject_last_doc_context,
+)
 
 # ---------------------------------------------------------------------------
 # SCENE GRAPH SCHEMA (for Claude reference)
@@ -102,6 +109,24 @@ LAYOUT INTENT SELECTION:
 - "overlay" → layered components with absolute positioning
 - "stack" → vertical stack using flex column
 
+CRITICAL - SPATIAL KEYWORD DETECTION (Sprint 4.4.0):
+=========================================================
+When user mentions SPATIAL POSITIONS, each position is a SEPARATE COMPONENT:
+
+"izquierda/left AND derecha/right" → two_column layout (2 components)
+- User: "calendario a la izquierda y plan a la derecha"
+  → Layout: two_column, Component 1: calendar (grid_column="1"), Component 2: text_block (grid_column="2")
+
+"arriba/top AND abajo/bottom" → stack layout (2 components)
+- User: "meeting arriba y countdown abajo"
+  → Layout: stack, Component 1: meeting_detail (flex=1), Component 2: countdown (flex=1)
+
+"izquierda, centro, derecha / left, center, right" → three_column layout (3 components)
+- User: "clock left, calendar center, weather right"
+  → Layout: three_column, 3 components with grid_column="1", "2", "3"
+
+NEVER create a single-component fullscreen when user specifies TWO positions!
+
 DESIGN SYSTEM - ALWAYS APPLY THESE DEFAULTS:
 When user doesn't specify styling, use these values:
 
@@ -141,10 +166,30 @@ When user asks for a document related to a meeting/event, use these props:
 
 The service will search the meeting, find the linked document in the event description, and fetch it.
 
-AI DOCUMENT INTELLIGENCE (CRITICAL):
-When user requests SPECIFIC types of content from a document, use content_request prop to specify what AI should generate.
+AI CONTENT GENERATION VS DOCUMENT EXTRACTION (CRITICAL - Sprint 4.4.0):
+========================================================================
+DISTINGUISH between generating NEW content vs extracting FROM existing document:
 
-- "content_request": Natural language description of what to generate from the document
+USE text_block WHEN:
+- User says "crea/create/genera/generate" content FROM SCRATCH
+- Examples: "crearas un plan", "generate a checklist", "dame ideas"
+- NO document source mentioned
+- You GENERATE the content directly in props.content
+- Example: {"type": "text_block", "props": {"content": "[YOUR GENERATED PLAN HERE]", "title": "South Beach Plan"}}
+
+USE doc_summary WHEN:
+- User wants content FROM an existing document/meeting
+- Examples: "extract key points from the doc", "show the agenda"
+- Document/meeting IS mentioned as the source
+- You use content_request to tell backend what to extract
+- Example: {"type": "doc_summary", "props": {"meeting_search": "kickoff", "content_request": "Extract key points"}}
+
+NEVER MIX: Do NOT use doc_summary for generated content - that's text_block territory!
+
+AI DOCUMENT INTELLIGENCE (for doc_summary only):
+When user requests SPECIFIC types of content from a document, use content_request prop to specify what AI should extract/transform.
+
+- "content_request": Natural language description of what to extract from the document
   Examples:
   - "Generate 3 powerful opening phrases for this meeting"
   - "Create a time-boxed agenda script with speaker notes"
@@ -211,7 +256,7 @@ Example for meeting-related document (simple preview):
     }}
 }}
 
-COMPLETE EXAMPLE: Meeting + First Agenda Item (TWO COMPONENTS):
+COMPLETE EXAMPLE 1: Meeting + First Agenda Item (TWO COMPONENTS, stack):
 User request: "próxima reunión con hora y abajo el primer punto de la agenda"
 → This is a MULTI-PART request requiring 2 components in a "stack" layout:
 
@@ -243,6 +288,25 @@ User request: "próxima reunión con hora y abajo el primer punto de la agenda"
     ]
 }}
 
+CRITICAL EXAMPLE: Calendar + Generated Plan (Sprint 4.4.0):
+User request: "manten el evento a la izquierda y creame un plan a la derecha para hacer en South Beach"
+
+BREAKDOWN:
+→ MULTI-PART request with SPATIAL keywords ("izquierda" AND "derecha")
+→ Part 1: "manten el evento a la izquierda" = calendar component (shows events)
+→ Part 2: "creame un plan a la derecha" = text_block with GENERATED content (NOT doc_summary!)
+
+REQUIRED OUTPUT:
+- Layout: "two_column" with columns=2, rows=1, gap="24px"
+- Component 1: calendar_week with grid_column="1"
+- Component 2: text_block with grid_column="2", props.content=[YOUR GENERATED SOUTH BEACH PLAN]
+
+KEY LESSONS:
+- "creame/create" verb = YOU generate the content in props.content (text_block)
+- "muestra/show" verb = FETCH existing content (doc_summary/meeting_detail)
+- Spatial keywords ("izquierda Y derecha") = two_column layout with 2 components
+- NEVER use doc_summary for generated content - that's text_block territory!
+
 EXAMPLE COMPLETE COMPONENT (NEVER return less than this):
 {{
     "id": "countdown_main",
@@ -264,10 +328,10 @@ EXAMPLE COMPLETE COMPONENT (NEVER return less than this):
     "data": {{}}
 }}
 
-{components}
+__COMPONENTS__
 
 SCHEMA:
-{schema}
+__SCHEMA__
 """
 
 
@@ -297,9 +361,41 @@ Requirements:
 11. DETECT MULTI-PART REQUESTS: If user asks for X AND Y, create separate components for each part
     - "reunión + agenda" = meeting_detail + doc_summary with content_request
     - "countdown + summary" = countdown_timer + doc_summary
-12. CRITICAL - USE CONVERSATION CONTEXT: If previous conversation contains content generated by another AI, use that content! Display what was already generated, don't say you can't do something.
+    - "calendario a la izquierda y plan a la derecha" = calendar_week (grid_column="1") + text_block (grid_column="2")
+    - "manten X a la izquierda y crea Y a la derecha" = two_column layout with 2 components
 
-13. CONVERSATION SUMMARY REQUESTS: If the user asks to "summarize this conversation" / "resume esta conversación" / "show what we discussed":
+    CRITICAL: When user says "a la izquierda Y a la derecha", that's TWO components, NOT one!
+12. CONTENT EXTRACTION (Sprint 4.4.0 - GAP #1): When user says "show X" where X is a specific item, extract search terms:
+    - "show my South Beach plan" → meeting_detail with props {{"meeting_search": "South Beach plan"}}
+    - "show budget document" → doc_summary with props {{"doc_search": "budget"}}
+    - "show my dentist appointment" → meeting_detail with props {{"meeting_search": "dentist"}}
+    - DO NOT create empty components - ALWAYS populate search props from the user's request
+    - Extract the KEY NOUNS from the request and use them as search terms
+    - If user says "my plan" and conversation shows a recent event_id, use that instead
+
+12a. GENERATE vs EXTRACT (Sprint 4.4.0 - Critical Fix):
+    WHEN USER SAYS "crea/genera/create/generate" → Use text_block, YOU generate content:
+    - "crearas un plan para South Beach" → text_block with props.content = [YOUR GENERATED PLAN]
+    - "generate a checklist for the meeting" → text_block with props.content = [YOUR CHECKLIST]
+    - "dame ideas para la presentación" → text_block with props.content = [YOUR IDEAS]
+
+    WHEN USER SAYS "muestra/show/extrae/extract" → Use doc_summary/meeting_detail to FETCH:
+    - "muestra el plan de South Beach" → meeting_detail with meeting_search="South Beach"
+    - "show the budget document" → doc_summary with doc_search="budget"
+    - "extract key points from the doc" → doc_summary with content_request="Extract key points"
+
+    CRITICAL: "crear/generar" = text_block (you make it), "mostrar/extraer" = doc_summary (fetch existing)
+
+13. CRITICAL - USE CONVERSATION CONTEXT: If previous conversation contains content generated by another AI, use that content! Display what was already generated, don't say you can't do something.
+
+13a. DISPLAY INTENT SEQUENCING (Sprint 4.4.0 - GAP #11): When user said "create X AND show it":
+    - Step 1 already happened (content was generated by Gemini)
+    - You are Step 2 (display the generated content)
+    - Look for generated_content in conversation context above
+    - Use that content in a text_block component
+    - DON'T try to generate new content - display what already exists
+
+14. CONVERSATION SUMMARY REQUESTS: If the user asks to "summarize this conversation" / "resume esta conversación" / "show what we discussed":
     - Create a text_block component
     - In props.content, write a CLEAR SUMMARY of the conversation history provided
     - Include key points discussed, conclusions reached, and interesting insights
@@ -323,16 +419,18 @@ Respond with ONLY the JSON Scene Graph. No explanation, no markdown."""
 def build_scene_system_prompt(components_context: str) -> str:
     """
     Build the complete system prompt for scene generation.
-    
+
     Args:
         components_context: Output from component_registry.to_prompt_context()
-        
+
     Returns:
         Formatted system prompt
     """
-    return SCENE_SYSTEM_PROMPT.format(
-        components=components_context,
-        schema=SCENE_GRAPH_SCHEMA,
+    # Sprint 4.4.0: Use .replace() instead of .format() to avoid conflicts with JSON examples
+    return SCENE_SYSTEM_PROMPT.replace(
+        "__COMPONENTS__", components_context
+    ).replace(
+        "__SCHEMA__", SCENE_GRAPH_SCHEMA
     )
 
 
@@ -421,47 +519,26 @@ def build_scene_generation_prompt(
                         conversation_section += f"  Assistant: {response}\n"
                     conversation_section += "\n"
         
-        # Include generated content (if any) - THIS IS KEY
-        if conversation_context.get("generated_content"):
-            gc = conversation_context["generated_content"]
-            conversation_section += "\n*** RECENTLY GENERATED CONTENT (display this!) ***\n"
-            conversation_section += f"  Type: {gc.get('type', 'unknown')}\n"
-            conversation_section += f"  Title: {gc.get('title', 'Untitled')}\n"
-            # Include full content for display - SANITIZED to prevent JSON errors
-            content = gc.get('content', '')
-            # Escape quotes and limit length to prevent JSON errors
-            sanitized_content = content.replace('"', '\\"').replace('\n', '\\n')
-            # Truncate if too long (max 2000 chars to prevent token overflow)
-            if len(sanitized_content) > 2000:
-                sanitized_content = sanitized_content[:2000] + "... [truncated]"
-            conversation_section += f"  Content:\n{sanitized_content}\n"
-            conversation_section += "\nIMPORTANT: Use a text_block component to display this generated content! Include the content in the 'props.content' and 'data.content' fields.\n"
+        # Sprint 4.4.0 - GAP #2: Use shared helper for consistent generated_content injection
+        conversation_section = inject_generated_content_context(
+            conversation_section,
+            conversation_context,
+            format_style="scene"
+        )
         
-        # Sprint 4.3.2: Include last event context (for "mi plan", "my meeting", etc.)
-        if conversation_context.get("last_event"):
-            event = conversation_context["last_event"]
-            conversation_section += "\n*** RECENTLY CREATED/REFERENCED EVENT (CRITICAL) ***\n"
-            conversation_section += f"  Title: {event.get('title', 'Unknown')}\n"
-            if event.get('id'):
-                conversation_section += f"  Event ID: {event['id']}\n"
-            if event.get('date'):
-                conversation_section += f"  Date: {event['date']}\n"
-            conversation_section += "\n⚠️ IMPORTANT: When user refers to 'mi plan', 'my plan', 'my meeting', 'ese evento', etc.,\n"
-            conversation_section += "they are referring to THIS event. Use the event_id above in meeting_detail component props:\n"
-            conversation_section += f'{{ "type": "meeting_detail", "props": {{ "event_id": "{event.get("id", "")}" }} }}\n'
-            conversation_section += "OR use meeting_search with the exact event title:\n"
-            conversation_section += f'{{ "type": "meeting_detail", "props": {{ "meeting_search": "{event.get("title", "")}" }} }}\n\n'
+        # Sprint 4.4.0 - GAP #4: Use shared helper for consistent last_event injection
+        conversation_section = inject_last_event_context(
+            conversation_section,
+            conversation_context,
+            format_style="scene"
+        )
 
-        # Sprint 4.3.2: Include last doc context
-        if conversation_context.get("last_doc"):
-            doc = conversation_context["last_doc"]
-            conversation_section += "\n*** RECENTLY REFERENCED DOCUMENT ***\n"
-            conversation_section += f"  Title: {doc.get('title', 'Unknown')}\n"
-            if doc.get('id'):
-                conversation_section += f"  Doc ID: {doc['id']}\n"
-            if doc.get('url'):
-                conversation_section += f"  URL: {doc['url']}\n"
-            conversation_section += "\nWhen user refers to 'that document', use doc_id prop in doc_summary/doc_preview.\n\n"
+        # Sprint 4.4.0 - GAP #5: Use shared helper for consistent last_doc injection
+        conversation_section = inject_last_doc_context(
+            conversation_section,
+            conversation_context,
+            format_style="scene"
+        )
 
         # Include last assistant response (useful context)
         if conversation_context.get("last_response") and not conversation_context.get("generated_content"):

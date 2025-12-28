@@ -1,9 +1,10 @@
 # Jarvis Project Context
 
-> **Last Updated:** December 27, 2025
-> **Current Sprint:** Sprint 4.1.0 - Intelligent Conversations & Real-Time Data ✅ COMPLETE
+> **Last Updated:** December 28, 2025
+> **Current Sprint:** Sprint 4.5.0 - Intelligent Execution & Context Memory (PLANNED)
+> **Previous Sprint:** Sprint 4.4.0 - Prompt Coordination & Context Harmonization ✅ COMPLETE
 > **Tech Debt Cleanup:** ✅ Complete (301 tests, 84% router reduction)
-> **Status:** ✅ Ready for Sprint 4.2 (Raspberry Pi Agent)
+> **Status:** ✅ Ready to implement Sprint 4.5.0
 
 Jarvis is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
 
@@ -163,7 +164,34 @@ Jarvis is an intelligent screen control system that lets users operate multiple 
 | Router prompts updated for SIMPLE classification | ✅ Done |
 | Scene data preservation in _parse_scene_response | ✅ Done |
 
-### Sprint 4.2: Raspberry Pi Agent (Next)
+### Sprint 4.4.0: Prompt Coordination & Context Harmonization ✅ COMPLETE (December 28, 2025)
+| Task | Status |
+|------|--------|
+| Intent prompts optimization (2191 → 508 lines, 76% reduction) | ✅ Done |
+| Examples reduction (137 → 18 examples, 2 per intent type) | ✅ Done |
+| Spatial keyword detection in scene_prompts.py | ✅ Done |
+| Fixed defaults.py content generation detection | ✅ Done |
+| Fixed KeyError with .format() → .replace() in scene_prompts.py | ✅ Done |
+| CONVERSATION vs DISPLAY_CONTENT contradiction resolved | ✅ Done |
+| JSON syntax improvements for Gemini responses | ✅ Done |
+| Content generation keyword detection (returns None for Claude) | ✅ Done |
+
+### Sprint 4.5.0: Intelligent Execution & Context Memory (PLANNED)
+| Task | Status |
+|------|--------|
+| **Problem #1: Search Execution** | |
+| Expand search keywords (Spanish: últimas, actualizaciones) | ⏳ Planned |
+| Add execution enforcement to assistant prompts | ⏳ Planned |
+| Make grounding intent-based (not just keyword-based) | ⏳ Planned |
+| **Problem #2: Context Memory** | |
+| Add weather/query detection to _detect_content_type() | ⏳ Planned |
+| Add anaphoric resolution to scene prompts | ⏳ Planned |
+| Pass last_response explicitly to scene generation | ⏳ Planned |
+| Teach intent parser to resolve content references | ⏳ Planned |
+| **Testing & Validation** | |
+| Add real-world test cases for both problems | ⏳ Planned |
+
+### Sprint 4.2: Raspberry Pi Agent (Future)
 - Agent project structure (Python)
 - WebSocket client to connect to cloud
 - Pairing flow implementation
@@ -1032,6 +1060,57 @@ environments/
   - Fixed `SceneMetadata.refresh_seconds` validation error
   - Fixed scene component data being overwritten with `{}`
   - Fixed location extraction regex for multi-word places
+
+### December 28, 2025 - Sprint 4.4.0 Complete (Prompt Coordination & Context Harmonization)
+- **Intent Prompts Optimization:**
+  - Reduced `intent_prompts.py` from 2191 lines to 508 lines (76% reduction)
+  - Reduced examples from 137 to 18 (2 per intent type: 9 intent types)
+  - Added CRITICAL JSON RULES at the beginning
+  - Fixed CONVERSATION vs DISPLAY_CONTENT contradiction
+  - Cleaner, more maintainable prompt structure
+- **Scene Prompts Improvements:**
+  - Fixed KeyError with `.format()` → changed to `.replace()` for placeholders
+  - Changed from `{components}` to `__COMPONENTS__` to avoid JSON conflicts
+  - Added SPATIAL KEYWORD DETECTION section (lines 112-128)
+  - Improved requirement 11 for multi-part requests
+- **Default Scene Detection:**
+  - Added `user_request` parameter to `detect_default_scene_type()`
+  - Added content generation keyword detection in `defaults.py`
+  - Returns `None` when generation needed (forces Claude generation)
+  - Keywords: crea, genera, create, plan, ideas, summary, etc.
+- **Service Updates:**
+  - Updated `service.py` to pass `user_request` to fallback detection
+  - Added exception when `scene_type is None` (requires Claude)
+  - Prevents incorrect default scene selection for generated content
+- **Bug Fixes:**
+  - Fixed KeyError '"type"' in scene_prompts.py
+  - Fixed SyntaxError in intent_prompts.py rebuild
+  - Fixed Gemini JSON malformation from prompt overload
+  - Fixed spatial keyword detection ("left", "right", "top", "bottom")
+
+### December 28, 2025 - Sprint 4.5.0 Planned (Intelligent Execution & Context Memory)
+- **Problem Analysis:**
+  - **Problem #1:** Gemini doesn't execute searches for general queries (ABA updates)
+    - Root cause: Missing Spanish keywords ("últimas", "actualizaciones")
+    - Root cause: Prompts suggest web search but don't enforce execution
+    - Root cause: Keyword-based logic instead of intent-based
+  - **Problem #2:** Weather searches work but context not remembered for display
+    - Root cause: Weather responses NOT saved as generated_content
+    - Root cause: Scene prompts lack anaphoric resolution instructions
+    - Root cause: Intent parser doesn't resolve "muéstramelo" references
+- **Evidence-Based Plan Created:**
+  - `SPRINT_4.5.0_UNIFIED_PLAN.md` - Comprehensive plan for both problems
+  - 9 GAPs identified with exact file locations and line numbers
+  - Critical fixes: ~37 minutes implementation time
+  - Success metrics defined: 0% → 95% for both problems
+- **Files Analyzed:**
+  - `app/services/intent_service.py:1606-1615` - Search keyword detection
+  - `app/services/intent_service.py:1665-1676` - Content detection
+  - `app/services/intent_service.py:2335-2388` - _detect_content_type()
+  - `app/ai/prompts/assistant_prompts.py:102` - Web search instruction
+  - `app/ai/prompts/scene_prompts.py` - Missing anaphoric resolution
+  - `app/ai/intent/parser.py:130-131` - Context usage
+- **Implementation NOT started yet** - awaiting user approval
 
 ### December 22, 2025 - Sprint 4.0.3 Complete (Multi-Action Intent Support)
 - **Multi-Action Intent Support:**
