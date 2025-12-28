@@ -771,6 +771,11 @@ class GoogleCalendarClient(EnvironmentService):
             # Convert to UTC for API
             time_min = local_start.astimezone(timezone.utc)
             time_max = local_end.astimezone(timezone.utc)
+        elif date_range == "today_after":
+            # Sprint 4.3.4: From NOW until end of today (for "events after X time today")
+            time_min = now.astimezone(timezone.utc)
+            local_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+            time_max = local_end.astimezone(timezone.utc)
         elif date_range == "tomorrow":
             local_start = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
             local_end = local_start + timedelta(days=1)
@@ -808,6 +813,9 @@ class GoogleCalendarClient(EnvironmentService):
         
         if date_range == "today":
             return " for today"
+        elif date_range == "today_after":
+            # Sprint 4.3.4: More descriptive text for remaining events today
+            return " for the rest of today"
         elif date_range == "tomorrow":
             return " for tomorrow"
         elif date_range == "yesterday":

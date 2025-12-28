@@ -1489,6 +1489,9 @@ Ask them politely what event they want to find. Respond in their language.'''
         
         if date_range == "today":
             return " for today"
+        elif date_range == "today_after":
+            # Sprint 4.3.4: Descriptive text for remaining events today
+            return " for the rest of today"
         elif date_range == "tomorrow":
             return " for tomorrow"
         elif date_range == "yesterday":
