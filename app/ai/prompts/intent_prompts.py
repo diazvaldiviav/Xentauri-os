@@ -110,9 +110,15 @@ C) pending_op_type = "delete" (user has a pending event deletion):
    - "yes" / "confirm" → calendar_edit, confirm_delete
    - "no" / "cancel" → calendar_edit, cancel_edit
 
-D) pending_op_type = null (no pending operation):
-   - "yes" / "confirm" alone → conversation (ambiguous, ask for clarification)
+D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
+   - "yes" / "si" / "confirm" alone → CONVERSATION (NOT calendar_create!)
+   - "ok" / "sure" / "claro" → CONVERSATION (NOT calendar_create!)
+   - User saying "yes" in a conversation about Netflix/stocks/general topics → CONVERSATION
+   - NEVER use confirm_create if there is NO pending event!
    - "change it to 2pm" → calendar_edit, edit_existing_event (needs search)
+   
+   CRITICAL: If the context does NOT show "has_pending_create: true" or "pending_op_type: create",
+   then ANY affirmative response like "si", "yes", "ok", "confirm" MUST be classified as CONVERSATION!
 
 6. CALENDAR_EDIT - Edit or delete an existing calendar event (Sprint 3.9)
    Actions: edit_existing_event, delete_existing_event, select_event, confirm_edit, confirm_delete, cancel_edit
@@ -272,6 +278,30 @@ D) pending_op_type = null (no pending operation):
    - General knowledge: "What can you do?", "Que puedes hacer?", "Tell me about yourself"
    - Casual: "Hello", "Thanks", "Help", "Hola", "Gracias"
    - CONTENT GENERATION: "Create a template for X", "Give me tips about Y", "Make a checklist for Z"
+   - DISCUSSION/DEBATE: User discussing, arguing, explaining something to the AI
+   
+   CRITICAL - CONVERSATION vs DISPLAY_CONTENT (Important!):
+   ==========================================================
+   CONVERSATION is for:
+   - User is DISCUSSING or DEBATING a topic with the AI
+   - User is making statements, arguments, or comments
+   - User mentions "pantalla/screen" as part of conversation, NOT as a display command
+   - User is explaining, correcting, or responding to AI in dialogue
+   
+   Examples of CONVERSATION (NOT display_content):
+   ✅ "te fuiste del tema, te estoy creando a ti" → CONVERSATION (discussing)
+   ✅ "no me escuchaste, lo que dije fue..." → CONVERSATION (clarifying)  
+   ✅ "eso no es correcto, déjame explicarte" → CONVERSATION (debating)
+   ✅ "estoy trabajando en algo para la pantalla" → CONVERSATION (discussing work)
+   ✅ "creo que deberías mostrar más información" → CONVERSATION (giving feedback)
+   
+   DISPLAY_CONTENT requires EXPLICIT display command:
+   ❌ "muéstralo en la pantalla" → DISPLAY_CONTENT (explicit command)
+   ❌ "ponlo en la pantalla de la sala" → DISPLAY_CONTENT (explicit command)
+   ❌ "resume esta conversación y ponla en pantalla" → DISPLAY_CONTENT (explicit command)
+   
+   DETECTION RULE: If the PRIMARY purpose is discussion/debate → CONVERSATION
+   Only use DISPLAY_CONTENT when user EXPLICITLY commands to show something on a display.
 
    CRITICAL - CONTENT GENERATION vs DOCUMENT:
    These are CONVERSATION, NOT doc_query or display_content:
@@ -436,9 +466,19 @@ ACTION MAPPING FOR CONTENT (IMPORTANT!):
 - "calendar on the TV" → show_calendar
 - "show my schedule" → show_calendar
 - "display my events" → show_calendar
-- "show content" → show_content
 - "clear screen" → clear_content
 - "hide display" → clear_content
+
+CRITICAL DISTINCTION - EXISTING vs NEW CONTENT:
+- "show MY calendar" → DEVICE_COMMAND + show_calendar (show EXISTING content)
+- "show THE calendar" → DEVICE_COMMAND + show_calendar (show EXISTING content)
+- "show A creative phrase" → DISPLAY_CONTENT (generate + display NEW content)
+- "show AN inspiring quote" → DISPLAY_CONTENT (generate + display NEW content)
+- "put A message on screen" → DISPLAY_CONTENT (generate + display NEW content)
+- "display SOMETHING creative" → DISPLAY_CONTENT (generate + display NEW content)
+
+RULE: Indefinite articles (a, an, una, un) + creative content = DISPLAY_CONTENT (generates text_block)
+RULE: Possessive/definite articles (my, the, mi, el, la) + calendar = DEVICE_COMMAND + show_calendar
 
 CALENDAR SEARCH EXTRACTION (IMPORTANT!):
 When user mentions specific events, extract search terms:
@@ -700,6 +740,39 @@ Output: {
   "reasoning": "General capabilities question - needs direct answer, NO confirmation"
 }
 
+Input: "te fuiste del tema, te estoy creando a ti, entonces estoy demostrando capacidad"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "te fuiste del tema, te estoy creando a ti, entonces estoy demostrando capacidad",
+  "reasoning": "User is DISCUSSING and making a point in conversation - not a display command. This is dialogue/debate."
+}
+
+Input: "no me escuchaste, lo que quise decir fue algo diferente"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "no me escuchaste, lo que quise decir fue algo diferente",
+  "reasoning": "User is clarifying a previous statement in conversation - not a display command. This is dialogue."
+}
+
+Input: "creo que estás equivocado sobre ese tema, déjame explicarte"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "question",
+  "parameters": null,
+  "original_text": "creo que estás equivocado sobre ese tema, déjame explicarte",
+  "reasoning": "User is debating and wants to explain something - not a display command. This is dialogue."
+}
+
 Input: "How many events do I have today?"
 Output: {
   "intent_type": "calendar_query",
@@ -827,12 +900,33 @@ Output: {
 }
 
 Input: "yes"
+Context: has_pending_create: true, pending_event: "Meeting with John"
 Output: {
   "intent_type": "calendar_create",
   "confidence": 0.85,
   "action": "confirm_create",
   "original_text": "yes",
-  "reasoning": "Confirmation response - user confirming pending action"
+  "reasoning": "Confirmation response - user confirming pending event creation"
+}
+
+Input: "si"
+Context: (no pending_operation)
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.9,
+  "action": "question",
+  "original_text": "si",
+  "reasoning": "No pending operation in context - 'si' is a conversational affirmative, NOT calendar confirmation"
+}
+
+Input: "ok"
+Context: (no pending_operation)
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.9,
+  "action": "question",
+  "original_text": "ok",
+  "reasoning": "No pending operation - 'ok' is conversational acknowledgment"
 }
 
 Input: "yes, for december 25 at 10am"
@@ -1259,6 +1353,170 @@ Output: {
   "reasoning": "General knowledge request for a tutorial - no specific document reference = CONVERSATION"
 }
 
+MEMORY-AWARE CONTENT DISPLAY (Sprint 4.2):
+==========================================
+When user references RECENTLY GENERATED content (from working memory), use DISPLAY_CONTENT:
+
+Detection keywords that indicate MEMORY content (not Google Docs):
+Spanish: 'que creaste', 'que hiciste', 'que generaste', 'que acabas de', 'esa nota', 'ese email', 'la plantilla'
+English: 'you created', 'you made', 'you generated', 'you just wrote', 'that note', 'that email', 'the template'
+
+RULE: If user references content "you" (the AI) created → DISPLAY_CONTENT (from memory)
+RULE: If user references external documents (Google Docs, Drive) → DOC_QUERY
+
+Input: "muestra la nota que creaste en la pantalla"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "show generated note",
+  "target_device": "pantalla",
+  "original_text": "muestra la nota que creaste en la pantalla",
+  "reasoning": "User wants to display recently generated content ('que creaste' = 'you created'). This is from memory, NOT Google Docs - use DISPLAY_CONTENT"
+}
+
+Input: "necesito crear una nota ABA y mostrarla en la sala"
+Output: {
+  "intent_type": "conversation",
+  "confidence": 0.9,
+  "action": "question",
+  "parameters": null,
+  "original_text": "necesito crear una nota ABA y mostrarla en la sala",
+  "reasoning": "Multi-action request: PRIMARY intent is content creation (CONVERSATION). After content is generated, it will be stored in memory for later display."
+}
+
+Input: "muestra el email de google docs"
+Output: {
+  "intent_type": "doc_query",
+  "confidence": 0.9,
+  "action": "open_doc",
+  "meeting_search": null,
+  "original_text": "muestra el email de google docs",
+  "reasoning": "Explicitly references 'Google Docs' - search external storage, NOT memory"
+}
+
+Input: "muestra el email que acabas de escribir"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "show generated email",
+  "target_device": null,
+  "original_text": "muestra el email que acabas de escribir",
+  "reasoning": "'que acabas de escribir' = 'you just wrote' - references AI-generated content in memory"
+}
+
+Input: "presenta la plantilla en la pantalla de la cocina"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.9,
+  "action": "display_scene",
+  "layout_request": "show generated template",
+  "target_device": "pantalla de la cocina",
+  "original_text": "presenta la plantilla en la pantalla de la cocina",
+  "reasoning": "Without 'Google Docs' reference, assume recently generated content from memory - use DISPLAY_CONTENT"
+}
+
+Input: "show the note you made on the living room TV"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "show generated note",
+  "target_device": "living room TV",
+  "original_text": "show the note you made on the living room TV",
+  "reasoning": "'you made' indicates AI-generated content in working memory - DISPLAY_CONTENT, not DOC_QUERY"
+}
+
+CREATIVE CONTENT GENERATION + DISPLAY (CRITICAL):
+==========================================
+When user asks to "show/display/put" NEW creative content (phrase, quote, message, text),
+this is DISPLAY_CONTENT with the Scene Graph generating the content!
+
+DETECTION: Look for INDEFINITE articles (una, un, a, an) + creative content keywords:
+Spanish: 'una frase', 'un mensaje', 'una cita', 'un texto', 'algo creativo', 'algo inspirador'
+English: 'a phrase', 'a message', 'a quote', 'some text', 'something creative', 'something inspiring'
+
+RULE: "mostrar UNA frase creativa" = DISPLAY_CONTENT (Scene Graph generates + displays)
+RULE: "mostrar MI calendario" = DEVICE_COMMAND + show_calendar (show existing)
+
+Input: "puedes mostrar una frase creativa en la sala"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "creative phrase / frase creativa",
+  "target_device": "sala",
+  "original_text": "puedes mostrar una frase creativa en la sala",
+  "reasoning": "'UNA frase creativa' = generate and display NEW creative content. DISPLAY_CONTENT with text_block component."
+}
+
+Input: "pon una frase inspiradora en la pantalla"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "inspiring phrase / frase inspiradora",
+  "target_device": "pantalla",
+  "original_text": "pon una frase inspiradora en la pantalla",
+  "reasoning": "'UNA frase inspiradora' = generate inspiring phrase and display. DISPLAY_CONTENT, not show_calendar."
+}
+
+Input: "muestra un mensaje motivacional en el TV"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "motivational message / mensaje motivacional",
+  "target_device": "TV",
+  "original_text": "muestra un mensaje motivacional en el TV",
+  "reasoning": "'UN mensaje motivacional' = generate and display motivational message. DISPLAY_CONTENT with text generation."
+}
+
+Input: "display a creative quote on the living room screen"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "creative quote",
+  "target_device": "living room screen",
+  "original_text": "display a creative quote on the living room screen",
+  "reasoning": "'A creative quote' = generate and display new quote. DISPLAY_CONTENT intent."
+}
+
+Input: "show something inspiring on the TV"
+Output: {
+  "intent_type": "display_content",
+  "confidence": 0.95,
+  "action": "display_scene",
+  "layout_request": "something inspiring",
+  "target_device": "TV",
+  "original_text": "show something inspiring on the TV",
+  "reasoning": "'something inspiring' = generate inspiring content and display. DISPLAY_CONTENT."
+}
+
+vs. EXISTING content (these ARE device_command with show_calendar):
+
+Input: "muestra MI calendario en la sala"
+Output: {
+  "intent_type": "device_command",
+  "confidence": 0.95,
+  "action": "show_calendar",
+  "device_name": "sala",
+  "original_text": "muestra MI calendario en la sala",
+  "reasoning": "'MI calendario' = possessive = show EXISTING calendar. DEVICE_COMMAND with show_calendar."
+}
+
+Input: "pon EL calendario en la pantalla"
+Output: {
+  "intent_type": "device_command",
+  "confidence": 0.95,
+  "action": "show_calendar",
+  "device_name": "pantalla",
+  "original_text": "pon EL calendario en la pantalla",
+  "reasoning": "'EL calendario' = definite article = show EXISTING calendar. DEVICE_COMMAND."
+}
+
 Input: "hazme unas notas sobre machine learning y ponlas en pantalla"
 Output: {
   "intent_type": "conversation",
@@ -1311,6 +1569,74 @@ Output: {
   "meeting_search": null,
   "original_text": "is there a doc for this event?",
   "reasoning": "User asking about 'this event' - needs context resolution. If conversation context has a recent event, that will be used."
+}
+
+CRITICAL DISTINCTION - CALENDAR EVENT vs MEETING DOCUMENT:
+==========================================================
+When user mentions "reunion" or "meeting" WITHOUT "doc"/"documento":
+→ CALENDAR_QUERY (event from calendar)
+
+When user mentions "reunion doc" or "meeting document":
+→ DOC_QUERY (document from Google Docs)
+
+DETECTION RULE:
+- "reunión" / "meeting" / "evento" / "event" ALONE → CALENDAR_QUERY
+- "documento de reunión" / "meeting doc" / "doc" → DOC_QUERY
+- If unclear, prefer CALENDAR_QUERY (users usually mean the event itself)
+
+Input: "puedes mostrarme esa reunion en pantalla?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "action": "find_event",
+  "device_name": "pantalla",
+  "search_term": "reunion",
+  "original_text": "puedes mostrarme esa reunion en pantalla?",
+  "reasoning": "'esa reunion' = calendar event (NO 'documento' keyword). Use CALENDAR_QUERY not DOC_QUERY"
+}
+
+Input: "muestra ese evento en la sala"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "action": "find_event",
+  "device_name": "sala",
+  "search_term": "evento",
+  "original_text": "muestra ese evento en la sala",
+  "reasoning": "'ese evento' = calendar event. Only use DOC_QUERY when user says 'documento', 'doc', or 'meeting doc'"
+}
+
+Input: "show that meeting on screen"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "action": "find_event",
+  "device_name": "screen",
+  "search_term": "meeting",
+  "original_text": "show that meeting on screen",
+  "reasoning": "'that meeting' alone = calendar event. DOC_QUERY requires 'the meeting DOC' or 'document'"
+}
+
+Input: "muestra el documento de esa reunion en pantalla"
+Output: {
+  "intent_type": "doc_query",
+  "confidence": 0.95,
+  "action": "open_doc",
+  "device_name": "pantalla",
+  "meeting_search": "reunion",
+  "original_text": "muestra el documento de esa reunion en pantalla",
+  "reasoning": "'documento de esa reunion' = meeting DOCUMENT. Has 'documento' keyword = DOC_QUERY"
+}
+
+Input: "open the meeting doc on screen"
+Output: {
+  "intent_type": "doc_query",
+  "confidence": 0.95,
+  "action": "open_doc",
+  "device_name": "screen",
+  "meeting_search": "meeting",
+  "original_text": "open the meeting doc on screen",
+  "reasoning": "'meeting doc' = document. Has 'doc' keyword = DOC_QUERY"
 }
 
 Input: "summarize that meeting's notes"

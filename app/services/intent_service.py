@@ -242,11 +242,34 @@ class IntentService:
             from app.ai.context import _build_pending_state
             pending_state = _build_pending_state(str(user_id))
             
+            # Sprint 4.2 FIX: Add conversation context and generated content for context-aware parsing
+            from app.services.conversation_context_service import conversation_context_service
+            from app.ai.context import _build_conversation_context
+            
+            # Get conversation context (history, last messages)
+            conversation_context = _build_conversation_context(str(user_id))
+            
+            # Get generated content from memory (for "show that note" references)
+            generated_content = conversation_context_service.get_generated_content(str(user_id))
+            
+            # Serialize generated_content timestamp to ISO string for JSON compatibility
+            if generated_content and "timestamp" in generated_content:
+                ts = generated_content["timestamp"]
+                if hasattr(ts, 'isoformat'):
+                    generated_content = {
+                        **generated_content,
+                        "timestamp": ts.isoformat()
+                    }
+            
             context = {
                 "devices": device_context,
                 "user_id": str(user_id),
                 # Add pending operation context for routing and parsing
                 "pending_operation": pending_state.to_dict() if pending_state else None,
+                # Sprint 4.2: Add conversation context for multi-turn awareness
+                "conversation_context": conversation_context.to_dict() if conversation_context else None,
+                # Sprint 4.2: Add generated content for memory-aware references
+                "generated_content": generated_content,
             }
             
             # Log pending state for debugging
@@ -898,11 +921,26 @@ Respond naturally in the SAME language. Be encouraging.'''
             count = kwargs.get('count', 0)
             search = kwargs.get('search_term', 'events')
             period = kwargs.get('period', '')
-            prompt = f'''User asked: "{user_request}"
 
-They have {count} "{search}" event(s) {period}.
+            # More explicit prompt to prevent hallucination
+            if count == 0:
+                prompt = f'''User asked: "{user_request}"
 
-Tell them the count naturally. Respond in their language.'''
+IMPORTANT: They have ZERO (0) "{search}" events {period}.
+
+Tell them they have NO events matching their query. Respond in their language.'''
+            elif count == 1:
+                prompt = f'''User asked: "{user_request}"
+
+IMPORTANT: They have EXACTLY ONE (1) "{search}" event {period}.
+
+Tell them they have 1 event. Respond in their language.'''
+            else:
+                prompt = f'''User asked: "{user_request}"
+
+IMPORTANT: They have EXACTLY {count} "{search}" events {period}.
+
+Tell them the COUNT ({count} events). Respond in their language.'''
         
         elif template_type == "list":
             events = kwargs.get('events', [])
@@ -978,7 +1016,25 @@ Ask them politely what event they want to find. Respond in their language.'''
             temperature=0.7,
             max_tokens=200,
         )
-        
+
+        # Validate "count" responses to prevent hallucination
+        if template_type == "count" and response.success:
+            count_value = kwargs.get('count', 0)
+            response_text = response.content.strip()
+
+            # Check if response contradicts the count
+            if count_value == 0 and any(word in response_text.lower() for word in ['tienes', 'have', 'hay', 'there are']):
+                # Response might be saying "you have X" when count is 0
+                if not any(word in response_text.lower() for word in ['no ', 'zero', 'cero', 'ninguna', 'ningún']):
+                    logger.warning(f"Count template hallucination detected: count={count_value}, response='{response_text[:50]}'")
+                    # Override with explicit template
+                    search_term = kwargs.get('search_term', 'eventos' if ('es' in user_request.lower() or 'ñ' in user_request) else 'events')
+                    period = kwargs.get('period', '')
+                    if 'es' in user_request.lower() or 'ñ' in user_request:
+                        response.content = f"No tienes {search_term} {period}.".strip()
+                    else:
+                        response.content = f"You don't have any {search_term} {period}.".strip()
+
         return response.content.strip() if response.success else "I couldn't process that request."
     
     async def _smart_find_event(
@@ -1477,14 +1533,19 @@ Respond in the same language they used originally.
             conversation_context_service.clear_pending_content(str(user_id))
         elif conversation_history:
             # Include conversation history for context
-            user_prompt = f"""CONVERSATION HISTORY:
+            # Sprint 4.2.4: Clearer prompt to prevent model confusion
+            user_prompt = f"""=== PREVIOUS CONVERSATION (for context only) ===
 {conversation_history}
+=== END OF HISTORY ===
 
-CURRENT REQUEST:
-{original_text}
+>>> CURRENT USER MESSAGE (respond to THIS): <<<
+"{original_text}"
 
-Respond to the current request, using the conversation history for context if relevant.
-ALWAYS respond in the same language as the user's current request."""
+IMPORTANT INSTRUCTIONS:
+1. Answer ONLY the current message above, NOT previous questions from the history
+2. Use the conversation history ONLY as background context
+3. If the user is correcting you or changing topic, acknowledge it and respond to their NEW question
+4. Respond in the same language as the current message"""
         else:
             user_prompt = build_assistant_prompt(original_text, context)
         
@@ -1546,6 +1607,20 @@ ALWAYS respond in the same language as the user's current request."""
                 message = "Lo siento, estoy teniendo problemas procesando eso. ¿Podrías reformular? / I apologize, I'm having trouble processing that. Could you rephrase?"
         else:
             message = response.content.strip()
+        
+        # Sprint 4.2: Detect and store generated content for memory-aware display
+        content_type = self._detect_content_type(original_text, message)
+        if content_type:
+            title = self._extract_content_title(original_text, message)
+            conversation_context_service.set_generated_content(
+                user_id=str(user_id),
+                content=message,
+                content_type=content_type,
+                title=title,
+            )
+            logger.info(
+                f"[{request_id}] Stored generated content: type={content_type}, title={title}"
+            )
         
         # Sprint 4.1: Save conversation turn for future context
         conversation_context_service.add_conversation_turn(
@@ -2160,6 +2235,104 @@ ALWAYS respond in the same language as the user's current request."""
         if hasattr(intent_type, 'value'):
             return intent_type.value
         return str(intent_type)
+    
+    def _detect_content_type(self, request: str, response: str) -> Optional[str]:
+        """
+        Detect if response is generated content (note, email, template, etc.)
+        
+        Sprint 4.2: Memory-aware content display.
+        Sprint 4.2.1: Added research/search detection.
+        
+        Args:
+            request: The user's original request
+            response: The AI-generated response
+            
+        Returns:
+            Content type string if detected, None otherwise
+        """
+        request_lower = request.lower()
+        
+        # Content creation keywords
+        content_keywords = {
+            "note": ["nota", "note", "apunte", "notes", "notas"],
+            "email": ["email", "correo", "mensaje de correo", "mail"],
+            "template": ["plantilla", "template", "formato"],
+            "script": ["script", "guión", "guion"],
+            "document": ["documento", "document", "doc"],
+            "list": ["lista", "list", "checklist"],
+            "message": ["mensaje", "message"],
+            "summary": ["resumen", "summary"],
+            "tutorial": ["tutorial", "guía", "guide"],
+            # Sprint 4.2.1: Research/search content
+            "research": ["investiga", "investigate", "research", "búsqueda", "busca", "search", "find", "encuentra"],
+            "analysis": ["analiza", "analyze", "analysis", "análisis"],
+            "explanation": ["explica", "explain", "qué es", "what is", "cuéntame", "tell me about"],
+        }
+        
+        # Check if request contains creation intent
+        creation_verbs = [
+            "crear", "create", "escribe", "write", "genera", "generate",
+            "redacta", "draft", "hazme", "dame", "give me", "necesito",
+            "i need", "make", "haz", "crea",
+            # Sprint 4.2.1: Research/search verbs (these also generate content)
+            "investiga", "investigate", "busca", "search", "find",
+            "analiza", "analyze", "explica", "explain", "cuéntame", "tell me",
+        ]
+        has_creation_intent = any(verb in request_lower for verb in creation_verbs)
+        
+        if has_creation_intent:
+            for content_type, keywords in content_keywords.items():
+                if any(keyword in request_lower for keyword in keywords):
+                    return content_type
+        
+        # Check if response is structured content (longer than 100 chars with creation intent)
+        if len(response) > 100 and has_creation_intent:
+            return "research" if any(v in request_lower for v in ["investiga", "busca", "search", "find"]) else "document"
+        
+        return None
+    
+    def _extract_content_title(self, request: str, response: str) -> Optional[str]:
+        """
+        Extract title from request or first line of response.
+        
+        Sprint 4.2: Memory-aware content display.
+        
+        Args:
+            request: The user's original request
+            response: The AI-generated response
+            
+        Returns:
+            Title string if extracted, None otherwise
+        """
+        import re
+        
+        # Try to extract from request (e.g., "crear nota ABA" → "ABA")
+        # Pattern: content type word followed by name/title
+        patterns = [
+            r'(nota|note|email|correo|documento|document|plantilla|template)\s+(?:de\s+|sobre\s+|para\s+)?["\']?([A-Za-z0-9áéíóúÁÉÍÓÚñÑ\s]+)["\']?',
+            r'(nota|note|email|correo|documento|document|plantilla|template)\s+["\']?([A-Z][A-Za-z0-9\s]+)["\']?',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, request, re.IGNORECASE)
+            if match:
+                title = match.group(2).strip()
+                # Clean up common trailing words
+                title = re.sub(r'\s+(y|and|en|on|para|for)\s*$', '', title, flags=re.IGNORECASE)
+                if len(title) > 2:  # Avoid single letters
+                    return title[:50]  # Max 50 chars
+        
+        # Fallback: use first line of response (max 50 chars)
+        first_line = response.split('\n')[0].strip()
+        # Remove markdown headers
+        first_line = re.sub(r'^#+\s*', '', first_line)
+        # Remove common prefixes
+        first_line = re.sub(r'^(Aquí|Here|Este|This)\s+(está|is|es)?\s*:?\s*', '', first_line, flags=re.IGNORECASE)
+        
+        if first_line and len(first_line) > 3:
+            return first_line[:50]
+        
+        return None
     
     @staticmethod
     def _build_success_message(action: str, device_name: str, parameters: Optional[Dict]) -> str:
@@ -5176,17 +5349,153 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
         Handle display content intents by generating and sending scene graphs.
         
         Sprint 4.0: Scene Graph implementation for creative device layouts.
+        Sprint 4.2: Memory-aware content display - check generated content first.
         
         Flow:
-        1. Resolve target device (from intent.device_name or first online device)
-        2. Detect default scene type or use custom layout
-        3. Normalize layout hints to LayoutHint objects
-        4. Generate scene via SceneService
-        5. Send scene to device via WebSocket
-        6. Return result with component summary
+        1. Check for recently generated content in memory (Sprint 4.2)
+        2. Resolve target device (from intent.device_name or first online device)
+        3. Detect default scene type or use custom layout
+        4. Normalize layout hints to LayoutHint objects
+        5. Generate scene via SceneService
+        6. Send scene to device via WebSocket
+        7. Return result with component summary
         """
         from app.ai.scene.service import scene_service
         from app.ai.scene.defaults import detect_default_scene_type
+        from app.services.conversation_context_service import conversation_context_service
+        from app.services.commands import command_service  # Import at function level for all code paths
+        
+        # DEBUG: Log entry into _handle_display_content
+        logger.info(f"[{request_id}] ENTERING _handle_display_content for user {str(user_id)[:8]}...")
+        
+        # Sprint 4.2: Check for recently generated content in memory
+        generated_content = conversation_context_service.get_generated_content(str(user_id))
+        logger.info(f"[{request_id}] generated_content exists: {generated_content is not None}")
+        
+        # Also get conversation history for context
+        conversation_history = conversation_context_service.get_conversation_history(str(user_id), max_turns=5)
+        logger.info(f"[{request_id}] conversation_history turns: {len(conversation_history) if conversation_history else 0}")
+        
+        if generated_content:
+            # Check if user is referencing the generated content
+            original_text_lower = intent.original_text.lower() if intent.original_text else ""
+            logger.info(f"[{request_id}] Checking memory keywords in: '{original_text_lower[:50]}...'")
+            memory_keywords = [
+                'que creaste', 'que hiciste', 'que generaste', 'que acabas',
+                'esa nota', 'ese email', 'la plantilla', 'la nota', 'el email',
+                'you created', 'you made', 'you generated', 'you just wrote',
+                'that note', 'that email', 'the template', 'the note',
+                'show it', 'muéstralo', 'muestramelo', 'muéstramelo',
+                # Sprint 4.2.1: Research/search result references
+                'los resultados', 'the results', 'lo que encontraste', 'what you found',
+                'lo que investigaste', 'what you researched', 'esa información',
+                'that information', 'eso', 'that', 'esto', 'this',
+                'muestrame eso', 'show me that', 'ponlo', 'put it', 'en la pantalla',
+                'on the screen', 'en pantalla', 'on screen',
+                # Sprint 4.2.2: Demonstrative references (esas, esos, etc.)
+                'esas', 'esos', 'estas', 'estos', 'those', 'these',
+            ]
+            
+            is_memory_reference = any(kw in original_text_lower for kw in memory_keywords)
+            
+            if is_memory_reference:
+                logger.info(
+                    f"[{request_id}] Displaying generated content from memory: "
+                    f"type={generated_content['type']}, title={generated_content['title']}"
+                )
+                
+                # Resolve target device for displaying generated content
+                target_device = None
+                if intent.device_name:
+                    target_device, _ = device_mapper.match(intent.device_name, devices)
+                if not target_device:
+                    target_device = next((d for d in devices if d.is_online), None)
+                
+                if not target_device:
+                    processing_time = (time.time() - start_time) * 1000
+                    return IntentResult(
+                        success=False,
+                        intent_type=IntentResultType.DISPLAY_CONTENT,
+                        message="No display device available. Please connect a device first.",
+                        processing_time_ms=processing_time,
+                        request_id=request_id,
+                    )
+                
+                # Build proper SceneGraph with generated content as text_block
+                content_title = generated_content["title"] or "Generated Content"
+                content_text = generated_content["content"]
+                
+                scene_dict = {
+                    "scene_id": f"memory-content-{request_id[:8]}",
+                    "version": "1.1",
+                    "target_devices": [str(target_device.id)],
+                    "layout": {
+                        "intent": "fullscreen",
+                        "engine": "flex",
+                        "gap": "16px",
+                    },
+                    "components": [
+                        {
+                            "id": "generated_content_display",
+                            "type": "text_block",
+                            "priority": "primary",
+                            "position": {"flex": 1},
+                            "style": {
+                                "background": "#1a1a2e",
+                                "text_color": "#ffffff",
+                                "border_radius": "16px",
+                                "padding": "32px",
+                            },
+                            "props": {
+                                "content": content_text,
+                                "title": content_title,
+                                "alignment": "left",
+                                "font_size": "18px",
+                            },
+                            "data": {
+                                "content": content_text,
+                                "is_placeholder": False,
+                            },
+                        }
+                    ],
+                    "global_style": {
+                        "background": "#0f0f23",
+                        "font_family": "Inter",
+                        "text_color": "#ffffff",
+                        "accent_color": "#7b2cbf",
+                    },
+                    "metadata": {
+                        "user_request": intent.original_text,
+                        "generated_by": "memory_context",
+                        "refresh_seconds": 300,
+                    },
+                }
+                
+                # Send to device via command service
+                result = await command_service.display_scene(
+                    device_id=target_device.id,
+                    scene=scene_dict,
+                )
+                
+                processing_time = (time.time() - start_time) * 1000
+                
+                return IntentResult(
+                    success=result.success,
+                    intent_type=IntentResultType.DISPLAY_CONTENT,
+                    confidence=0.95,
+                    device=target_device,
+                    action="display_scene",
+                    message=f"Showing {generated_content['type']}: {content_title} on {target_device.name}",
+                    command_sent=result.success,
+                    command_id=result.command_id,
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                    data={
+                        "source": "generated_content_memory",
+                        "content_type": generated_content["type"],
+                        "content_title": content_title,
+                    },
+                )
         
         logger.info(
             f"[{request_id}] Handling display content intent",
@@ -5262,7 +5571,44 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
             if realtime_data:
                 logger.info(f"[{request_id}] Fetched real-time data for: {list(realtime_data.keys())}")
             
-            # Generate scene via SceneService (now with real-time data)
+            # Sprint 4.2: Build conversation context for scene generation
+            # This ensures Claude knows what was discussed/generated before
+            conversation_context_dict = {}
+            
+            # Detect if user wants a conversation summary (need more history)
+            original_text_lower = (intent.original_text or "").lower()
+            is_summary_request = any(kw in original_text_lower for kw in [
+                'resume', 'resumen', 'resumas', 'summarize', 'summary',
+                'lo que hablamos', 'what we discussed', 'esta conversación',
+                'this conversation', 'nuestra conversación', 'our conversation',
+            ])
+            
+            # Get more turns for summary requests
+            max_turns = 10 if is_summary_request else 5
+            conversation_history = conversation_context_service.get_conversation_history(str(user_id), max_turns=max_turns)
+            if conversation_history:
+                conversation_context_dict["history"] = conversation_history
+                if is_summary_request:
+                    logger.info(f"[{request_id}] SUMMARY REQUEST: Including {len(conversation_history)} conversation turns for summarization")
+                else:
+                    logger.info(f"[{request_id}] Including {len(conversation_history)} conversation turns in scene context")
+            
+            # Get generated content (even if not explicitly referenced)
+            if generated_content:
+                # Serialize timestamp if present
+                gc_serialized = {
+                    k: v.isoformat() if hasattr(v, 'isoformat') else v
+                    for k, v in generated_content.items()
+                }
+                conversation_context_dict["generated_content"] = gc_serialized
+                logger.info(f"[{request_id}] Including generated content in scene context: type={generated_content.get('type')}")
+            
+            # Get last assistant response (may contain useful content)
+            context_state = conversation_context_service.get_context(str(user_id))
+            if context_state and context_state.last_assistant_response:
+                conversation_context_dict["last_response"] = context_state.last_assistant_response
+            
+            # Generate scene via SceneService (now with real-time data AND conversation context)
             logger.info(f"[{request_id}] Generating scene with {len(normalized_hints)} layout hints")
             scene = await scene_service.generate_scene(
                 layout_hints=normalized_hints,
@@ -5271,7 +5617,8 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
                 user_id=str(user_id),
                 user_request=intent.original_text,
                 db=db,
-                realtime_data=realtime_data,  # NEW: Pass real-time data
+                realtime_data=realtime_data,  # Sprint 4.1: Pass real-time data
+                conversation_context=conversation_context_dict,  # Sprint 4.2: Pass conversation context
             )
             
             # Send scene to device via WebSocket

@@ -99,6 +99,7 @@ class SceneService:
         user_request: str,
         db: Session,
         realtime_data: Dict[str, Any] = None,
+        conversation_context: Dict[str, Any] = None,
     ) -> SceneGraph:
         """
         Generate a complete Scene Graph with embedded data.
@@ -117,6 +118,7 @@ class SceneService:
             user_request: Original user request for metadata
             db: Database session
             realtime_data: Pre-fetched real-time data from Gemini (Sprint 4.1)
+            conversation_context: Conversation history and generated content (Sprint 4.2)
             
         Returns:
             Complete SceneGraph ready for sending to device
@@ -127,6 +129,7 @@ class SceneService:
                 "info_type": info_type,
                 "hint_count": len(layout_hints),
                 "device_count": len(target_devices),
+                "has_conversation_context": conversation_context is not None,
             }
         )
         
@@ -138,6 +141,7 @@ class SceneService:
                 user_request=user_request,
                 target_devices=target_devices,
                 realtime_data=realtime_data or {},
+                conversation_context=conversation_context or {},
             )
             
             # Validate generated scene
@@ -285,6 +289,7 @@ class SceneService:
         user_request: str,
         target_devices: List[str],
         realtime_data: Dict[str, Any] = None,
+        conversation_context: Dict[str, Any] = None,
     ) -> SceneGraph:
         """
         Use Claude to generate a creative layout.
@@ -293,6 +298,7 @@ class SceneService:
         anthropic_provider.generate_json() to get the scene structure.
         
         Sprint 4.1: Now accepts realtime_data to embed in components.
+        Sprint 4.2: Now accepts conversation_context for multi-turn awareness.
         
         Args:
             hints: Normalized layout hints
@@ -300,6 +306,7 @@ class SceneService:
             user_request: Original user request
             target_devices: Target device IDs
             realtime_data: Pre-fetched real-time data from Gemini
+            conversation_context: Previous conversation history and generated content
             
         Returns:
             SceneGraph from Claude's response
@@ -319,12 +326,14 @@ class SceneService:
         )
         
         # Sprint 4.1: Pass realtime_data to prompt builder
+        # Sprint 4.2: Pass conversation_context for multi-turn awareness
         generation_prompt = build_scene_generation_prompt(
             user_request=user_request,
             layout_hints=hints,
             info_type=info_type,
             device_count=len(target_devices),
             realtime_data=realtime_data or {},
+            conversation_context=conversation_context or {},
         )
         
         logger.debug("Calling Claude for scene generation")
@@ -349,7 +358,23 @@ class SceneService:
             )
             return scene
         except json.JSONDecodeError as e:
-            raise Exception(f"Claude returned invalid JSON: {e}")
+            logger.error(f"Claude JSON parsing failed: {e}")
+            logger.debug(f"Raw Claude response: {response.content[:500]}...")
+
+            # Try to clean common JSON errors
+            try:
+                # Remove trailing commas
+                cleaned_content = re.sub(r',(\s*[}\]])', r'\1', response.content)
+                # Fix unterminated strings (basic attempt)
+                cleaned_content = re.sub(r'(["\'])\s*\n\s*}', r'\1}', cleaned_content)
+
+                scene_data = json.loads(cleaned_content)
+                logger.info("Recovered from JSON error with cleaning")
+                scene = self._parse_scene_response(scene_data, target_devices, user_request, response.model)
+                return scene
+            except Exception as retry_error:
+                logger.error(f"JSON cleanup failed: {retry_error}")
+                raise Exception(f"Claude returned invalid JSON: {e}")
         except Exception as e:
             raise Exception(f"Failed to parse Claude response: {e}")
     
