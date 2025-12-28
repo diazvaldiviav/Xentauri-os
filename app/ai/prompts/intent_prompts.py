@@ -845,6 +845,76 @@ Output: {
   "reasoning": "Asking about events for tomorrow - returns text answer"
 }
 
+CRITICAL DISTINCTION - "WHAT event" (list) vs "HOW MANY events" (count):
+========================================================================
+When user asks WHAT event(s) they have, use list_events to show details.
+When user asks HOW MANY or IF they have events, use count_events.
+
+Spanish detection rules:
+- "que evento" / "cual evento" / "what event" → list_events (wants details)
+- "cuantos eventos" / "how many events" → count_events (wants number)
+- "tengo algun evento" / "do I have" / "hay eventos" → count_events (yes/no)
+
+Input: "que evento tengo hoy?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "list_events",
+  "date_range": "today",
+  "search_term": null,
+  "original_text": "que evento tengo hoy?",
+  "reasoning": "'que evento' = WHAT event (not HOW MANY). User wants to know the event details, use list_events."
+}
+
+Input: "cual es mi evento de hoy?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "list_events",
+  "date_range": "today",
+  "search_term": null,
+  "original_text": "cual es mi evento de hoy?",
+  "reasoning": "'cual es' = WHICH/WHAT event. User wants details, use list_events."
+}
+
+Input: "cuantos eventos tengo hoy?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.95,
+  "device_name": null,
+  "action": "count_events",
+  "date_range": "today",
+  "search_term": null,
+  "original_text": "cuantos eventos tengo hoy?",
+  "reasoning": "'cuantos' = HOW MANY. User wants the count, use count_events."
+}
+
+Input: "tengo algun evento hoy?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.90,
+  "device_name": null,
+  "action": "count_events",
+  "date_range": "today",
+  "search_term": null,
+  "original_text": "tengo algun evento hoy?",
+  "reasoning": "'tengo algun' = DO I HAVE (yes/no question). Use count_events."
+}
+
+Input: "hay eventos en mi calendario para hoy?"
+Output: {
+  "intent_type": "calendar_query",
+  "confidence": 0.90,
+  "device_name": null,
+  "action": "count_events",
+  "date_range": "today",
+  "search_term": null,
+  "original_text": "hay eventos en mi calendario para hoy?",
+  "reasoning": "'hay eventos' = ARE THERE events (yes/no). Use count_events."
+}
+
 Input: "Schedule a meeting tomorrow at 6 pm"
 Output: {
   "intent_type": "calendar_create",

@@ -930,7 +930,20 @@ IMPORTANT: They have ZERO (0) "{search}" events {period}.
 
 Tell them they have NO events matching their query. Respond in their language.'''
             elif count == 1:
-                prompt = f'''User asked: "{user_request}"
+                # If we have the event details, include them
+                event = kwargs.get('event')
+                if event:
+                    title = event.get_display_title()
+                    time_str = event.get_time_display()
+                    prompt = f'''User asked: "{user_request}"
+
+IMPORTANT: They have EXACTLY ONE (1) event {period}.
+Event Details: "{title}" at {time_str}
+
+Tell them they have 1 event AND mention the event name and time. Respond in their language.'''
+                else:
+                    # Fallback if no event object provided
+                    prompt = f'''User asked: "{user_request}"
 
 IMPORTANT: They have EXACTLY ONE (1) "{search}" event {period}.
 
@@ -1269,15 +1282,20 @@ Ask them politely what event they want to find. Respond in their language.'''
                     period=period,
                 )
             else:
-                return await self._generate_calendar_response(
-                    template_type="count",
-                    user_request=original_text or f"count {search_term}",
-                    user_id=user_id,
-                    db=db,
-                    count=count,
-                    search_term=corrected,
-                    period=period,
-                )
+                # If count=1, include event details in response
+                kwargs_dict = {
+                    "template_type": "count",
+                    "user_request": original_text or f"count {search_term}",
+                    "user_id": user_id,
+                    "db": db,
+                    "count": count,
+                    "search_term": corrected,
+                    "period": period,
+                }
+                if count == 1 and result.events:
+                    kwargs_dict["event"] = result.events[0]
+
+                return await self._generate_calendar_response(**kwargs_dict)
         
         # No search term - fetch events and use multilingual generator
         credentials = db.query(OAuthCredential).filter(
@@ -1319,15 +1337,20 @@ Ask them politely what event they want to find. Respond in their language.'''
                 period=period,
             )
         else:
-            return await self._generate_calendar_response(
-                template_type="count",
-                user_request=original_text or "count events",
-                user_id=user_id,
-                db=db,
-                count=count,
-                search_term="",
-                period=period,
-            )
+            # If count=1, include event details in response
+            kwargs_dict = {
+                "template_type": "count",
+                "user_request": original_text or "count events",
+                "user_id": user_id,
+                "db": db,
+                "count": count,
+                "search_term": "",
+                "period": period,
+            }
+            if count == 1 and events:
+                kwargs_dict["event"] = events[0]
+
+            return await self._generate_calendar_response(**kwargs_dict)
     
     async def _smart_list_events(
         self,
