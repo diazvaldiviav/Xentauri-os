@@ -362,20 +362,22 @@ Response:
 def build_execution_prompt(
     context: UnifiedContext,
     user_request: str,
+    conversation_history: str = None,
 ) -> str:
     """
     Build complete execution prompt for GPT-4o.
-    
+
     This combines:
     - System prompt with rules
     - User's context (devices, services)
     - JSON schema and examples
     - The actual user request
-    
+
     Args:
         context: UnifiedContext with user's setup
         user_request: What the user wants to do
-        
+        conversation_history: Optional conversation history with previous responses
+
     Returns:
         Complete prompt string for GPT-4o
     """
@@ -384,18 +386,32 @@ def build_execution_prompt(
     for device in context.devices:
         status = "ONLINE" if device.is_online else "OFFLINE"
         devices_list.append(f"  - {device.device_name} ({status})")
-    
+
     devices_section = "\n".join(devices_list) if devices_list else "  (No devices)"
-    
+
     # Format connected services
     services = []
     if context.has_google_calendar:
         services.append("✓ Google Calendar")
     if context.has_google_drive:
         services.append("✓ Google Drive")
-    
+
     services_section = "\n".join(f"  {s}" for s in services) if services else "  (None connected)"
-    
+
+    # Sprint 4.2.9: Inject conversation history for context-aware execution
+    history_section = ""
+    if conversation_history:
+        history_section = f"""
+PREVIOUS CONVERSATION CONTEXT:
+=============================
+{conversation_history}
+
+IMPORTANT: The conversation above includes information from web searches,
+calendar queries, and previous responses. Use this context to inform your actions.
+=============================
+
+"""
+
     # Build the complete prompt
     return f"""{EXECUTION_SYSTEM_PROMPT}
 
@@ -412,7 +428,7 @@ Connected Services:
 Available Actions:
   {', '.join(context.available_actions)}
 
-{JSON_SCHEMA_EXAMPLES}
+{history_section}{JSON_SCHEMA_EXAMPLES}
 
 {EXECUTION_EXAMPLES}
 

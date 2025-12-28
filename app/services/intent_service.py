@@ -1761,10 +1761,11 @@ IMPORTANT INSTRUCTIONS:
 
         # Build prompt and call AI
         if task_type == "execution":
-            prompt = build_execution_prompt(unified_context, text) if unified_context else text
+            # Sprint 4.2.9: Pass conversation history to executor (GPT) for context awareness
+            prompt = build_execution_prompt(unified_context, text, conversation_history) if unified_context else text
             system_prompt = "You are a smart display execution assistant. Return valid JSON."
         else:
-            # Sprint 4.2.8: Pass conversation history to reasoner for context awareness
+            # Sprint 4.2.8: Pass conversation history to reasoner (Claude) for context awareness
             prompt = build_reasoner_prompt(unified_context, text, conversation_history) if unified_context else text
             system_prompt = "You are a strategic advisor for smart home systems."
         
@@ -1807,6 +1808,14 @@ IMPORTANT INSTRUCTIONS:
         
         # Handle reasoning tasks (return text response)
         if task_type == "reasoning":
+            # Sprint 4.2.9: Save Claude's response to conversation context
+            conversation_context_service.add_conversation_turn(
+                user_id=str(user_id),
+                user_message=text,
+                assistant_response=response.content,
+                intent_type="complex_reasoning",
+            )
+
             return IntentResult(
                 success=True,
                 intent_type=IntentResultType.COMPLEX_REASONING,
@@ -1823,6 +1832,14 @@ IMPORTANT INSTRUCTIONS:
             action_response = parse_action_response(response.content, strict=False)
             
             if isinstance(action_response, ClarificationResponse):
+                # Sprint 4.2.9: Save GPT's clarification to conversation context
+                conversation_context_service.add_conversation_turn(
+                    user_id=str(user_id),
+                    user_message=text,
+                    assistant_response=action_response.message,
+                    intent_type="complex_execution_clarification",
+                )
+
                 return IntentResult(
                     success=True,
                     intent_type=IntentResultType.CLARIFICATION,
@@ -1834,7 +1851,7 @@ IMPORTANT INSTRUCTIONS:
                 )
             
             elif isinstance(action_response, ActionResponse):
-                return await self._execute_gpt_action(
+                result = await self._execute_gpt_action(
                     action_response=action_response,
                     request_id=request_id,
                     user_id=user_id,
@@ -1842,6 +1859,16 @@ IMPORTANT INSTRUCTIONS:
                     processing_time=processing_time,
                     routing_confidence=routing_decision.confidence,
                 )
+
+                # Sprint 4.2.9: Save GPT's action execution to conversation context
+                conversation_context_service.add_conversation_turn(
+                    user_id=str(user_id),
+                    user_message=text,
+                    assistant_response=result.message or f"Executed {action_response.action_name}",
+                    intent_type="complex_execution",
+                )
+
+                return result
             
             elif isinstance(action_response, ActionSequenceResponse):
                 results = []
@@ -1855,15 +1882,24 @@ IMPORTANT INSTRUCTIONS:
                         routing_confidence=routing_decision.confidence,
                     )
                     results.append(result)
-                
+
                 all_success = all(r.success for r in results)
                 messages = [r.message for r in results if r.message]
-                
+                combined_message = "\n".join(messages)
+
+                # Sprint 4.2.9: Save GPT's action sequence to conversation context
+                conversation_context_service.add_conversation_turn(
+                    user_id=str(user_id),
+                    user_message=text,
+                    assistant_response=combined_message or f"Executed {len(results)} actions",
+                    intent_type="complex_execution_sequence",
+                )
+
                 return IntentResult(
                     success=all_success,
                     intent_type=IntentResultType.ACTION_SEQUENCE,
                     confidence=routing_decision.confidence,
-                    message="\n".join(messages),
+                    message=combined_message,
                     command_sent=any(r.command_sent for r in results),
                     processing_time_ms=processing_time,
                     request_id=request_id,
