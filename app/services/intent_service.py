@@ -1755,12 +1755,17 @@ IMPORTANT INSTRUCTIONS:
                 request_id=request_id,
             )
         
+        # Sprint 4.2.8: Get conversation history for context-aware delegation
+        from app.services.conversation_context_service import conversation_context_service
+        conversation_history = conversation_context_service.get_conversation_summary(str(user_id))
+
         # Build prompt and call AI
         if task_type == "execution":
             prompt = build_execution_prompt(unified_context, text) if unified_context else text
             system_prompt = "You are a smart display execution assistant. Return valid JSON."
         else:
-            prompt = build_reasoner_prompt(unified_context, text) if unified_context else text
+            # Sprint 4.2.8: Pass conversation history to reasoner for context awareness
+            prompt = build_reasoner_prompt(unified_context, text, conversation_history) if unified_context else text
             system_prompt = "You are a strategic advisor for smart home systems."
         
         response = await ai_provider.generate(prompt=prompt, system_prompt=system_prompt)

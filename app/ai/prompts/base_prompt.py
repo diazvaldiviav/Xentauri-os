@@ -75,8 +75,8 @@ def build_base_system_prompt(context: UnifiedContext) -> str:
     # Format available actions
     actions_section = ", ".join(context.available_actions)
     
-    # Build the prompt
-    return f"""You are Jarvis, an intelligent assistant for controlling display devices (TVs, monitors, screens).
+    # Build the base prompt
+    base_prompt = f"""You are Jarvis, an intelligent assistant for controlling display devices (TVs, monitors, screens).
 
 CRITICAL LANGUAGE RULE:
 =======================
@@ -107,7 +107,17 @@ IMPORTANT GUIDELINES:
 3. For calendar display, you MUST have Google Calendar connected
 4. Always specify which device to target
 5. Be helpful and concise in your responses
-6. If the user asks for something you can't do, explain why clearly"""
+6. If the user asks for something you can't do, explain why clearly
+7. DON'T greet the user by name in EVERY response! Only greet once at conversation start, then respond naturally."""
+    
+    # Sprint 4.2: Inject generated content context (DRY - propagates to ALL models)
+    context_dict = context.to_dict()
+    if "generated_content_context" in context_dict:
+        generated_context = context_dict["generated_content_context"]
+        if generated_context:
+            return f"{base_prompt}\n{generated_context}"
+    
+    return base_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -259,24 +269,40 @@ Analyze the task and return the appropriate JSON response."""
 def build_reasoner_prompt(
     context: UnifiedContext,
     question: str,
+    conversation_history: Optional[str] = None,
 ) -> str:
     """
     Build prompt for the Reasoner (Claude).
-    
+
     The reasoner handles complex reasoning tasks that require:
     - Deep analysis
     - Strategic planning
     - Recommendations
-    
+
     Args:
         context: UnifiedContext
         question: The user's question or problem
-        
+        conversation_history: Optional conversation history with previous responses
+
     Returns:
         Complete prompt for Claude
     """
     base = build_base_system_prompt(context)
-    
+
+    # Sprint 4.2.8: Inject conversation history for context-aware delegation
+    history_section = ""
+    if conversation_history:
+        history_section = f"""
+PREVIOUS CONVERSATION CONTEXT:
+=============================
+{conversation_history}
+
+IMPORTANT: The conversation above includes information from web searches and
+previous queries. Use this context to inform your response.
+=============================
+
+"""
+
     return f"""{base}
 
 YOUR ROLE: Strategic Advisor & Analyst
@@ -287,13 +313,14 @@ You handle complex reasoning tasks that require:
 - Explaining complex concepts
 - Problem diagnosis
 
-USER QUESTION: "{question}"
+{history_section}USER QUESTION: "{question}"
 
 Provide a thoughtful, well-reasoned response. Consider:
 1. The user's current setup (devices, services)
 2. Best practices and common patterns
 3. Potential issues and solutions
 4. Clear explanations and recommendations
+5. Information from the previous conversation (if provided above)
 
 Be thorough but concise. Focus on actionable insights."""
 
