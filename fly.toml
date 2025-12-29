@@ -1,5 +1,5 @@
 app = "xentauri-cloud-core"
-primary_region = "mia"
+primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"
