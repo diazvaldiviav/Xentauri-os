@@ -30,7 +30,7 @@ from app.db.session import SessionLocal
 from app.models.device import Device
 
 
-logger = logging.getLogger("jarvis.simulator")
+logger = logging.getLogger("xentauri.simulator")
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis Display Simulator - {device_name}</title>
+    <title>Xentauri Display Simulator - {device_name}</title>
     <style>
         * {{
             margin: 0;
@@ -348,7 +348,7 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
     <!-- Content Frame -->
     <div class="content-frame" id="contentFrame">
         <div class="idle-screen" id="idleScreen">
-            <h1>🖥️ Jarvis Display</h1>
+            <h1>🖥️ Xentauri Display</h1>
             <p>Device: <strong>{device_name}</strong></p>
             <p>ID: <code>{device_id[:8]}...</code></p>
             <p class="waiting">Waiting for commands...</p>
@@ -363,14 +363,14 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
     
     <script>
         // Debug: Confirm script is running
-        console.log('[Jarvis Simulator] Script starting...');
+        console.log('[Xentauri Simulator] Script starting...');
         
         // Configuration
         const DEVICE_ID = "{device_id}";
         const DEVICE_NAME = "{device_name}";
         const WS_URL = "{ws_url}";
         
-        console.log('[Jarvis Simulator] Config:', {{ DEVICE_ID, DEVICE_NAME, WS_URL }});
+        console.log('[Xentauri Simulator] Config:', {{ DEVICE_ID, DEVICE_NAME, WS_URL }});
         
         // DOM elements
         const statusDot = document.getElementById('statusDot');
@@ -408,7 +408,7 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
                 statusDot.classList.remove('reconnecting');
                 statusDot.classList.add('connected');
                 statusText.textContent = 'Connected';
-                log('Connected to Jarvis Cloud', 'success');
+                log('Connected to Xentauri Cloud', 'success');
                 
                 // Hide reconnection overlay
                 if (reconnectOverlay) {{
@@ -453,7 +453,7 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
         window.forceReconnect = forceReconnect;
         
         // Storage key for persisting content state
-        const STORAGE_KEY = `jarvis_simulator_${{DEVICE_ID}}`;
+        const STORAGE_KEY = `xentauri_simulator_${{DEVICE_ID}}`;
         
         // Save current content state to localStorage
         function saveContentState(url, contentType) {{
@@ -591,7 +591,7 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
         
         function connect() {{
             log(`Connecting to ${{WS_URL}}...`, 'info');
-            console.log('[Jarvis Simulator] Attempting WebSocket connection to:', WS_URL);
+            console.log('[Xentauri Simulator] Attempting WebSocket connection to:', WS_URL);
             
             // Clear any existing heartbeat
             if (heartbeatInterval) {{
@@ -603,7 +603,7 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
                 ws = new WebSocket(WS_URL);
                 
                 ws.onopen = () => {{
-                    console.log('[Jarvis Simulator] WebSocket connected successfully');
+                    console.log('[Xentauri Simulator] WebSocket connected successfully');
                     setConnected(true);
                     reconnectAttempts = 0;
                     
@@ -623,12 +623,12 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
                         }}
                     }} catch (e) {{
                         log(`Parse error: ${{e.message}}`, 'error');
-                        console.error('[Jarvis Simulator] Message parse error:', e);
+                        console.error('[Xentauri Simulator] Message parse error:', e);
                     }}
                 }};
                 
                 ws.onclose = (event) => {{
-                    console.log('[Jarvis Simulator] WebSocket closed:', event.code, event.reason);
+                    console.log('[Xentauri Simulator] WebSocket closed:', event.code, event.reason);
                     setConnected(false);
                     
                     // Clear heartbeat
@@ -655,12 +655,12 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
                 }};
                 
                 ws.onerror = (error) => {{
-                    console.error('[Jarvis Simulator] WebSocket error:', error);
+                    console.error('[Xentauri Simulator] WebSocket error:', error);
                     log('WebSocket error - check browser console', 'error');
                 }};
                 
             }} catch (e) {{
-                console.error('[Jarvis Simulator] Connection exception:', e);
+                console.error('[Xentauri Simulator] Connection exception:', e);
                 log(`Connection failed: ${{e.message}}`, 'error');
                 
                 // Still try to reconnect on exception
@@ -697,8 +697,8 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
         }}, 5000);
         
         // Start connection
-        console.log('[Jarvis Simulator] About to initialize...');
-        log('Jarvis Display Simulator starting...');
+        console.log('[Xentauri Simulator] About to initialize...');
+        log('Xentauri Display Simulator starting...');
         log('Keys: L=logs, ESC=clear, F=fullscreen, R=reconnect');
         
         // Restore previous content if available
@@ -706,9 +706,9 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
             log('Content restored from previous session', 'success');
         }}
         
-        console.log('[Jarvis Simulator] Calling connect()...');
+        console.log('[Xentauri Simulator] Calling connect()...');
         connect();
-        console.log('[Jarvis Simulator] connect() called');
+        console.log('[Xentauri Simulator] connect() called');
         
         // =========================================================================
         // SCENE GRAPH RENDERER (Sprint 4.0)
@@ -1067,7 +1067,16 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
             const el = document.createElement('div');
             el.className = 'text-block';
             el.style.fontSize = props?.font_size || '1em';
-            el.textContent = data?.content || '';
+            el.style.lineHeight = '1.6';
+            el.style.whiteSpace = 'pre-wrap';
+            el.style.wordWrap = 'break-word';
+            el.style.overflow = 'auto';
+            el.style.maxHeight = '100%';
+            
+            // Use props.content first, fallback to data.content
+            const content = props?.content || data?.content || '';
+            el.textContent = content;
+            
             return el;
         }}
         
@@ -1314,7 +1323,7 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
                 
                 return formatted;
             }} catch (e) {{
-                console.error('[Jarvis Simulator] Error formatting AI content:', e);
+                console.error('[Xentauri Simulator] Error formatting AI content:', e);
                 // Return plain escaped content on error
                 return escapeHtml(content || '');
             }}
@@ -1354,7 +1363,7 @@ async def simulator_page(request: Request):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Jarvis Simulator - Setup</title>
+    <title>Xentauri Simulator - Setup</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -1382,7 +1391,7 @@ async def simulator_page(request: Request):
 </head>
 <body>
     <div class="container">
-        <h1>🖥️ Jarvis Display Simulator</h1>
+        <h1>🖥️ Xentauri Display Simulator</h1>
         <p>No devices found. Create a device first:</p>
         <code>POST /devices</code>
         <p>Then refresh this page.</p>
@@ -1401,7 +1410,7 @@ async def simulator_page(request: Request):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Jarvis Simulator - Select Device</title>
+    <title>Xentauri Simulator - Select Device</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -1444,7 +1453,7 @@ async def simulator_page(request: Request):
 </head>
 <body>
     <div class="container">
-        <h1>🖥️ Jarvis Display Simulator</h1>
+        <h1>🖥️ Xentauri Display Simulator</h1>
         <p>Select a device to simulate:</p>
         <select id="deviceSelect">
             {device_options}

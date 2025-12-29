@@ -1603,13 +1603,22 @@ IMPORTANT INSTRUCTIONS:
             user_prompt = build_assistant_prompt(original_text, context)
         
         # Determine if web search is needed
+        # Sprint 4.5.0: Expanded keywords for Spanish queries and general updates
         search_keywords = [
-            'weather', 'temperature', 'forecast', 'clima', 'tiempo',
+            # Weather
+            'weather', 'temperature', 'forecast', 'clima', 'tiempo', 'pronóstico',
+            # Time
             'time', 'clock', 'timezone', 'hora',
+            # News/Updates (Sprint 4.5.0: Added Spanish equivalents)
             'news', 'latest', 'today', 'noticias',
+            'últimas', 'actualizaciones', 'updates', 'novedades',
+            'recent', 'reciente', 'cambios', 'changes',
+            # Sports
             'score', 'game', 'match', 'partido',
+            # Finance
             'stock', 'price', 'precio',
-            'current', 'now', 'hoy', 'ahora',
+            # Current/Now
+            'current', 'now', 'hoy', 'ahora', 'actual',
         ]
         
         use_search = any(keyword in original_text.lower() for keyword in search_keywords)
@@ -2335,22 +2344,35 @@ IMPORTANT INSTRUCTIONS:
     def _detect_content_type(self, request: str, response: str) -> Optional[str]:
         """
         Detect if response is generated content (note, email, template, etc.)
-        
+
         Sprint 4.2: Memory-aware content display.
         Sprint 4.2.1: Added research/search detection.
-        
+        Sprint 4.5.0: Added weather/query detection for display context.
+
         Args:
             request: The user's original request
             response: The AI-generated response
-            
+
         Returns:
             Content type string if detected, None otherwise
         """
         request_lower = request.lower()
-        
+        response_lower = response.lower()
+
+        # Sprint 4.5.0: Weather/info query detection (Problem #2 fix)
+        weather_keywords = ["clima", "weather", "temperatura", "temperature", "forecast", "pronóstico", "tiempo"]
+        if any(kw in request_lower for kw in weather_keywords):
+            return "weather_info"
+
+        # Sprint 4.5.0: Detect weather by response characteristics
+        if len(response) > 100:
+            weather_indicators = ["°c", "°f", "grados", "degrees", "humidity", "humedad", "lluvia", "rain", "soleado", "sunny"]
+            if any(ind in response_lower for ind in weather_indicators):
+                return "weather_info"
+
         # Content creation keywords
         content_keywords = {
-            "note": ["nota", "note", "apunte", "notes", "notas"],
+            "note": ["nota", "note", "apunte", "notes", "notas", "tips"],
             "email": ["email", "correo", "mensaje de correo", "mail"],
             "template": ["plantilla", "template", "formato"],
             "script": ["script", "guión", "guion"],
@@ -2359,6 +2381,8 @@ IMPORTANT INSTRUCTIONS:
             "message": ["mensaje", "message"],
             "summary": ["resumen", "summary"],
             "tutorial": ["tutorial", "guía", "guide"],
+            # Sprint 4.5.0: Plan/intervention content
+            "plan": ["plan", "intervención", "intervention", "protocolo", "protocol", "estrategia", "strategy"],
             # Sprint 4.2.1: Research/search content
             "research": ["investiga", "investigate", "research", "búsqueda", "busca", "search", "find", "encuentra"],
             "analysis": ["analiza", "analyze", "analysis", "análisis"],
@@ -5505,10 +5529,24 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
             ]
             
             is_memory_reference = any(kw in original_text_lower for kw in memory_keywords)
-            
-            if is_memory_reference:
+
+            # Sprint 4.5.0: Detect multi-content requests that need Claude scene generation
+            multi_content_keywords = [
+                ' y ', ' and ', 'juntos', 'together', 'ambos', 'both',
+                'izquierda', 'derecha', 'left', 'right', 'arriba', 'abajo',
+                'two_column', 'dos columnas', 'lado a lado', 'side by side',
+            ]
+            is_multi_content_request = any(kw in original_text_lower for kw in multi_content_keywords)
+
+            # Skip fast path for multi-content requests - let Claude handle layout
+            if is_multi_content_request:
                 logger.info(
-                    f"[{request_id}] Displaying generated content from memory: "
+                    f"[{request_id}] Multi-content request detected - skipping fast path, using Claude scene generation"
+                )
+
+            if is_memory_reference and not is_multi_content_request:
+                logger.info(
+                    f"[{request_id}] Displaying generated content from memory (fast path): "
                     f"type={generated_content['type']}, title={generated_content['title']}"
                 )
                 
@@ -5739,6 +5777,12 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
             if last_doc:
                 conversation_context_dict["last_doc"] = last_doc
                 logger.info(f"[{request_id}] Including last doc in scene context: {last_doc.get('title')}")
+
+            # Sprint 4.5.0: Include content memory for multi-content display
+            content_memory = conversation_context_service.get_content_memory(str(user_id), limit=5)
+            if content_memory:
+                conversation_context_dict["content_memory"] = content_memory
+                logger.info(f"[{request_id}] Including content memory in scene context: {len(content_memory)} items")
 
             # Generate scene via SceneService (now with real-time data AND conversation context)
             logger.info(f"[{request_id}] Generating scene with {len(normalized_hints)} layout hints")

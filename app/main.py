@@ -48,7 +48,7 @@ app = FastAPI(
 # - allow_credentials=True: Allow cookies/auth headers
 # 
 # PRODUCTION TODO: Restrict to specific origins:
-# allow_origins=["https://jarvis-app.com", "https://admin.jarvis-app.com"]
+# allow_origins=["https://xentauri-app.com", "https://admin.xentauri-app.com"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],         # TODO: Restrict in production

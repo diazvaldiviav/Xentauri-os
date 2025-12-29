@@ -39,7 +39,20 @@ GUIDELINES:
 - Use clear, simple language
 - If the document has action items or deadlines, highlight them
 - If asked about specific topics, focus on those
-- Keep your response under 500 words unless the document is very detailed"""
+- Keep your response under 500 words unless the document is very detailed
+
+CRITICAL - DOCUMENT REFERENCE RESOLUTION (Sprint 4.4.0 - GAP #5, #22):
+When user says "that document", "the doc", "this document", "ese documento":
+→ If this document was recently referenced (within 5 min), assume they mean THIS document
+→ Do NOT ask "which document?" - they're referring to the document being analyzed above
+→ Use the DOCUMENT TITLE and CONTENT provided above
+
+⏱️ IMPORTANT - TTL (Time To Live): Document references expire after 5 minutes!
+- This document context is only valid if referenced within the last 5 minutes
+- If older than 5 min, the system will prompt user to re-specify
+- You're seeing this because it's FRESH (< 5 min old) and safe to use
+
+This prevents asking users to re-specify documents they just mentioned!"""
 
 
 # ---------------------------------------------------------------------------

@@ -512,9 +512,9 @@ def build_scene_generation_prompt(
                 for turn in history[-3:]:  # Last 3 turns
                     conversation_section += f"  User: {turn.get('user', '')}\n"
                     if turn.get('assistant'):
-                        # Truncate long responses
-                        response = turn['assistant'][:500]
-                        if len(turn['assistant']) > 500:
+                        # Truncate long responses (Sprint 4.5.0: increased from 500 to 1000)
+                        response = turn['assistant'][:1000]
+                        if len(turn['assistant']) > 1000:
                             response += "..."
                         conversation_section += f"  Assistant: {response}\n"
                     conversation_section += "\n"
@@ -539,6 +539,52 @@ def build_scene_generation_prompt(
             conversation_context,
             format_style="scene"
         )
+
+        # Sprint 4.5.0: Inject content memory for multi-content display
+        if conversation_context.get("content_memory"):
+            memory = conversation_context["content_memory"]
+            conversation_section += "\n\n*** CONTENT MEMORY (Sprint 4.5.0 - Full content available) ***\n"
+            conversation_section += "Previously generated contents that user may reference:\n"
+
+            for i, item in enumerate(memory[-5:], 1):  # Last 5 items
+                conversation_section += f"\n[Content #{i}]\n"
+                conversation_section += f"  Title: {item.get('title', 'Untitled')}\n"
+                conversation_section += f"  Type: {item.get('type', 'unknown')}\n"
+                # Include FULL content (not truncated!) - this is the key fix
+                content = item.get('content', '')
+                if len(content) > 4000:
+                    content = content[:4000] + "\n... [truncated for prompt length]"
+                conversation_section += f"  Content:\n{content}\n"
+
+            conversation_section += """
+⚠️ CRITICAL - CONTENT MEMORY USAGE (Sprint 4.5.0):
+===================================================
+When user references previously generated content ("la nota", "el plan", "the template"):
+
+❌ WRONG - NEVER DO THIS:
+   {"type": "doc_summary", "props": {"meeting_search": "nota"}}  ← WRONG! doc_summary searches Google Docs!
+
+✅ CORRECT - ALWAYS DO THIS:
+   {"type": "text_block", "props": {"title": "Tips ABA", "content": "<COPY FULL CONTENT FROM MEMORY ABOVE>"}}
+
+HOW TO USE CONTENT MEMORY:
+1. User says "muestra la nota" → Find matching content in [Content #1], [Content #2], etc. above
+2. COPY the FULL "Content:" text from that memory item
+3. Put it in a text_block component with props.content = that full text
+
+EXAMPLE - User: "muestra la nota y el plan juntos"
+→ Find [Content #1] with title "Tips ABA" and [Content #2] with title "Plan Intervención"
+→ Create JSON:
+{
+  "layout": {"intent": "two_column", ...},
+  "components": [
+    {"type": "text_block", "props": {"title": "Tips ABA", "content": "<FULL text from Content #1>"}},
+    {"type": "text_block", "props": {"title": "Plan Intervención", "content": "<FULL text from Content #2>"}}
+  ]
+}
+
+REMEMBER: Content Memory items are YOUR PREVIOUS RESPONSES - use text_block to display them!
+"""
 
         # Include last assistant response (useful context)
         if conversation_context.get("last_response") and not conversation_context.get("generated_content"):

@@ -12,9 +12,10 @@ Example flow:
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Optional
-from dataclasses import dataclass
+from typing import Dict, List, Optional
+from dataclasses import dataclass, field
 import logging
+import time
 
 logger = logging.getLogger("jarvis.conversation")
 
@@ -34,9 +35,33 @@ class ConversationTurn:
     def to_dict(self) -> Dict:
         return {
             "user": self.user_message,
-            "assistant": self.assistant_response[:200] if self.assistant_response else None,
+            "assistant": self.assistant_response[:500] if self.assistant_response else None,  # Sprint 4.5.0: Increased from 200
             "intent": self.intent_type,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+        }
+
+
+@dataclass
+class GeneratedContent:
+    """
+    Single piece of generated content with metadata.
+
+    Sprint 4.5.0: Content Memory System - stores multiple generated contents
+    instead of overwriting previous ones.
+    """
+    content: str
+    content_type: str
+    title: Optional[str] = None
+    timestamp: Optional[datetime] = None
+    token_count: int = 0  # Estimated tokens for memory management
+
+    def to_dict(self) -> Dict:
+        return {
+            "content": self.content,
+            "type": self.content_type,
+            "title": self.title,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "token_count": self.token_count,
         }
 
 
@@ -78,9 +103,109 @@ class UserConversationState:
     pending_content_request: Optional[str] = None  # What user asked to generate
     pending_content_type: Optional[str] = None  # "template", "notes", "checklist", etc.
     
+    # Generated content tracking (Sprint 4.2: Memory-aware content display)
+    generated_content: Optional[str] = None  # The actual generated content
+    generated_content_type: Optional[str] = None  # note, email, template, script, etc.
+    generated_content_title: Optional[str] = None  # Title extracted from request/response
+    generated_content_timestamp: Optional[datetime] = None  # When content was generated
+
+    # Scene metadata tracking (Sprint 4.4.0 - GAP #8: Assistant awareness of displayed content)
+    last_scene_id: Optional[str] = None  # ID of last displayed scene
+    last_scene_components: list = None  # List of component types shown
+    last_scene_layout: Optional[str] = None  # Layout intent (sidebar, fullscreen, etc.)
+    last_scene_timestamp: Optional[datetime] = None  # When scene was displayed
+
+    # Sprint 4.5.0: Content Memory System - stores multiple generated contents
+    content_memory: List[GeneratedContent] = None  # List of generated contents
+    max_content_items: int = 10  # Keep last N generated contents
+    max_content_tokens: int = 20000  # ~20k tokens total limit for memory
+
     def __post_init__(self):
         if self.conversation_history is None:
             self.conversation_history = []
+        if self.last_scene_components is None:
+            self.last_scene_components = []
+        if self.content_memory is None:
+            self.content_memory = []
+
+    # -------------------------------------------------------------------------
+    # CONTENT MEMORY METHODS (Sprint 4.5.0)
+    # -------------------------------------------------------------------------
+
+    def add_to_content_memory(self, content: GeneratedContent) -> None:
+        """
+        Add content to memory with automatic cleanup.
+
+        Sprint 4.5.0: Stores multiple contents instead of overwriting.
+        """
+        self.content_memory.append(content)
+        self._enforce_content_limits()
+
+    def _enforce_content_limits(self) -> None:
+        """Enforce item count and token limits for content memory."""
+        # Remove oldest if over item limit
+        while len(self.content_memory) > self.max_content_items:
+            self.content_memory.pop(0)
+
+        # Remove oldest if over token limit
+        total_tokens = sum(c.token_count for c in self.content_memory)
+        while total_tokens > self.max_content_tokens and self.content_memory:
+            removed = self.content_memory.pop(0)
+            total_tokens -= removed.token_count
+
+    def get_content_by_title(self, title_query: str) -> Optional[GeneratedContent]:
+        """
+        Find content by title (fuzzy match).
+
+        Args:
+            title_query: Partial or full title to search for
+
+        Returns:
+            Most recent matching GeneratedContent or None
+        """
+        title_lower = title_query.lower()
+        for content in reversed(self.content_memory):  # Most recent first
+            if content.title and title_lower in content.title.lower():
+                return content
+        return None
+
+    def get_content_by_type(self, content_type: str) -> List[GeneratedContent]:
+        """
+        Find all content of a specific type.
+
+        Args:
+            content_type: Type to filter by (e.g., "note", "template", "weather_info")
+
+        Returns:
+            List of matching GeneratedContent objects
+        """
+        return [c for c in self.content_memory if c.content_type == content_type]
+
+    def get_recent_contents(self, limit: int = 5) -> List[GeneratedContent]:
+        """
+        Get most recent generated contents.
+
+        Args:
+            limit: Maximum number of contents to return
+
+        Returns:
+            List of most recent GeneratedContent objects
+        """
+        return self.content_memory[-limit:] if self.content_memory else []
+
+    def get_content_memory_for_prompt(self, limit: int = 5) -> List[Dict]:
+        """
+        Get content memory formatted for injection into prompts.
+
+        Sprint 4.5.0: Provides full content (not truncated) for Claude.
+
+        Args:
+            limit: Maximum number of contents to include
+
+        Returns:
+            List of content dictionaries with full content
+        """
+        return [c.to_dict() for c in self.content_memory[-limit:]]
     
     def to_dict(self) -> Dict:
         """Convert state to dictionary for logging/debugging."""
@@ -105,6 +230,17 @@ class UserConversationState:
                 "pending_content": self.pending_content_request,
                 "history_length": len(self.conversation_history),
             } if self.last_user_request else None,
+            "last_scene": {
+                "scene_id": self.last_scene_id,
+                "components": self.last_scene_components,
+                "layout": self.last_scene_layout,
+            } if self.last_scene_id else None,
+            # Sprint 4.5.0: Content memory info
+            "content_memory": {
+                "count": len(self.content_memory) if self.content_memory else 0,
+                "titles": [c.title for c in self.content_memory[-5:]] if self.content_memory else [],
+                "total_tokens": sum(c.token_count for c in self.content_memory) if self.content_memory else 0,
+            } if self.content_memory else None,
         }
 
 
@@ -205,7 +341,38 @@ class ConversationContextService:
         context.last_search_type = search_type
         context.last_search_timestamp = datetime.now(timezone.utc)
         logger.debug(f"Context set - last_search: '{search_term}' ({search_type})")
-    
+
+    def set_last_scene(
+        self,
+        user_id: str,
+        scene_id: str,
+        components: list,
+        layout_intent: str,
+    ) -> None:
+        """
+        Record that a scene was just displayed.
+
+        Sprint 4.4.0 - GAP #8: Track displayed scenes for assistant awareness.
+
+        This allows the assistant to reference what's currently on screen in
+        follow-up conversations.
+
+        Args:
+            user_id: User identifier
+            scene_id: Scene graph ID
+            components: List of component types (e.g., ["meeting_detail", "text_block"])
+            layout_intent: Layout type (e.g., "sidebar", "fullscreen")
+        """
+        context = self._get_or_create(user_id)
+        context.last_scene_id = scene_id
+        context.last_scene_components = components
+        context.last_scene_layout = layout_intent
+        context.last_scene_timestamp = datetime.now(timezone.utc)
+        logger.info(
+            f"Context set - last_scene: '{scene_id[:20]}...' with {len(components)} components "
+            f"({layout_intent}) for user {user_id[:8]}..."
+        )
+
     def get_last_event(self, user_id: str) -> Optional[Dict]:
         """
         Get the last referenced event if still valid (within TTL).
@@ -323,10 +490,10 @@ class ConversationContextService:
             timestamp=datetime.now(timezone.utc),
         )
         
-        # Add to history (keep last 10 turns max)
+        # Add to history (keep last 15 turns max for better context)
         context.conversation_history.append(turn)
-        if len(context.conversation_history) > 10:
-            context.conversation_history = context.conversation_history[-10:]
+        if len(context.conversation_history) > 15:
+            context.conversation_history = context.conversation_history[-15:]
         
         # Update last turn fields
         context.last_user_request = user_message
@@ -420,11 +587,12 @@ class ConversationContextService:
         recent = context.conversation_history[-max_turns:]
         return [turn.to_dict() for turn in recent]
     
-    def get_conversation_summary(self, user_id: str) -> Optional[str]:
+    def get_conversation_summary(self, user_id: str, max_turns: int = 5) -> Optional[str]:
         """
         Get a summary of recent conversation for AI prompts.
         
         Sprint 4.1: Provides formatted conversation history for AI context.
+        Sprint 4.2.3: Prioritizes CONVERSATION turns over device commands.
         
         Returns:
             Formatted string with recent conversation or None
@@ -439,15 +607,33 @@ class ConversationContextService:
             if age > self._ttl:
                 return None
         
-        # Format last 3 turns for context
-        recent_turns = context.conversation_history[-3:]
+        # Sprint 4.2.3: Prioritize conversation turns over device commands
+        # This ensures that meaningful discussions aren't pushed out by simple commands
+        conversation_turns = [
+            t for t in context.conversation_history 
+            if t.intent_type in ('conversation', 'IntentResultType.CONVERSATION', None)
+        ]
+        command_turns = [
+            t for t in context.conversation_history 
+            if t.intent_type not in ('conversation', 'IntentResultType.CONVERSATION', None)
+        ]
+        
+        # Include more conversation turns + some command context
+        prioritized_turns = conversation_turns[-max_turns:] + command_turns[-2:]
+        
+        # Sort by timestamp to maintain chronological order
+        prioritized_turns.sort(key=lambda t: t.timestamp if t.timestamp else datetime.min.replace(tzinfo=timezone.utc))
+        
+        # Take the last max_turns after sorting
+        recent_turns = prioritized_turns[-max_turns:]
+        
         lines = []
         for turn in recent_turns:
             lines.append(f"User: {turn.user_message}")
             if turn.assistant_response:
-                # Truncate long responses
-                response = turn.assistant_response[:150]
-                if len(turn.assistant_response) > 150:
+                # Truncate long responses (Sprint 4.5.0: increased from 150 to 300)
+                response = turn.assistant_response[:300]
+                if len(turn.assistant_response) > 300:
                     response += "..."
                 lines.append(f"Assistant: {response}")
         
@@ -459,6 +645,121 @@ class ConversationContextService:
             self._contexts[user_id] = UserConversationState()
         return self._contexts[user_id]
     
+    # -------------------------------------------------------------------------
+    # GENERATED CONTENT TRACKING (Sprint 4.2)
+    # -------------------------------------------------------------------------
+    
+    def set_generated_content(
+        self,
+        user_id: str,
+        content: str,
+        content_type: str,
+        title: Optional[str] = None,
+    ) -> None:
+        """
+        Store generated content with 300s TTL (same as conversation context).
+
+        Sprint 4.2: Memory-aware content display.
+        Sprint 4.5.0: Also adds to content_memory for multi-content retrieval.
+
+        This allows the AI to remember generated content (notes, emails, templates)
+        so users can reference it later with "show the note on the screen".
+
+        Args:
+            user_id: User identifier
+            content: The actual generated content
+            content_type: Type of content (note, email, template, script, etc.)
+            title: Optional title extracted from request or response
+        """
+        context = self._get_or_create(user_id)
+
+        # Sprint 4.5.0: Add to content memory (stores multiple contents)
+        token_count = len(content) // 4  # Estimate ~4 chars per token
+        generated = GeneratedContent(
+            content=content,
+            content_type=content_type,
+            title=title,
+            timestamp=datetime.now(timezone.utc),
+            token_count=token_count,
+        )
+        context.add_to_content_memory(generated)
+
+        # Backwards compatibility: also set singleton fields
+        context.generated_content = content
+        context.generated_content_type = content_type
+        context.generated_content_title = title
+        context.generated_content_timestamp = generated.timestamp
+
+        logger.info(
+            f"Generated content stored for user {user_id[:8]}... "
+            f"type={content_type}, title={title}, length={len(content)}, "
+            f"memory_size={len(context.content_memory)}"
+        )
+    
+    def get_generated_content(self, user_id: str) -> Optional[Dict]:
+        """
+        Retrieve generated content if still valid (within 300s TTL).
+        
+        Sprint 4.2: Memory-aware content display.
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            Dict with content, type, title, timestamp if valid, None otherwise
+        """
+        context = self._contexts.get(user_id)
+        if not context or not context.generated_content:
+            return None
+        
+        # Check TTL (5 minutes = 300 seconds, same as pending_event_service)
+        if context.generated_content_timestamp:
+            age = (datetime.now(timezone.utc) - context.generated_content_timestamp).total_seconds()
+            if age > self._ttl:
+                logger.debug(f"Generated content expired for user {user_id[:8]}... (age: {age:.0f}s)")
+                self.clear_generated_content(user_id)
+                return None
+        
+        return {
+            "content": context.generated_content,
+            "type": context.generated_content_type,
+            "title": context.generated_content_title,
+            "timestamp": context.generated_content_timestamp,
+        }
+    
+    def clear_generated_content(self, user_id: str) -> None:
+        """
+        Clear generated content from memory.
+
+        Args:
+            user_id: User identifier
+        """
+        context = self._contexts.get(user_id)
+        if context:
+            context.generated_content = None
+            context.generated_content_type = None
+            context.generated_content_title = None
+            context.generated_content_timestamp = None
+            logger.debug(f"Generated content cleared for user {user_id[:8]}...")
+
+    def get_content_memory(self, user_id: str, limit: int = 5) -> List[Dict]:
+        """
+        Get content memory for a user.
+
+        Sprint 4.5.0: Returns list of generated contents for prompt injection.
+
+        Args:
+            user_id: User identifier
+            limit: Maximum number of contents to return
+
+        Returns:
+            List of content dictionaries with full content
+        """
+        context = self._contexts.get(user_id)
+        if not context or not context.content_memory:
+            return []
+        return context.get_content_memory_for_prompt(limit)
+
     def clear(self, user_id: str) -> None:
         """
         Clear context for user.

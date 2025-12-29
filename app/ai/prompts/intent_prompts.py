@@ -26,7 +26,7 @@ Prompt Engineering Techniques:
 # ---------------------------------------------------------------------------
 # Core prompt for intent extraction
 
-INTENT_SYSTEM_PROMPT = """You are an intent parser for Jarvis, a smart home display control system.
+INTENT_SYSTEM_PROMPT = """You are an intent parser for Xentauri, a smart home display control system.
 
 Your job is to extract STRUCTURED INTENTS from natural language commands.
 
@@ -476,7 +476,7 @@ JSON response only, no explanation."""
 # ---------------------------------------------------------------------------
 # Specialized prompt for device commands (used after intent is confirmed)
 
-DEVICE_COMMAND_PROMPT = """You are processing a device command for Jarvis.
+DEVICE_COMMAND_PROMPT = """You are processing a device command for Xentauri.
 
 The user wants to control a display device.
 

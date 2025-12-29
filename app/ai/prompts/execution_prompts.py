@@ -33,12 +33,15 @@ response = await openai_provider.generate(prompt)
 
 from app.ai.context import UnifiedContext
 
+# Sprint 4.4.0 - GAP #2: Import shared helper for generated_content injection
+from app.ai.prompts.helpers import inject_generated_content_context
+
 
 # ---------------------------------------------------------------------------
 # SYSTEM PROMPT FOR EXECUTION
 # ---------------------------------------------------------------------------
 
-EXECUTION_SYSTEM_PROMPT = """You are Jarvis, an advanced execution specialist for a smart display control system.
+EXECUTION_SYSTEM_PROMPT = """You are Xentauri, an advanced execution specialist for a smart display control system.
 
 YOUR ROLE: Convert user requests into structured, executable JSON actions.
 
@@ -77,12 +80,97 @@ If the user asks for something NOT in the available actions list, you MUST still
 
 Common unsupported requests:
 - "schedule a meeting" -> Cannot create events, only display calendars
-- "create an event" -> Cannot create events, only display calendars  
+- "create an event" -> Cannot create events, only display calendars
 - "send an email" -> Not supported
 - "set a reminder" -> Not supported
 - "play music" -> Not supported
 
-ALWAYS respond with JSON clarification explaining what you CAN do instead."""
+ALWAYS respond with JSON clarification explaining what you CAN do instead.
+
+SERVICE CAPABILITIES (Sprint 4.4.0 - GAP #17, #19):
+=================================================
+Understanding what each service CAN and CANNOT do is critical for avoiding
+user frustration.
+
+GOOGLE CALENDAR (Read-Only):
+✓ CAN: Query events, search calendar, display events, get event details
+✗ CANNOT: Create events, edit events, delete events, send invites
+→ If user asks to create/schedule: Return clarification explaining read-only limitation
+→ Suggest displaying their calendar instead
+
+GOOGLE DRIVE / DOCS (Read-Only):
+✓ CAN: Query documents, search docs, display document content, get doc metadata
+✗ CANNOT: Create documents, edit documents, delete documents, upload files
+→ If user asks to create/edit docs: Return clarification explaining read-only limitation
+→ Suggest displaying existing documents instead
+
+DEVICES (Full Control):
+✓ CAN: Power on/off, change input, adjust volume, display content, execute commands
+→ Full control over registered smart displays and devices
+
+SEMANTIC MATCHING (Sprint 4.4.0 - GAP #9):
+=========================================
+The AI Router has already performed semantic analysis to route this request to you.
+
+CONTENT EXTRACTION GUIDELINES:
+When user says "show X" or "display Y":
+- Extract the SUBJECT/OBJECT (X, Y) as the search term, NOT the VERB ("show", "display")
+- Example: "show my South Beach plan" → search_term="South Beach plan" (NOT "show")
+- Example: "display budget document" → search_term="budget" (NOT "display")
+- The router determined this is a calendar/doc query - your job is extracting WHAT to query
+
+IMPORTANT: Don't search for action verbs like "show", "display", "present" as meeting titles.
+Focus on the content being requested (the plan, document, event name).
+
+CALENDAR SEARCH WORKFLOW (Sprint 4.4.0 - GAP #12):
+==================================================
+Understanding your role in the calendar search pipeline:
+
+THE FULL WORKFLOW:
+1. User: "show my South Beach plan"
+2. Router: Semantic analysis → routes to DISPLAY_CONTENT
+3. Intent Parser: Extracts info_type="calendar", hints=["South Beach plan"]
+4. YOU (GPT): Return action with parameters {{"meeting_search": "South Beach plan"}}
+5. Service Layer: Uses GPT semantic matching to find best event match in calendar
+6. Display: Scene rendered with event details on screen
+
+YOUR ROLE (Step 4):
+- Extract the search term from the user's request
+- Return it in the action parameters (meeting_search, doc_search, etc.)
+- Let the service layer handle the actual calendar/doc API calls
+- You don't query the calendar directly - you provide search params
+
+EXAMPLE FLOW:
+User: "display my dentist appointment"
+→ You return: {{"action_name": "show_calendar", "parameters": {{"meeting_search": "dentist"}}}}
+→ Service finds matching event using semantic search
+→ Event displayed on screen
+
+DISPLAY INTENT SEQUENCING (Sprint 4.4.0 - GAP #11):
+====================================================
+Understanding the two-step flow for "generate + display" requests:
+
+WHEN USER SAYS "CREATE X AND SHOW IT":
+1. FIRST (Your Job): Generate the content
+   - Router sends to CONVERSATION intent
+   - You generate the content (plan, template, summary, etc.)
+   - Content is stored in generated_content memory
+
+2. THEN (Automatic): System triggers display
+   - Code layer auto-detects "and show it" pattern
+   - Triggers DISPLAY_CONTENT intent automatically
+   - Scene generation picks up generated_content from memory
+   - Content is displayed on screen
+
+YOU ONLY HANDLE STEP 1 (generation). The display happens automatically after.
+
+EXAMPLE SEQUENCING:
+User: "Create a South Beach plan and display it on TV"
+→ Step 1 (You): Generate plan content, return it in response
+→ Step 2 (Auto): System triggers display with your generated content
+→ Result: Plan appears on TV
+
+DON'T try to handle both steps - focus on content generation only."""
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +440,44 @@ Response:
   "message": "I can show your calendar for December 11th on the Living Room TV, but I cannot create meetings or events. Would you like me to display your calendar so you can see your schedule for that day?",
   "missing_info": "unsupported_feature"
 }
+```
+
+Example 10: Using last_event context (Sprint 4.4.0)
+----------------------------------
+User: "Reschedule my meeting for tomorrow at 2pm"
+Context: Living Room TV exists, Google Calendar connected
+Conversation history shows:
+  - last_event: "Board meeting" (event_id: abc123, date: 2025-12-28)
+
+Response:
+```json
+{
+  "type": "action",
+  "action_name": "reschedule_event",
+  "parameters": {
+    "event_id": "abc123",
+    "new_date": "2025-12-29",
+    "new_time": "14:00"
+  },
+  "reasoning": "User said 'my meeting' - conversation shows last_event is 'Board meeting'. Using that event_id instead of asking which meeting.",
+  "confidence": 0.95
+}
+```
+
+Example 11: last_event expired - ask for clarification
+----------------------------------
+User: "Show my meeting on the TV"
+Context: Living Room TV exists, Google Calendar connected
+Conversation history shows:
+  - last_event: "Board meeting" (created 6 minutes ago - EXPIRED)
+
+Response:
+```json
+{
+  "type": "clarification",
+  "message": "Which meeting would you like to display? I don't have recent context about a specific meeting (last reference was over 5 minutes ago).",
+  "missing_info": "event_specification"
+}
 ```"""
 
 
@@ -363,6 +489,7 @@ def build_execution_prompt(
     context: UnifiedContext,
     user_request: str,
     conversation_history: str = None,
+    router_decision = None,
 ) -> str:
     """
     Build complete execution prompt for GPT-4o.
@@ -372,11 +499,13 @@ def build_execution_prompt(
     - User's context (devices, services)
     - JSON schema and examples
     - The actual user request
+    - Optional router analysis (Sprint 4.4.0 - GAP #7)
 
     Args:
         context: UnifiedContext with user's setup
         user_request: What the user wants to do
         conversation_history: Optional conversation history with previous responses
+        router_decision: Optional routing decision with complexity/reasoning (Sprint 4.4.0 - GAP #7)
 
     Returns:
         Complete prompt string for GPT-4o
@@ -398,7 +527,25 @@ def build_execution_prompt(
 
     services_section = "\n".join(f"  {s}" for s in services) if services else "  (None connected)"
 
+    # Sprint 4.4.0 - GAP #7: Inject router analysis if available
+    router_section = ""
+    if router_decision:
+        router_section = f"""
+ROUTER ANALYSIS (why you were selected):
+=========================================
+Complexity: {router_decision.complexity.value if hasattr(router_decision.complexity, 'value') else router_decision.complexity}
+Reasoning: {router_decision.reasoning}
+Confidence: {router_decision.confidence:.2f}
+Is Device Command: {router_decision.is_device_command}
+
+IMPORTANT: The router has already analyzed this request and determined it requires
+complex execution (GPT-4o). You don't need to re-classify - focus on extracting
+parameters and building the appropriate action response.
+
+"""
+
     # Sprint 4.2.9: Inject conversation history for context-aware execution
+    # Sprint 4.4.0: Add last_event, last_doc, and generated_content awareness (GAP #2, #4, #5)
     history_section = ""
     if conversation_history:
         history_section = f"""
@@ -408,9 +555,45 @@ PREVIOUS CONVERSATION CONTEXT:
 
 IMPORTANT: The conversation above includes information from web searches,
 calendar queries, and previous responses. Use this context to inform your actions.
+
+📋 CONVERSATION HISTORY LIMITS (Sprint 4.4.0 - GAP #21):
+- Limited to recent turns (typically 5-10 depending on context)
+- Each turn may be truncated to prevent token overflow
+- Older conversation beyond this window is NOT visible here
+- If user references something not shown above, ask for clarification
+- Don't assume you have full conversation history - only what's shown here
+
+CRITICAL - RECENT EVENT/DOC REFERENCES (Sprint 4.4.0 - GAP #16, #22):
+If the conversation mentions a recently created or viewed event/document:
+- Look for "last_event" with event_id, title, date
+- Look for "last_doc" with doc_id, title, url
+
+⏱️ IMPORTANT - TTL (Time To Live): These references expire after 5 minutes!
+- If last_event/last_doc is older than 5 minutes, it will NOT appear in conversation
+- If you see them in the conversation, they are FRESH (< 5 min old) and safe to use
+- If they're missing, either they expired OR user hasn't referenced anything recently
+
+When user says "my plan", "my meeting", "that event", "ese evento":
+→ Check if last_event exists in conversation above
+→ If yes: Use that event_id/title, DO NOT ask "which event?"
+→ If no or too old (>5 min): Ask for clarification
+
+When user says "that document", "the doc", "ese documento":
+→ Check if last_doc exists in conversation above
+→ If yes: Use that doc_id/url, DO NOT ask "which document?"
+→ If no or too old (>5 min): Ask for clarification
+
+This prevents asking users to re-specify things they just mentioned!
 =============================
 
 """
+
+    # Sprint 4.4.0 - GAP #2: Inject generated content context if available
+    context_dict = context.to_dict()
+    if "generated_content_context" in context_dict:
+        generated_context = context_dict["generated_content_context"]
+        if generated_context:
+            history_section += f"\n{generated_context}\n"
 
     # Build the complete prompt
     return f"""{EXECUTION_SYSTEM_PROMPT}
@@ -428,7 +611,7 @@ Connected Services:
 Available Actions:
   {', '.join(context.available_actions)}
 
-{history_section}{JSON_SCHEMA_EXAMPLES}
+{router_section}{history_section}{JSON_SCHEMA_EXAMPLES}
 
 {EXECUTION_EXAMPLES}
 

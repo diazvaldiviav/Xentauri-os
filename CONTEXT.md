@@ -1,16 +1,16 @@
-# Jarvis Project Context
+# Xentauri Project Context
 
-> **Last Updated:** December 28, 2025
-> **Current Sprint:** Sprint 4.5.0 - Intelligent Execution & Context Memory (PLANNED)
-> **Previous Sprint:** Sprint 4.4.0 - Prompt Coordination & Context Harmonization ✅ COMPLETE
-> **Tech Debt Cleanup:** ✅ Complete (301 tests, 84% router reduction)
-> **Status:** ✅ Ready to implement Sprint 4.5.0
+> **Last Updated:** December 29, 2025
+> **Current Sprint:** Sprint 5.0 - Raspberry Pi Agent (NEXT)
+> **Previous Sprint:** Sprint 4.5.0 - Intelligent Execution & Context Memory ✅ COMPLETE
+> **Backend Status:** ✅ MVP COMPLETE - Ready for Production Deployment
+> **Status:** 🚀 Backend ready for fly.io deployment, starting Raspberry Pi Agent
 
-Jarvis is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
+Xentauri is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
 
-- **Jarvis Remote** (iOS app): User-facing mobile application for voice/text commands and device management.
-- **Jarvis Cloud Core** (Backend): Cloud services that process commands, manage devices/sessions, orchestrate agents, and provide APIs.
-- **Jarvis Stick** (Raspberry Pi Agents): Edge software running on Raspberry Pi devices connected to screens, executing commands locally.
+- **Xentauri Remote** (iOS app): User-facing mobile application for voice/text commands and device management.
+- **Xentauri Cloud Core** (Backend): Cloud services that process commands, manage devices/sessions, orchestrate agents, and provide APIs.
+- **Xentauri Stick** (Raspberry Pi Agents): Edge software running on Raspberry Pi devices connected to screens, executing commands locally.
 
 ---
 
@@ -29,7 +29,7 @@ Jarvis is an intelligent screen control system that lets users operate multiple 
 | GET /users/me (protected route) | ✅ Done |
 | Local development running | ✅ Done |
 | Database migrations | ✅ Done |
-| Deploy to Fly.io | ⏳ Pending |
+| Deploy to Fly.io | ✅ Done |
 
 ### Sprint 2: WebSocket Hub + Device Management ✅ COMPLETE
 | Task | Status |
@@ -176,28 +176,49 @@ Jarvis is an intelligent screen control system that lets users operate multiple 
 | JSON syntax improvements for Gemini responses | ✅ Done |
 | Content generation keyword detection (returns None for Claude) | ✅ Done |
 
-### Sprint 4.5.0: Intelligent Execution & Context Memory (PLANNED)
+### Sprint 4.5.0: Intelligent Execution & Context Memory ✅ COMPLETE (December 29, 2025)
 | Task | Status |
 |------|--------|
 | **Problem #1: Search Execution** | |
-| Expand search keywords (Spanish: últimas, actualizaciones) | ⏳ Planned |
-| Add execution enforcement to assistant prompts | ⏳ Planned |
-| Make grounding intent-based (not just keyword-based) | ⏳ Planned |
+| Expand search keywords (Spanish: últimas, actualizaciones, novedades) | ✅ Done |
+| Add execution enforcement to assistant prompts | ✅ Done |
+| Weather detection in _detect_content_type() | ✅ Done |
 | **Problem #2: Context Memory** | |
-| Add weather/query detection to _detect_content_type() | ⏳ Planned |
-| Add anaphoric resolution to scene prompts | ⏳ Planned |
-| Pass last_response explicitly to scene generation | ⏳ Planned |
-| Teach intent parser to resolve content references | ⏳ Planned |
+| Content Memory System (GeneratedContent dataclass) | ✅ Done |
+| Multi-content retrieval (get_content_by_title, get_recent_contents) | ✅ Done |
+| Content memory injection in scene_prompts.py | ✅ Done |
+| Multi-content display detection (skip fast path) | ✅ Done |
+| Plan/intervention content type detection | ✅ Done |
 | **Testing & Validation** | |
-| Add real-world test cases for both problems | ⏳ Planned |
+| Real-time API tests (5 creative prompts) | ✅ Done |
+| Calendar context flow test (Noche Vieja event) | ✅ Done |
+| Multi-content display test (calendar + plan) | ✅ Done |
 
-### Sprint 4.2: Raspberry Pi Agent (Future)
-- Agent project structure (Python)
-- WebSocket client to connect to cloud
-- Pairing flow implementation
-- HDMI-CEC command execution (cec-client)
-- Command acknowledgment and status reporting
-- Local configuration and persistence
+### 🎉 BACKEND MVP COMPLETE
+All backend features for MVP are complete:
+- ✅ User authentication (JWT)
+- ✅ Device management (CRUD + pairing)
+- ✅ AI Router (Gemini/GPT/Claude)
+- ✅ Google Calendar integration (CRUD)
+- ✅ Google Docs intelligence
+- ✅ Scene Graph (dynamic layouts)
+- ✅ Multi-action intents
+- ✅ Intelligent conversations
+- ✅ Real-time data (weather, search)
+- ✅ Content memory system
+- ✅ Multilingual support (Spanish/English)
+
+### Sprint 5.0: Raspberry Pi Agent (NEXT)
+| Task | Status |
+|------|--------|
+| Agent project structure (Python) | ⏳ Planned |
+| WebSocket client to connect to cloud | ⏳ Planned |
+| Pairing flow implementation | ⏳ Planned |
+| HDMI-CEC command execution (cec-client) | ⏳ Planned |
+| Content display (Chromium kiosk) | ⏳ Planned |
+| Command acknowledgment and status reporting | ⏳ Planned |
+| Local configuration and persistence | ⏳ Planned |
+| End-to-end testing with real hardware | ⏳ Planned |
 
 ---
 

@@ -1,4 +1,4 @@
-app = "jarvis-cloud-core"
+app = "xentauri-cloud-core"
 primary_region = "mia"
 
 [build]

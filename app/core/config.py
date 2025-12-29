@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # APPLICATION SETTINGS
     # ---------------------------------------------------------------------------
     # APP_NAME: Display name shown in API docs and logging
-    APP_NAME: str = "Jarvis Cloud Core"
+    APP_NAME: str = "Xentauri Cloud Core"
     
     # DEBUG: Enable debug mode (more verbose errors, auto-reload in dev)
     # Set to False in production for security
@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     # AI MODEL CONFIGURATION
     # ---------------------------------------------------------------------------
     # Default models for each provider (can be overridden per-request)
-    GEMINI_MODEL: str = "gemini-2.5-flash-lite"  # Fast, cheap orchestrator
+    GEMINI_MODEL: str = "gemini-2.5-flash"  # Fast, cheap orchestrator
     OPENAI_MODEL: str = "gpt-5.2"  # Capable model for complex tasks
     ANTHROPIC_MODEL: str = "claude-opus-4-5-20251101"  # Most powerful Claude model
     

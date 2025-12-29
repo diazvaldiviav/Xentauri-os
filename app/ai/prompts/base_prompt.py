@@ -76,7 +76,7 @@ def build_base_system_prompt(context: UnifiedContext) -> str:
     actions_section = ", ".join(context.available_actions)
     
     # Build the base prompt
-    base_prompt = f"""You are Jarvis, an intelligent assistant for controlling display devices (TVs, monitors, screens).
+    base_prompt = f"""You are Xentauri, an intelligent assistant for controlling display devices (TVs, monitors, screens).
 
 CRITICAL LANGUAGE RULE:
 =======================
@@ -270,6 +270,7 @@ def build_reasoner_prompt(
     context: UnifiedContext,
     question: str,
     conversation_history: Optional[str] = None,
+    router_decision = None,
 ) -> str:
     """
     Build prompt for the Reasoner (Claude).
@@ -283,11 +284,29 @@ def build_reasoner_prompt(
         context: UnifiedContext
         question: The user's question or problem
         conversation_history: Optional conversation history with previous responses
+        router_decision: Optional routing decision with complexity/reasoning (Sprint 4.4.0 - GAP #7)
 
     Returns:
         Complete prompt for Claude
     """
     base = build_base_system_prompt(context)
+
+    # Sprint 4.4.0 - GAP #7: Inject router analysis if available
+    router_section = ""
+    if router_decision:
+        router_section = f"""
+ROUTER ANALYSIS (why you were selected):
+=========================================
+Complexity: {router_decision.complexity.value if hasattr(router_decision.complexity, 'value') else router_decision.complexity}
+Reasoning: {router_decision.reasoning}
+Confidence: {router_decision.confidence:.2f}
+Is Device Command: {router_decision.is_device_command}
+
+IMPORTANT: The router has already analyzed this request and determined it requires
+complex reasoning (Claude Opus). You don't need to re-classify - focus on providing
+deep analysis and strategic recommendations.
+
+"""
 
     # Sprint 4.2.8: Inject conversation history for context-aware delegation
     history_section = ""
@@ -299,11 +318,19 @@ PREVIOUS CONVERSATION CONTEXT:
 
 IMPORTANT: The conversation above includes information from web searches and
 previous queries. Use this context to inform your response.
+
+📋 CONVERSATION HISTORY LIMITS (Sprint 4.4.0 - GAP #21):
+- Limited to recent turns (typically 5-10)
+- Each turn may be truncated to prevent token overflow
+- Older conversation is NOT visible - only what's shown here
+- If user references something not shown, ask for clarification
 =============================
 
 """
 
     return f"""{base}
+
+{router_section}
 
 YOUR ROLE: Strategic Advisor & Analyst
 

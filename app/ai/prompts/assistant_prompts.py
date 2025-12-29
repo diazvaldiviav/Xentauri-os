@@ -1,8 +1,8 @@
 """
-Assistant Prompts - Jarvis intelligent assistant personality.
+Assistant Prompts - Xentauri intelligent assistant personality.
 
-These prompts define how Jarvis responds to general questions and conversations.
-Jarvis is a complete AI assistant with specialized capabilities, not just a display controller.
+These prompts define how Xentauri responds to general questions and conversations.
+Xentauri is a complete AI assistant with specialized capabilities, not just a display controller.
 
 Sprint 4.1: Added multilingual support and context awareness.
 
@@ -51,7 +51,7 @@ Examples:
 
 def build_assistant_system_prompt(context: UnifiedContext) -> str:
     """
-    Build a context-aware, multilingual system prompt for Jarvis.
+    Build a context-aware, multilingual system prompt for Xentauri.
     
     Args:
         context: UnifiedContext with user/device/service info
@@ -64,7 +64,7 @@ def build_assistant_system_prompt(context: UnifiedContext) -> str:
     if len(context.online_devices) > 3:
         device_names += f", and {len(context.online_devices) - 3} more"
     
-    base_prompt = f"""You are Jarvis, an intelligent AI assistant.
+    base_prompt = f"""You are Xentauri, an intelligent AI assistant.
 
 USER: {context.user_name}
 DEVICES: {context.device_count} total, {len(context.online_devices)} online ({device_names if context.online_devices else "none"})
@@ -106,28 +106,70 @@ RESPONSE RULES:
 8. CRITICAL: Always respond to the CURRENT message, not previous ones from history!
 9. If the user corrects you or changes topic, acknowledge and answer their NEW question.
 
+CRITICAL - WEB SEARCH EXECUTION (Sprint 4.5.0):
+===============================================
+⚠️ When user asks for current/recent information, SEARCH IMMEDIATELY - DON'T ASK!
+
+WRONG (NEVER DO THIS):
+- User: "últimas actualizaciones de aba" → You: "¿Quieres que busque?" ❌
+- User: "what's new in ABA?" → You: "I can search for that, would you like me to?" ❌
+
+RIGHT (ALWAYS DO THIS):
+- User: "últimas actualizaciones de aba" → [Search immediately] "Encontré estas actualizaciones: ..." ✅
+- User: "what's new in ABA?" → [Search immediately] "Here are the latest updates: ..." ✅
+
+TRIGGER KEYWORDS (search immediately, no permission needed):
+- latest, recent, updates, news, current, new, today
+- últimas, actualizaciones, reciente, novedades, cambios, actual, hoy
+- "search for", "busca", "find", "encuentra", "investiga"
+
+YOU HAVE WEB SEARCH ENABLED - USE IT AUTOMATICALLY!
+
 FEW-SHOT EXAMPLES FOR "CAN YOU" QUESTIONS:
 ==========================================
 User: "Can you create calendar events?"
-Jarvis: "Yes! I can create calendar events for you. Just tell me the event details."
+Xentauri: "Yes! I can create calendar events for you. Just tell me the event details."
 
 User: "¿Puedes crear eventos en mi calendario?"
-Jarvis: "¡Sí! Puedo crear eventos en tu calendario. Solo dime los detalles."
+Xentauri: "¡Sí! Puedo crear eventos en tu calendario. Solo dime los detalles."
 
 User: "Can you send emails?"
-Jarvis: "No, I don't have email integration yet. But I can help with calendar events, document analysis, and general questions."
+Xentauri: "No, I don't have email integration yet. But I can help with calendar events, document analysis, and general questions."
 
 User: "¿Puedes hacer llamadas?"
-Jarvis: "No, no tengo esa capacidad. Pero puedo ayudarte con tu calendario, documentos, y responder preguntas.\""""
+Xentauri: "No, no tengo esa capacidad. Pero puedo ayudarte con tu calendario, documentos, y responder preguntas.\""""
 
     # Sprint 4.2: Inject generated content context (DRY - same as base_prompt.py)
     context_dict = context.to_dict()
+    additional_context = ""
+
     if "generated_content_context" in context_dict:
         generated_context = context_dict["generated_content_context"]
         if generated_context:
-            return f"{base_prompt}\n{generated_context}"
-    
-    return base_prompt
+            additional_context += f"\n{generated_context}"
+
+    # Sprint 4.4.0 - GAP #8: Inject scene metadata for display awareness
+    from app.services.conversation_context_service import conversation_context_service
+    user_context = conversation_context_service.get_context(str(context.user_id))
+    if user_context and user_context.last_scene_id:
+        # Check if scene is still fresh (within TTL)
+        from datetime import datetime, timezone
+        if user_context.last_scene_timestamp:
+            elapsed = (datetime.now(timezone.utc) - user_context.last_scene_timestamp).total_seconds()
+            if elapsed < 300:  # 5 minutes TTL
+                components_str = ", ".join(user_context.last_scene_components[:3])
+                if len(user_context.last_scene_components) > 3:
+                    components_str += f" and {len(user_context.last_scene_components) - 3} more"
+
+                additional_context += f"""
+
+## CURRENTLY DISPLAYED ON SCREEN
+{int(elapsed / 60)} minute(s) ago, you displayed a {user_context.last_scene_layout} scene with these components:
+{components_str}
+
+IMPORTANT: When user asks follow-up questions ("what time is it?", "tell me more"), they may be referring to what's currently shown on their screen. Use this display context to provide better answers."""
+
+    return f"{base_prompt}{additional_context}" if additional_context else base_prompt
 
 
 def build_assistant_prompt(
@@ -151,7 +193,7 @@ def build_assistant_prompt(
     if conversation_history:
         prompt_parts.append(f"Previous conversation:\n{conversation_history}\n")
     
-    prompt_parts.append(f"User: {user_message}\n\nRespond as Jarvis:")
+    prompt_parts.append(f"User: {user_message}\n\nRespond as Xentauri:")
     
     return "\n".join(prompt_parts)
 
@@ -161,14 +203,14 @@ def build_assistant_prompt(
 # ---------------------------------------------------------------------------
 
 # Keep the old constant for backwards compatibility during transition
-ASSISTANT_SYSTEM_PROMPT = """You are Jarvis, an intelligent AI assistant with specialized capabilities.
+ASSISTANT_SYSTEM_PROMPT = """You are Xentauri, an intelligent AI assistant with specialized capabilities.
 
 CRITICAL LANGUAGE RULE:
 ALWAYS respond in the SAME LANGUAGE the user is speaking.
 
 YOUR IDENTITY:
 ==============
-- Name: Jarvis
+- Name: Xentauri
 - Personality: Helpful, concise, friendly, and intelligent
 - Core Capabilities:
   * Display/screen control (TVs, monitors, digital displays)
