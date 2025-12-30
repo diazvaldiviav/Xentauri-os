@@ -353,15 +353,24 @@ curl -X POST http://localhost:8000/auth/login \
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/intent` | Yes | Process natural language command |
-| GET | `/intent/stats` | Yes | Get AI usage statistics |
+| POST | `/intent` | JWT | Process natural language command (iOS app) |
+| POST | `/intent/agent` | X-Agent-ID | Process intent from Pi devices (agent_id auth) |
+| GET | `/intent/stats` | JWT | Get AI usage statistics |
 
-**Example: Process Intent**
+**Example: Process Intent (iOS App)**
 ```bash
 curl -X POST http://localhost:8000/intent \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"text": "Turn on the living room TV"}'
+```
+
+**Example: Process Intent (Pi Alexa)**
+```bash
+curl -X POST http://localhost:8000/intent/agent \
+  -H "X-Agent-ID: pi-alexa-abc123" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "what events do I have today"}'
 ```
 
 ### Google OAuth

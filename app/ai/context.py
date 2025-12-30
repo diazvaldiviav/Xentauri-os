@@ -328,7 +328,7 @@ class UnifiedContext:
         
         This is used to inject context into AI prompts.
         """
-        return {
+        context_dict = {
             "user": {
                 "id": str(self.user_id),
                 "name": self.user_name,
@@ -351,6 +351,32 @@ class UnifiedContext:
             "conversation_context": self.conversation_context.to_dict() if self.conversation_context else None,
             "created_at": self.created_at.isoformat(),
         }
+        
+        # Sprint 4.2: Add generated content context if available
+        from app.services.conversation_context_service import conversation_context_service
+        
+        generated_content = conversation_context_service.get_generated_content(str(self.user_id))
+        if generated_content:
+            elapsed = (datetime.now(timezone.utc) - generated_content["timestamp"]).total_seconds()
+            minutes_ago = int(elapsed / 60)
+            
+            context_dict["generated_content_context"] = f"""
+## RECENTLY GENERATED CONTENT (Memory Context)
+
+{minutes_ago} minute(s) ago, you generated this {generated_content['type'].upper()}:
+Title: {generated_content['title'] or 'Untitled'}
+Content:
+{generated_content['content']}
+
+IMPORTANT: If the user asks to "show", "display", "present" or reference this content, use DISPLAY_CONTENT intent (NOT DOC_QUERY). This content is in your working memory, not in Google Docs.
+
+⏱️ TTL (Time To Live): This generated content expires after 5 minutes!
+- You're seeing this because it was generated within the last 5 minutes
+- If this context is missing, the content has expired or hasn't been generated
+- After 5 min, users must regenerate or you should prompt them
+"""
+        
+        return context_dict
     
     def get_device_by_name(self, name: str) -> Optional[DeviceCapability]:
         """Find a device by name (case-insensitive)."""

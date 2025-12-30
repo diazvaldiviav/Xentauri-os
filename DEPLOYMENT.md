@@ -233,11 +233,29 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY . .
 
+# Make startup script executable
+RUN chmod +x start.sh
+
 # Expose port
 EXPOSE 8080
 
-# Run with gunicorn + uvicorn workers
-CMD ["gunicorn", "app.main:app", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--workers", "2"]
+# Run startup script (runs migrations, then starts app)
+CMD ["./start.sh"]
+```
+
+### start.sh
+
+The startup script runs database migrations automatically before starting the app:
+
+```bash
+#!/bin/bash
+set -e
+
+echo "Running database migrations..."
+alembic upgrade head
+
+echo "Starting application..."
+exec gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080 --workers 2
 ```
 
 ---
@@ -279,6 +297,17 @@ fly secrets set DATABASE_URL="postgresql+psycopg://..." --app xentauri-cloud-cor
    ```bash
    fly ssh console --app xentauri-cloud-core -c "nc -zv xentauri-db.flycast 5432"
    ```
+
+### Tables Not Created (relation "users" does not exist)
+
+If you see `UndefinedTable: relation "users" does not exist`, the migrations haven't run.
+
+**Manual fix:**
+```bash
+fly ssh console --app xentauri-cloud-core -C "bash -c 'cd /app && alembic upgrade head'"
+```
+
+**Note:** This is now handled automatically by `start.sh` on each deploy.
 
 ### Google OAuth Not Working
 
@@ -344,6 +373,8 @@ fly postgres connect --app xentauri-db
 
 # Set secret
 fly secrets set KEY="value" --app xentauri-cloud-core
+
+fly apps restart xentauri-cloud-core => reset
 ```
 
 ---

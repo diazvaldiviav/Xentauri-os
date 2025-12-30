@@ -5,7 +5,7 @@ The main dependency here is get_current_user which validates JWT tokens.
 
 import uuid  # For parsing user ID from token
 
-from fastapi import Depends, HTTPException, status  # FastAPI components
+from fastapi import Depends, Header, HTTPException, status  # FastAPI components
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials  # Auth header extraction
 from jose import JWTError, jwt  # JWT decoding and error handling
 from sqlalchemy.orm import Session  # Database session type
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session  # Database session type
 from app.core.config import settings  # App configuration (SECRET_KEY, ALGORITHM)
 from app.db.session import get_db  # Database session dependency
 from app.models.user import User  # User ORM model
+from app.models.device import Device  # Device ORM model (for agent auth)
 
 # ---------------------------------------------------------------------------
 # SECURITY SCHEME
@@ -135,4 +136,94 @@ def get_current_user(
     # ---------------------------------------------------------------------------
     # The route handler receives this User object
     # Example: def my_route(current_user: User = Depends(get_current_user))
+    return user
+
+
+# ---------------------------------------------------------------------------
+# AGENT AUTHENTICATION (Pi Alexa - Sprint 5.0)
+# ---------------------------------------------------------------------------
+
+def get_user_from_agent(
+    x_agent_id: str = Header(..., alias="X-Agent-ID"),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    Validate agent_id header and return the associated user.
+
+    This is a FastAPI dependency used by Pi devices that authenticate via
+    agent_id instead of JWT tokens. The agent must be paired with a device
+    that belongs to a user.
+
+    Chain: X-Agent-ID header → Device (by agent_id) → User (by user_id)
+
+    Args:
+        x_agent_id: The agent identifier from "X-Agent-ID" header
+        db: Database session for querying device and user
+
+    Returns:
+        User: The user who owns the device paired with this agent
+
+    Raises:
+        401 Unauthorized: If agent_id is not paired with any device
+        401 Unauthorized: If user not found for the device
+        403 Forbidden: If user account is deactivated
+
+    Usage:
+        @router.post("/intent/agent")
+        async def process_intent_agent(
+            request: IntentRequest,
+            current_user: User = Depends(get_user_from_agent),
+        ):
+            # current_user is the owner of the Pi device
+            ...
+
+    Example Request:
+        curl -X POST /intent/agent \
+          -H "X-Agent-ID: pi-alexa-abc123" \
+          -H "Content-Type: application/json" \
+          -d '{"text": "show my calendar"}'
+    """
+
+    # ---------------------------------------------------------------------------
+    # STEP 1: Find device by agent_id
+    # ---------------------------------------------------------------------------
+    # The agent_id is set during the pairing process when a Pi connects
+    # to a device record via the /devices/pair endpoint
+    device = db.query(Device).filter(Device.agent_id == x_agent_id).first()
+
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Agent not paired. Use the pairing flow first.",
+            headers={"WWW-Authenticate": "Agent"},  # Custom scheme for agents
+        )
+
+    # ---------------------------------------------------------------------------
+    # STEP 2: Get the device owner
+    # ---------------------------------------------------------------------------
+    # Each device has a user_id foreign key pointing to its owner
+    user = db.query(User).filter(User.id == device.user_id).first()
+
+    if not user:
+        # This should never happen due to FK constraint, but handle gracefully
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found for this agent.",
+            headers={"WWW-Authenticate": "Agent"},
+        )
+
+    # ---------------------------------------------------------------------------
+    # STEP 3: Check if user account is active
+    # ---------------------------------------------------------------------------
+    # Same check as JWT auth - deactivated users can't access the API
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive",
+        )
+
+    # ---------------------------------------------------------------------------
+    # STEP 4: Return the authenticated user
+    # ---------------------------------------------------------------------------
+    # The route handler receives this User object, same as with JWT auth
     return user

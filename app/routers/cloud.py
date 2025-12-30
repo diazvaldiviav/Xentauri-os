@@ -259,12 +259,12 @@ async def get_calendar_html(
                     )
                     return HTMLResponse(content=html, status_code=400)
                 
-                # Smart search within the specific date
-                search_result = await calendar_search_service.smart_search_with_date(
+                # Smart search across all events (method doesn't support specific dates)
+                # Then filter by date in the rendering layer
+                search_result = await calendar_search_service.smart_search(
                     user_query=search_term,
                     user_id=user_id,
                     db=db,
-                    date=parsed_date,
                 )
             else:
                 # Smart search across all future events

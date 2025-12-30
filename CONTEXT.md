@@ -1,10 +1,10 @@
 # Xentauri Project Context
 
-> **Last Updated:** December 29, 2025
-> **Current Sprint:** Sprint 5.0 - Raspberry Pi Agent (NEXT)
-> **Previous Sprint:** Sprint 4.5.0 - Intelligent Execution & Context Memory ✅ COMPLETE
-> **Backend Status:** ✅ MVP COMPLETE - Ready for Production Deployment
-> **Status:** 🚀 Backend ready for fly.io deployment, starting Raspberry Pi Agent
+> **Last Updated:** December 30, 2025
+> **Current Sprint:** Sprint 5.0 - Raspberry Pi Agent (IN PROGRESS)
+> **Previous Sprint:** Sprint 5.1.0 - Pi Alexa Authentication ✅ COMPLETE
+> **Backend Status:** ✅ MVP COMPLETE - Deployed to Production
+> **Status:** 🚀 Backend deployed to fly.io, Pi Alexa auth ready
 
 Xentauri is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
 
@@ -194,6 +194,16 @@ Xentauri is an intelligent screen control system that lets users operate multipl
 | Calendar context flow test (Noche Vieja event) | ✅ Done |
 | Multi-content display test (calendar + plan) | ✅ Done |
 
+### Sprint 5.1.0: Pi Alexa Authentication ✅ COMPLETE (December 30, 2025)
+| Task | Status |
+|------|--------|
+| `get_user_from_agent()` dependency in deps.py | ✅ Done |
+| POST /intent/agent endpoint (agent_id auth) | ✅ Done |
+| X-Agent-ID header validation | ✅ Done |
+| Agent → Device → User chain lookup | ✅ Done |
+| Same IntentService.process() logic as /intent | ✅ Done |
+| Documentation (PI_ALEXA_AUTHENTICATION.md) | ✅ Done |
+
 ### 🎉 BACKEND MVP COMPLETE
 All backend features for MVP are complete:
 - ✅ User authentication (JWT)
@@ -207,6 +217,7 @@ All backend features for MVP are complete:
 - ✅ Real-time data (weather, search)
 - ✅ Content memory system
 - ✅ Multilingual support (Spanish/English)
+- ✅ Pi Alexa agent_id authentication
 
 ### Sprint 5.0: Raspberry Pi Agent (NEXT)
 | Task | Status |
@@ -390,11 +401,12 @@ Jarvis_Cloud/
 | POST | /commands/{device_id}/power/off | Yes | Turn device off |
 | GET | /commands/{device_id}/status | Yes | Check if device is online |
 
-### Intent (AI - Sprint 3)
+### Intent (AI - Sprint 3 + 5.1)
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | /intent | Yes | Process natural language command |
-| GET | /intent/stats | Yes | Get AI usage statistics |
+| POST | /intent | JWT | Process natural language command (iOS app) |
+| POST | /intent/agent | X-Agent-ID | Process intent from Pi Alexa (agent_id auth) |
+| GET | /intent/stats | JWT | Get AI usage statistics |
 
 ### Google OAuth (Sprint 3.5)
 | Method | Endpoint | Auth | Description |
@@ -835,6 +847,26 @@ environments/
 ---
 
 ## 📝 Session Notes
+
+### December 30, 2025 - Sprint 5.1.0 Complete (Pi Alexa Authentication)
+- **New Endpoint: POST /intent/agent**
+  - Authenticates via X-Agent-ID header instead of JWT
+  - Same business logic as /intent (calls IntentService.process())
+  - Designed for Pi Alexa voice input device
+- **New Dependency: get_user_from_agent()**
+  - Located in `app/deps.py`
+  - Chain: agent_id → Device → User
+  - Returns 401 if agent not paired or user not found
+- **Documentation:**
+  - Created `docs/PI_ALEXA_AUTHENTICATION.md` with full implementation plan
+  - Updated API endpoints section in CONTEXT.md
+  - Updated README.md with new endpoint
+- **Security:**
+  - UUID v4 agent IDs (2^122 possibilities)
+  - HTTPS transport only
+  - Same rate limiting as /intent
+- **Deployment:**
+  - Deployed to Fly.io production
 
 ### December 12, 2025 - Technical Debt Cleanup Complete
 - **Phase 1: Tests First** (89 tests)

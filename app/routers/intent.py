@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, get_user_from_agent
 from app.models.user import User
 from app.services.intent_service import intent_service, IntentResult
 from app.ai.monitoring import ai_monitor
@@ -174,6 +174,7 @@ async def process_intent(
     2. Maps device names to your devices
     3. Sends commands to connected devices
     4. Returns the result
+    5. Saves conversation history for context (Sprint 4.2)
     
     **Examples:**
     - "Turn on the living room TV"
@@ -189,10 +190,82 @@ async def process_intent(
             db=db,
             device_id=request.device_id,
         )
+        
+        # Sprint 4.2: Save conversation history for context-aware processing
+        # This ensures conversation_history is populated for future requests
+        from app.services.conversation_context_service import conversation_context_service
+        
+        conversation_context_service.add_conversation_turn(
+            user_id=str(current_user.id),
+            user_message=request.text,
+            assistant_response=result.message or "",
+            intent_type=result.intent_type,
+        )
+        
         return _result_to_response(result)
-    
+
     except Exception as e:
         logger.error(f"Failed to process intent: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process intent: {str(e)}"
+        )
+
+
+@router.post("/agent", response_model=IntentResponse)
+async def process_intent_agent(
+    request: IntentRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_user_from_agent),
+):
+    """
+    Process a natural language command from a Pi Alexa device.
+
+    This endpoint is identical to POST /intent but authenticates via
+    X-Agent-ID header instead of JWT Bearer token. Designed for Pi devices
+    that send voice commands but don't have JWT tokens.
+
+    **Authentication:**
+    - Header: `X-Agent-ID: <agent_id>`
+    - The agent_id must be paired to a device owned by the user
+
+    **Example:**
+    ```bash
+    curl -X POST https://api.xentauri.com/intent/agent \\
+      -H "X-Agent-ID: pi-alexa-abc123" \\
+      -H "Content-Type: application/json" \\
+      -d '{"text": "what events do I have today"}'
+    ```
+
+    **Examples of commands:**
+    - "Turn on the living room TV"
+    - "Show the calendar on bedroom monitor"
+    - "What's on my schedule today?"
+    - "Create a meeting tomorrow at 3pm"
+    """
+    try:
+        # Same logic as /intent - reuse IntentService
+        result = await intent_service.process(
+            text=request.text,
+            user_id=current_user.id,
+            db=db,
+            device_id=request.device_id,
+        )
+
+        # Save conversation history for context-aware processing
+        from app.services.conversation_context_service import conversation_context_service
+
+        conversation_context_service.add_conversation_turn(
+            user_id=str(current_user.id),
+            user_message=request.text,
+            assistant_response=result.message or "",
+            intent_type=result.intent_type,
+        )
+
+        return _result_to_response(result)
+
+    except Exception as e:
+        logger.error(f"[INTENT_AGENT] Failed to process intent: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process intent: {str(e)}"
