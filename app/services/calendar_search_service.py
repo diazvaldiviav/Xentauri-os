@@ -137,9 +137,11 @@ class CalendarSearchService:
                 time_min, time_max = calendar_client._parse_date_range(date_range, user_timezone)
                 logger.info(f"Date range '{date_range}' parsed to: {time_min} - {time_max}")
             else:
-                # No date filter - search next N days
-                time_min = datetime.now(timezone.utc)
-                time_max = time_min + timedelta(days=days_ahead)
+                # No date filter - search from start of today to include past events
+                # Sprint 5.1.1: Start from midnight today so we can edit/delete past events
+                now = datetime.now(timezone.utc)
+                time_min = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                time_max = now + timedelta(days=days_ahead)
             
             # Fetch events for the time range
             all_events = await calendar_client.list_upcoming_events(
@@ -224,40 +226,48 @@ class CalendarSearchService:
             # Log LLM response for debugging
             logger.info(f"LLM response: matched_events={result_data.get('matched_events', [])}, no_match={no_match_found}")
             
+            # Sprint 5.1.1: Normalize accents for matching (reunión = reunion)
+            import unicodedata
+            def normalize_text(text: str) -> str:
+                """Remove accents and normalize text for comparison."""
+                normalized = unicodedata.normalize('NFD', text.lower().strip())
+                return ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+
             # Extract matched event titles
             for match in result_data.get("matched_events", []):
                 title = match.get("event_title", "")
                 confidence = match.get("confidence", 0)
-                
+
                 if title and confidence >= 0.50:
-                    matched_titles.add(title.lower().strip())
+                    matched_titles.add(normalize_text(title))
                     logger.info(
                         f"LLM matched: '{title}' with confidence {confidence:.2f}"
                     )
-            
+
             # Filter original events by matched titles
             matched_events = []
             for event in events:
-                event_title = event.get_display_title().lower().strip()
-                
+                event_title_normalized = normalize_text(event.get_display_title())
+
                 # Check if this event's title matches any LLM-identified titles
-                if event_title in matched_titles:
+                if event_title_normalized in matched_titles:
                     matched_events.append(event)
                 else:
                     # Also check for partial matches (LLM might return shorter titles)
                     for matched_title in matched_titles:
-                        if matched_title in event_title or event_title in matched_title:
+                        if matched_title in event_title_normalized or event_title_normalized in matched_title:
                             matched_events.append(event)
                             break
             
             # IMPORTANT: If query exactly matches an event title, include it!
             # This handles cases where user types the exact event name
-            query_lower = query.lower().strip()
+            query_normalized = normalize_text(query)
             for event in events:
-                event_title = event.get_display_title().lower().strip()
-                if query_lower == event_title or query_lower in event_title or event_title in query_lower:
+                event_title = event.get_display_title()
+                event_normalized = normalize_text(event_title)
+                if query_normalized == event_normalized or query_normalized in event_normalized or event_normalized in query_normalized:
                     if event not in matched_events:
-                        logger.info(f"Added exact/partial match: '{event_title}' for query '{query}'")
+                        logger.info(f"Added exact/partial match: '{event_title}' for query '{query}' (normalized: {query_normalized} vs {event_normalized})")
                         matched_events.append(event)
             
             logger.info(

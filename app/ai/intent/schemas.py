@@ -255,6 +255,8 @@ class CalendarCreateIntent(Intent):
     is_all_day: bool = Field(default=False, description="True if event has no specific time")
     location: Optional[str] = Field(default=None, description="Event location")
     recurrence: Optional[str] = Field(default=None, description="Recurrence rule (e.g., 'weekly', 'daily', 'RRULE:...')")
+    # Sprint 5.1.1: Document association
+    doc_url: Optional[str] = Field(default=None, description="Google Doc URL to link to this event")
     
     # Edit details (for edit_pending_event action)
     edit_field: Optional[str] = Field(default=None, description="Field to edit: event_time, event_date, event_title, duration_minutes, location, recurrence")

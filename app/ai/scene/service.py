@@ -350,6 +350,14 @@ class SceneService:
         # Parse response into SceneGraph
         try:
             scene_data = json.loads(response.content)
+
+            # Sprint 5.1.1: Check if Claude returned an error object
+            if "error" in scene_data and "message" in scene_data:
+                error_type = scene_data.get("error", "unknown_error")
+                error_message = scene_data.get("message", "Unknown error")
+                logger.warning(f"Claude returned error: {error_type} - {error_message}")
+                raise Exception(error_message)
+
             scene = self._parse_scene_response(
                 scene_data,
                 target_devices,
@@ -840,11 +848,12 @@ class SceneService:
                 from uuid import UUID
 
                 # Use smart_search to find the event
+                # Sprint 5.1.1: Fix - search in more events, return first match
                 search_result = await calendar_search_service.smart_search(
                     user_query=meeting_search,
                     user_id=UUID(user_id),
                     db=db,
-                    max_events=1,
+                    max_events=50,
                 )
 
                 if search_result.events:

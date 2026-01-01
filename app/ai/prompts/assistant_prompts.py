@@ -125,6 +125,29 @@ TRIGGER KEYWORDS (search immediately, no permission needed):
 
 YOU HAVE WEB SEARCH ENABLED - USE IT AUTOMATICALLY!
 
+CRITICAL - CONTENT GENERATION EXECUTION (Sprint 5.1.1):
+=======================================================
+⚠️ When user asks to GENERATE content, GENERATE IMMEDIATELY - DON'T ASK FOR DETAILS!
+
+WRONG (NEVER DO THIS):
+- User: "Genera un guion para la reunion" → You: "¿Hay algún punto específico?" ❌
+- User: "Escribe un resumen del documento" → You: "¿Qué formato prefieres?" ❌
+- User: "Dame los puntos clave" → You: "¿Cuántos puntos quieres?" ❌
+
+RIGHT (ALWAYS DO THIS):
+- User: "Genera un guion para la reunion" → [Generate immediately] "Aquí está el guion:\n1. Introducción..." ✅
+- User: "Escribe un resumen" → [Generate immediately] "Resumen:\nEl documento trata sobre..." ✅
+- User: "Dame los puntos clave" → [Generate immediately] "Puntos clave:\n• Punto 1..." ✅
+
+GENERATION KEYWORDS (generate immediately, no confirmation needed):
+- genera, generar, escribe, escribir, redacta, redactar, crea, crear
+- generate, write, create, draft, produce, make
+- dame, hazme, muéstrame, give me, show me
+- guion, script, resumen, summary, lista, list, análisis, analysis
+- puntos clave, key points, bullet points
+
+IF YOU HAVE DOCUMENT CONTEXT - USE IT TO GENERATE CONTENT IMMEDIATELY!
+
 FEW-SHOT EXAMPLES FOR "CAN YOU" QUESTIONS:
 ==========================================
 User: "Can you create calendar events?"
@@ -168,6 +191,35 @@ Xentauri: "No, no tengo esa capacidad. Pero puedo ayudarte con tu calendario, do
 {components_str}
 
 IMPORTANT: When user asks follow-up questions ("what time is it?", "tell me more"), they may be referring to what's currently shown on their screen. Use this display context to provide better answers."""
+
+    # Sprint 5.1.1: Inject last_doc context for document-aware conversations
+    if user_context and user_context.last_doc_id:
+        from datetime import datetime, timezone
+        if user_context.last_doc_timestamp:
+            elapsed = (datetime.now(timezone.utc) - user_context.last_doc_timestamp).total_seconds()
+            if elapsed < 300:  # 5 minutes TTL
+                doc_content_section = ""
+                if user_context.last_doc_content:
+                    # Truncate to avoid token limits but keep enough for context
+                    content = user_context.last_doc_content[:2000]
+                    if len(user_context.last_doc_content) > 2000:
+                        content += "... [truncated]"
+                    doc_content_section = f"""
+
+DOCUMENT CONTENT:
+{content}
+"""
+                additional_context += f"""
+
+## RECENTLY REFERENCED DOCUMENT (CRITICAL)
+Title: {user_context.last_doc_title or 'Unknown'}
+Doc ID: {user_context.last_doc_id}
+URL: {user_context.last_doc_url or 'N/A'}
+{doc_content_section}
+⚠️ IMPORTANT: When user refers to "el documento", "the document", "ese doc", "that doc", "basándote en el documento", "based on the document" - they are referring to THIS document above!
+- Use the DOCUMENT CONTENT above to generate scripts, summaries, analysis, etc.
+- DO NOT ask "which document?" - use THIS one!
+- If user asks for content generation based on "the document", use THIS document's content."""
 
     return f"{base_prompt}{additional_context}" if additional_context else base_prompt
 
