@@ -28,13 +28,15 @@ Security:
 """
 
 import logging
-import secrets
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import RedirectResponse
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.deps import get_current_user
 from app.models.user import User
@@ -76,27 +78,58 @@ def _get_and_remove_state(state: str) -> Optional[dict]:
 
 @router.get("/login")
 async def google_login(
-    current_user: User = Depends(get_current_user),
+    token: str = Query(..., description="JWT token (required for browser redirects)"),
     redirect_after: Optional[str] = Query(None, description="URL to redirect after auth"),
+    db: Session = Depends(get_db),
 ):
     """
     Initiate Google OAuth login flow.
-    
-    Redirects the user to Google's OAuth consent screen where they can
-    authorize Jarvis to access their Google Calendar.
-    
+
+    Accepts JWT via query param (for browser redirects where headers can't be sent).
+
     Args:
-        current_user: Authenticated Jarvis user (from JWT)
+        token: JWT token from query param
         redirect_after: Optional URL to redirect to after successful auth
-    
+        db: Database session
+
     Returns:
         RedirectResponse to Google's OAuth consent screen
-    
+
     Usage:
-        1. Call this endpoint from the frontend
-        2. User is redirected to Google
-        3. After consent, user lands on /auth/google/callback
+        window.location.href = `/auth/google/login?token=${jwt}`
     """
+    # Validate JWT token from query param
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired token",
+    )
+
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise credentials_exception
+
+    current_user = db.query(User).filter(User.id == uid).first()
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive",
+        )
+
     # Create OAuth client
     auth_client = GoogleAuthClient()
     
