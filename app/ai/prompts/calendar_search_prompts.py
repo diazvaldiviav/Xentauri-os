@@ -30,37 +30,22 @@ CALENDAR EVENTS:
 MATCHING RULES:
 
 1. TYPO TOLERANCE:
-   - "birday" → matches "birthday", "Birthday Party", "Cumpleaños"
-   - "aniversary" → matches "anniversary", "Aniversario"
-   - "doctr" → matches "doctor", "Doctor appointment"
-   - "meting" → matches "meeting", "Team Meeting"
+   Recognize and correct common typos. You know what words look like when misspelled.
+   Example: "birday" → "birthday", "meting" → "meeting"
 
 2. CROSS-LANGUAGE MATCHING (English ↔ Spanish ↔ French ↔ German ↔ Portuguese):
-   - "birthday" ↔ "cumpleaños" ↔ "anniversaire" ↔ "Geburtstag" ↔ "aniversário"
-   - "anniversary" ↔ "aniversario" ↔ "anniversaire de mariage" ↔ "Hochzeitstag"
-   - "meeting" ↔ "reunión" ↔ "réunion" ↔ "Besprechung" ↔ "reunião"
-   - "doctor" ↔ "médico" ↔ "médecin" ↔ "Arzt"
-   - "dentist" ↔ "dentista" ↔ "dentiste" ↔ "Zahnarzt"
-   - "wedding" ↔ "boda" ↔ "mariage" ↔ "Hochzeit" ↔ "casamento"
+   Match semantically across languages. You understand that words like birthday/cumpleaños/anniversaire
+   are translations of the same concept. Apply this knowledge to all common calendar terms.
 
 3. SYNONYM HANDLING:
-   - "bday" = "birthday" = "cumpleaños"
-   - "appt" = "appointment" = "cita"
-   - "mtg" = "meeting" = "reunión"
-   - "doc" = "doctor" = "médico"
-   - "xmas" = "christmas" = "navidad"
-   - "b-day" = "birthday"
-   - "dr" = "doctor"
-   - "apt" = "appointment"
+   Recognize common abbreviations and informal terms: bday, appt, mtg, doc, xmas, b-day, dr, apt.
+   Match them to their full forms in any language.
 
 4. PARTIAL MATCHING:
-   - "mom" matches "Cumpleaños mamá", "Mom's birthday", "Call mom"
-   - "team" matches "Team standup", "Team meeting"
-   - "dental" matches "Dentist appointment", "Dental checkup"
+   Match partial words to full event titles. "mom" matches "Cumpleaños mamá", "team" matches "Team meeting".
 
 5. CONTEXT AWARENESS:
-   - "my birthday" → matches events containing user's birthday
-   - "work" → matches "Work meeting", "Work deadline", "Trabajo"
+   Understand possessives like "my birthday" and context words like "work" → work-related events.
 
 RESPONSE FORMAT:
 Return ONLY valid JSON with this structure:
@@ -86,26 +71,16 @@ CONFIDENCE LEVELS:
 - 0.50-0.64: Partial/fuzzy match (mom matches "mamá's birthday")
 - Below 0.50: Don't include - too uncertain
 
-EXAMPLES:
+EXAMPLES (showing JSON format and key cases):
 
 Query: "birday"
 Events: ["Cumpleaños de Victor - Dec 15", "Team Meeting - Dec 12"]
 Response: {{
   "matched_events": [
-    {{"event_title": "Cumpleaños de Victor", "event_date": "Dec 15", "match_reason": "typo 'birday' → 'birthday' + translation 'cumpleaños'", "confidence": 0.88}}
+    {{"event_title": "Cumpleaños de Victor", "event_date": "Dec 15", "match_reason": "typo + translation", "confidence": 0.88}}
   ],
   "no_match_found": false,
   "corrected_query": "birthday"
-}}
-
-Query: "anniversary"
-Events: ["Aniversario de boda - Dec 20", "Work meeting - Dec 12"]
-Response: {{
-  "matched_events": [
-    {{"event_title": "Aniversario de boda", "event_date": "Dec 20", "match_reason": "translation 'anniversary' = 'aniversario'", "confidence": 0.95}}
-  ],
-  "no_match_found": false,
-  "corrected_query": "anniversary"
 }}
 
 Query: "doctor"
@@ -114,17 +89,6 @@ Response: {{
   "matched_events": [],
   "no_match_found": true,
   "corrected_query": "doctor"
-}}
-
-Query: "my bday"
-Events: ["Cumpleaños - Dec 15", "Birthday party - Dec 16", "Meeting - Dec 12"]
-Response: {{
-  "matched_events": [
-    {{"event_title": "Cumpleaños", "event_date": "Dec 15", "match_reason": "synonym 'bday' = 'birthday' + translation 'cumpleaños'", "confidence": 0.90}},
-    {{"event_title": "Birthday party", "event_date": "Dec 16", "match_reason": "synonym 'bday' = 'birthday'", "confidence": 0.95}}
-  ],
-  "no_match_found": false,
-  "corrected_query": "birthday"
 }}
 
 CRITICAL RULES:

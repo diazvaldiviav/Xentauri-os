@@ -178,167 +178,59 @@ You must respond with a JSON object. No explanation, just JSON.
   "reasoning": "Brief explanation of your decision"
 }
 
-EXAMPLES:
+EXAMPLES (Sprint 5.1.2 - Consolidated):
+=======================================
+These examples show JSON FORMAT and KEY DISTINCTIONS only.
+The rules above already explain classification - these just demonstrate output structure.
 
+# FORMAT EXAMPLES (show the 3 complexity levels):
 Input: "Turn on the living room TV"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Direct power command for a specific device"}
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Direct device command"}
 
 Input: "Write a Python script to schedule TV power on/off"
-Output: {"complexity": "complex_execution", "is_device_command": false, "should_respond_directly": false, "confidence": 0.9, "reasoning": "Requires code generation, not a direct command"}
+Output: {"complexity": "complex_execution", "is_device_command": false, "should_respond_directly": false, "confidence": 0.9, "reasoning": "Requires code generation"}
 
 Input: "Why does my TV keep turning off randomly?"
-Output: {"complexity": "complex_reasoning", "is_device_command": false, "should_respond_directly": false, "confidence": 0.85, "reasoning": "Needs diagnostic analysis and troubleshooting logic"}
+Output: {"complexity": "complex_reasoning", "is_device_command": false, "should_respond_directly": false, "confidence": 0.85, "reasoning": "Needs diagnostic analysis"}
 
-Input: "Hello, how are you?"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Casual greeting, can respond directly"}
+# CONVERSATION (should_respond_directly=true):
+Input: "Hello!" / "What's the weather?" / "What can you do?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Conversational - respond directly"}
 
-Input: "What's the weather like in Miami today?"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "General question about weather - conversational response with web search, no confirmation needed"}
+# GENERATE + DISPLAY (GAP #13 - route to CONVERSATION, system auto-displays):
+Input: "Create a plan for X and show it on screen" / "Genera plantilla y muéstralo"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Content generation + display - CONVERSATION (auto-display after)"}
 
-Input: "Como esta el clima hoy en Miami para ir a la playa?"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Weather question in Spanish - conversational response in Spanish with web search, no confirmation needed"}
+# CALENDAR OPERATIONS (all SIMPLE - intent parser handles):
+Input: "Schedule meeting tomorrow" / "Reschedule dentist to 3pm" / "Delete my meeting"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar create/edit/delete - intent parser handles"}
 
-Input: "What can you do?"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "General capabilities question - conversational response, no confirmation needed"}
+Input: "How many events today?" / "What's my next meeting?"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar query - returns text answer"}
 
-Input: "I need a template for ABA notes, show it on the screen"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Content GENERATION + display request - user wants template CREATED and shown. Route as CONVERSATION to generate content (system will auto-trigger display with generated_content). See GAP #13 note."}
+# DOC OPERATIONS (all SIMPLE - doc service handles complexity):
+Input: "Summarize this doc" / "Link doc to meeting" / "Open meeting doc"
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Doc operation - intent parser handles"}
 
-Input: "dame una plantilla de notas medicas y muestralo en pantalla"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Spanish: generate template + display. CONVERSATION for generation (user says 'muéstralo' = show it). System should auto-display generated content. See GAP #13 note."}
+# DISPLAY LAYOUTS (SIMPLE - Scene Graph handles):
+Input: "Show calendar on left, clock on right" / "Create dashboard with weather"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Display layout - Scene Graph handles"}
 
-Input: "diseña un plan para South Beach y muéstralo en la pantalla"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Spanish: design plan + display. CONVERSATION for content generation. User explicitly says 'y muéstralo' (and show it) so system should auto-trigger display after generation. GAP #13."}
+Input: "Analiza documento y muéstramelo con countdown"
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Doc + display layout - Scene Graph (not GPT)"}
 
-Input: "create a checklist for home inspection"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.95, "reasoning": "Content generation - creating/generating content is CONVERSATION, not doc_query"}
+# EDGE CASES (genuinely tricky scenarios):
+Input: "muestra my South Beach plan" (Spanglish)
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.92, "reasoning": "Language mixing - 'muestra'=show, DISPLAY_CONTENT"}
 
-Input: "Show my birthday on the living room TV"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar display with search filter - this is a SIMPLE device command, not data creation"}
+Input: "shw calender" (typos)
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.85, "reasoning": "Typos corrected: show calendar"}
 
-Input: "Show my anniversary on the bedroom monitor"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar display with search filter - displaying existing events is SIMPLE"}
+Input: "that thing I asked about earlier" (vague)
+Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.70, "reasoning": "Ambiguous - CONVERSATION to clarify"}
 
-Input: "Show meetings for tomorrow on the TV"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar display with date and search - still a SIMPLE display command"}
-
-Input: "How many events do I have today?"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar query for event count - SIMPLE query returns text answer"}
-
-Input: "What's my next meeting?"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar query for next event - SIMPLE query"}
-
-Input: "When is my birthday?"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.92, "reasoning": "Calendar query to find event - SIMPLE lookup"}
-
-Input: "Do I have anything tomorrow?"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.90, "reasoning": "Calendar query about tomorrow's events - SIMPLE query"}
-
-Input: "Schedule a meeting tomorrow at 6 pm"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event creation - handled by intent parser with confirmation flow, not data processing"}
-
-Input: "Add an event to January 6"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event creation request - SIMPLE intent parsing"}
-
-Input: "Book a 2 hour meeting with John tomorrow"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar creation with details - parsed by intent system"}
-
-Input: "Create a recurring standup every Monday at 10 am"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Recurring calendar event creation - intent parser handles recurrence"}
-
-Input: "Add my birthday to the calendar on March 15"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "All-day calendar event creation - SIMPLE intent"}
-
-Input: "Set up a reminder for the dentist next Tuesday"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.93, "reasoning": "Calendar event creation (reminder) - SIMPLE intent parsing"}
-
-Input: "Reschedule my dentist appointment to 3pm"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event edit - SIMPLE intent with confirmation flow"}
-
-Input: "Move my meeting to tomorrow"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event reschedule - SIMPLE intent parsing"}
-
-Input: "Delete my meeting tomorrow"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event deletion - SIMPLE intent with confirmation"}
-
-Input: "Cancel my dentist appointment"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event cancellation (delete) - SIMPLE intent"}
-
-Input: "Remove the team lunch from my calendar"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event removal - SIMPLE intent parsing"}
-
-Input: "Change the location of my standup to Room B"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event edit (location change) - SIMPLE intent"}
-
-Input: "Push back my 3pm meeting to 4pm"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Calendar event time change - SIMPLE intent parsing"}
-
-Input: "Summarize this doc https://docs.google.com/document/d/abc123"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Document summarization - SIMPLE intent, doc service handles complexity internally"}
-
-Input: "Link this document to my standup meeting"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Document linking to calendar event - SIMPLE intent parsing"}
-
-Input: "Open the meeting doc for my team sync"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Retrieve linked document - SIMPLE intent"}
-
-Input: "What does this Google Doc say about the project timeline?"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Document query with specific question - SIMPLE intent"}
-
-Input: "Create a meeting from this planning document"
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Extract meeting context from doc - SIMPLE intent parsing"}
-
-Input: "Show calendar on the left with clock in the corner"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Display layout request - DISPLAY_CONTENT intent uses Scene Graph, NOT complex execution"}
-
-Input: "I want to see my next meeting on the left and a timer on the right"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Multi-component layout - Scene Graph handles this via DISPLAY_CONTENT intent"}
-
-Input: "Create a dashboard with my calendar, weather, and clock"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Dashboard layout - Scene Graph system, route to intent parser as SIMPLE"}
-
-Input: "Split the screen between my agenda and a countdown timer"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Split screen with timer - DISPLAY_CONTENT intent, NOT GPT complex execution"}
-
-Input: "Show my next meeting details with a timer countdown"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Meeting + timer layout - Scene Graph components, route as SIMPLE"}
-
-Input: "Analiza el documento de mi meeting de mañana, extrae las 3 frases de mayor impacto y muéstramelas en grande en la pantalla con un countdown hasta la reunión"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Despite 'analiza' and 'extrae', user wants to DISPLAY content on screen. This is display_content intent with Scene Graph (doc_summary + countdown_timer). Scene Service uses Claude to generate layout. Route as SIMPLE."}
-
-Input: "Extract 3 key phrases from tomorrow's board meeting doc and show them big on screen with a countdown"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Extract + display with layout. User wants Scene Graph with doc_summary (content_request for AI extraction) + countdown_timer. This is display_content intent, NOT data processing. Route as SIMPLE."}
-
-Input: "Dame un resumen del documento y muéstralo en la pantalla con la agenda del viernes al lado"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Document summary + multi-component layout (doc_summary + calendar). Scene Graph display request with spatial positioning. Route as SIMPLE display_content intent."}
-
-Input: "Analyze the meeting doc, generate impact statements and display them with a timer"
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.95, "reasoning": "Analyze + generate + display. Keywords suggest data processing, but 'display them' indicates user wants Scene Graph layout. This is display_content with content_request prop. Route as SIMPLE."}
-
-EDGE CASES (Sprint 4.4.0 - GAP #20):
-=====================================
-Tricky scenarios that require careful routing analysis.
-
-Input: "muestra my South Beach plan" (language mixing - Spanglish)
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.92, "reasoning": "Mixed Spanish/English. 'muestra' = show, handles like English 'show my South Beach plan'. DISPLAY_CONTENT."}
-
-Input: "shw calender" (typos - missing 'o', missing 'a')
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.85, "reasoning": "Obvious typos: shw→show, calender→calendar. Intent is clear: display calendar. Handle as SIMPLE."}
-
-Input: "that thing I asked about earlier" (vague reference without context)
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.70, "reasoning": "Ambiguous reference. No recent context visible. CONVERSATION to ask for clarification about 'that thing'."}
-
-Input: "turn it off" (ambiguous device reference)
-Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.75, "reasoning": "Device command with ambiguous target. Intent parser will handle device resolution or ask which device."}
-
-Input: "show me that" (context-dependent, could be anything)
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": true, "confidence": 0.60, "reasoning": "Too ambiguous without context. Could be display, could be explanation. CONVERSATION to clarify what 'that' refers to."}
-
-Input: "mi reunion es tarde o temprano?" (asking about time, not displaying)
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.90, "reasoning": "Spanish: asking if meeting is early or late. CALENDAR_QUERY for information, not DISPLAY_CONTENT."}
-
-Input: "cuando when es my next reunión" (extreme language mixing)
-Output: {"complexity": "simple", "is_device_command": false, "should_respond_directly": false, "confidence": 0.85, "reasoning": "Mixed languages asking 'when is my next meeting'. CALENDAR_QUERY despite the Spanglish."}
+Input: "turn it off" (ambiguous device)
+Output: {"complexity": "simple", "is_device_command": true, "should_respond_directly": false, "confidence": 0.75, "reasoning": "Device command, intent parser resolves target"}
 """
 
 
