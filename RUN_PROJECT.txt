@@ -95,3 +95,7 @@ curl -I -X GET \
   'http://0.0.0.0:8000/auth/google/login' \
   -H 'accept: application/json' \
   -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NzI1MjY1NC1kYjc2LTQzYTktOWUxOS1kMDVjYzYxMGJjMTMiLCJleHAiOjE3NjY0MjM4MTR9.98Orvtg1nmR8Ol7OQjHe8nVxN8VX5LcXeh7EqGMlLL8'
+
+
+  vamos a chequear el backend un momentico, vamos a trabajar en loca chequea RUN_PROJECT.txt y vamos a testear en tiempo real estos prompt, "necesito que me digas que evento tengo manana" respuesta esperada un evento para 
+las 8 pm, luego le dices: "en la parte izquierda ponme el calendario y a la derecha el clima, lo esperado es que te lo muestre pero en el pi sale el clima como null en la pantalla 

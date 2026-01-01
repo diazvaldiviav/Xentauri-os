@@ -143,3 +143,8 @@ site/
 .cursor/
 local_settings.py
 instance/
+
+# -----------------------------------------------------------------------------
+# Raspberry Pi Screen Client (Separate Project)
+# -----------------------------------------------------------------------------
+xentauri_pi_screen/
