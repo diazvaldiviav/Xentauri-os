@@ -1054,7 +1054,7 @@ Ask them politely what event they want to find. Respond in their language.'''
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=0.7,
-            max_tokens=200,
+            max_tokens=500,  # Sprint 5.1.1: Increased for listing multiple events
         )
 
         # Validate "count" responses to prevent hallucination
@@ -2513,21 +2513,29 @@ IMPORTANT INSTRUCTIONS:
         except Exception as e:
             logger.warning(f"Failed to store event context: {e}")
     
-    def _store_doc_context(self, user_id: str, doc_id: str, doc_url: str, doc_title: str = None) -> None:
+    def _store_doc_context(
+        self,
+        user_id: str,
+        doc_id: str,
+        doc_url: str,
+        doc_title: str = None,
+        doc_content: str = None,  # Sprint 5.1.1: Store content for context
+    ) -> None:
         """
         Store a document in conversation context for "this doc" references.
-        
+
         Called when a doc query returns/shows a document, so subsequent
         requests can reference it.
         """
         from app.services.conversation_context_service import conversation_context_service
-        
+
         try:
             conversation_context_service.set_last_doc(
                 user_id=user_id,
                 doc_id=doc_id,
                 doc_url=doc_url,
                 doc_title=doc_title,
+                doc_content=doc_content,  # Sprint 5.1.1
             )
             logger.debug(f"Stored doc context: {doc_title or doc_id}")
         except Exception as e:
@@ -2680,7 +2688,16 @@ IMPORTANT INSTRUCTIONS:
         event_date = None
         if intent.event_date:
             event_date = self._resolve_date_string(intent.event_date)
-        
+
+        # Sprint 5.1.1: Extract doc_id from doc_url if present
+        doc_id = None
+        if intent.doc_url:
+            try:
+                from app.environments.google.docs import GoogleDocsClient
+                doc_id = GoogleDocsClient.extract_doc_id(intent.doc_url)
+            except Exception:
+                pass  # Invalid URL, continue without doc_id
+
         # Store pending event
         pending = await pending_event_service.store_pending(
             user_id=str(user_id),
@@ -2693,6 +2710,9 @@ IMPORTANT INSTRUCTIONS:
             recurrence=intent.recurrence,
             timezone=user_timezone,
             original_text=intent.original_text,
+            doc_url=intent.doc_url,
+            doc_id=doc_id,
+            source="doc" if intent.doc_url else "manual",
         )
         
         # Build confirmation message
@@ -3972,7 +3992,11 @@ IMPORTANT INSTRUCTIONS:
         # Add location
         if pending.location:
             base += f", at {pending.location}"
-        
+
+        # Sprint 5.1.1: Show linked document
+        if pending.doc_url:
+            base += f"\n📄 With linked document"
+
         # Add highlight for edits
         if highlight_field:
             field_display = {
@@ -4902,8 +4926,25 @@ IMPORTANT INSTRUCTIONS:
             )
             
             processing_time = (time.time() - start_time) * 1000
-            
+
             if not summary_result.error:
+                # Sprint 5.1.1: Store doc context for future references (DRY - reuse helper)
+                self._store_doc_context(
+                    user_id=str(user_id),
+                    doc_id=doc_id,
+                    doc_url=doc_url,
+                    doc_title=summary_result.title,
+                    doc_content=summary_result.summary,  # Sprint 5.1.1: Include content
+                )
+                # Store summary in content memory for follow-up requests
+                from app.services.conversation_context_service import conversation_context_service
+                conversation_context_service.set_generated_content(
+                    user_id=str(user_id),
+                    content=summary_result.summary,
+                    content_type="doc_summary",
+                    title=summary_result.title,
+                )
+
                 return IntentResult(
                     success=True,
                     intent_type=IntentResultType.DOC_QUERY,
@@ -5357,8 +5398,7 @@ IMPORTANT INSTRUCTIONS:
             Example: {"weather_current": {"temperature": 25, "condition": "snow"}}
         """
         from app.ai.providers.gemini import gemini_provider
-        import json
-        
+
         realtime_data = {}
         
         # Check if user wants weather data
@@ -5367,50 +5407,31 @@ IMPORTANT INSTRUCTIONS:
             # Extract location from request
             location = self._extract_location_from_request(user_request)
             if not location:
-                location = "current location"  # Default
-            
-            # Use Gemini with web search to fetch weather
-            prompt = f"""Get current weather for {location}.
+                location = "Miami, FL"  # Default to real location (grounding needs specific place)
 
-Return ONLY a JSON object with this exact structure (no explanation, no markdown):
-{{
-  "temperature": <number in Fahrenheit>,
-  "condition": "<clear|cloudy|partly_cloudy|rain|snow|thunderstorm|fog>",
-  "humidity": <number 0-100>,
-  "wind_speed": <number in mph>,
-  "location": "{location}"
-}}"""
-            
+            # Gemini fetches weather as natural text (simple task)
+            # Claude will extract structured data when generating the scene (complex task)
+            prompt = f"What is the current weather in {location}? Include temperature in Fahrenheit, sky conditions, humidity percentage, and wind speed in mph."
+
             try:
                 response = await gemini_provider.generate_with_grounding(
                     prompt=prompt,
-                    system_prompt="You are a weather data extractor. Return ONLY valid JSON with no markdown formatting.",
+                    system_prompt="You are a weather reporter. Provide current weather conditions concisely.",
                     use_search=True,
                     temperature=0.1,
                     max_tokens=200,
                 )
-                
-                if response.success:
-                    # Clean response - remove markdown code blocks if present
-                    content = response.content.strip()
-                    if content.startswith("```"):
-                        # Remove markdown code blocks
-                        lines = content.split("\n")
-                        content = "\n".join(
-                            line for line in lines 
-                            if not line.startswith("```")
-                        ).strip()
-                    
-                    weather_data = json.loads(content)
-                    weather_data["is_placeholder"] = False  # Mark as real data
-                    weather_data["fetched_via"] = "gemini_grounding"
-                    realtime_data["weather_current"] = weather_data
-                    logger.info(
-                        f"Fetched real weather for {location}: "
-                        f"{weather_data.get('temperature')}°F, {weather_data.get('condition')}"
-                    )
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse weather JSON from Gemini: {e}")
+
+                if response.success and response.content:
+                    weather_text = response.content.strip()
+                    # Pass raw text to Claude - it will extract the structured data
+                    realtime_data["weather_current"] = {
+                        "raw_weather_info": weather_text,
+                        "location": location,
+                        "is_placeholder": False,
+                        "fetched_via": "gemini_grounding",
+                    }
+                    logger.info(f"Fetched weather for {location}: {weather_text[:100]}...")
             except Exception as e:
                 logger.warning(f"Failed to fetch weather data via Gemini: {e}")
                 # Don't fail - Claude will use placeholder if needed
@@ -5522,8 +5543,8 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
                 'los resultados', 'the results', 'lo que encontraste', 'what you found',
                 'lo que investigaste', 'what you researched', 'esa información',
                 'that information', 'eso', 'that', 'esto', 'this',
-                'muestrame eso', 'show me that', 'ponlo', 'put it', 'en la pantalla',
-                'on the screen', 'en pantalla', 'on screen',
+                'muestrame eso', 'show me that', 'ponlo', 'put it',
+                # Note: 'en la pantalla'/'on screen' removed - describes WHERE not WHAT (Sprint 5.1.1)
                 # Sprint 4.2.2: Demonstrative references (esas, esos, etc.)
                 'esas', 'esos', 'estas', 'estos', 'those', 'these',
             ]
@@ -5532,7 +5553,7 @@ Return ONLY a JSON object with this exact structure (no explanation, no markdown
 
             # Sprint 4.5.0: Detect multi-content requests that need Claude scene generation
             multi_content_keywords = [
-                ' y ', ' and ', 'juntos', 'together', 'ambos', 'both',
+                ' y ', ' and ', 'junto', 'juntos', 'together', 'ambos', 'both',
                 'izquierda', 'derecha', 'left', 'right', 'arriba', 'abajo',
                 'two_column', 'dos columnas', 'lado a lado', 'side by side',
             ]

@@ -85,6 +85,7 @@ class UserConversationState:
     last_doc_id: Optional[str] = None
     last_doc_url: Optional[str] = None
     last_doc_title: Optional[str] = None
+    last_doc_content: Optional[str] = None  # Sprint 5.1.1: Store doc summary for context
     last_doc_timestamp: Optional[datetime] = None
     
     # Search context - last search performed
@@ -305,20 +306,23 @@ class ConversationContextService:
         doc_id: str,
         doc_url: Optional[str] = None,
         doc_title: Optional[str] = None,
+        doc_content: Optional[str] = None,  # Sprint 5.1.1: Store content for context
     ) -> None:
         """
         Record that user just referenced a document.
-        
+
         Args:
             user_id: User identifier
             doc_id: Google Docs document ID
             doc_url: Optional full document URL
             doc_title: Optional document title
+            doc_content: Optional document content/summary for context
         """
         context = self._get_or_create(user_id)
         context.last_doc_id = doc_id
         context.last_doc_url = doc_url
         context.last_doc_title = doc_title
+        context.last_doc_content = doc_content  # Sprint 5.1.1
         context.last_doc_timestamp = datetime.now(timezone.utc)
         logger.info(f"Context set - last_doc: '{doc_id[:20]}...' for user {user_id[:8]}...")
     
