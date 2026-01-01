@@ -87,6 +87,20 @@ SUPPORTED INTENT TYPES:
    - "schedule a meeting tomorrow at 6 pm" → calendar_create, create_event
    - "add team standup every Monday at 9 am" → calendar_create, create_event (with recurrence)
    - "schedule birthday on January 15" → calendar_create, create_event (all-day)
+
+   EVENT TITLE EXTRACTION (Sprint 5.1.2):
+   → Preserve the user's language! Do NOT translate titles.
+   → "crear reunion" → event_title="Reunion" (NOT "Meeting")
+   → "agendar junta" → event_title="Junta" (NOT "Meeting")
+   → "schedule meeting" → event_title="Meeting"
+   → If no clear title, use "Evento" (Spanish) or "Event" (English) based on user's language.
+
+   DOCUMENT ASSOCIATION (Sprint 5.1.1):
+   If user includes a Google Docs URL with "asocia", "link", "attach", "con este documento":
+   - Extract the URL to doc_url field
+   - "Crea reunion para hoy y asocia este doc https://docs..." → calendar_create, doc_url="https://..."
+   - "Schedule meeting and link this document https://docs..." → calendar_create, doc_url="https://..."
+   Keywords: asocia, asociar, link, attach, con este documento, with this document
    Confirmation responses (when user has a pending event):
    - "yes" / "confirm" / "do it" → calendar_create, confirm_create
    - "yes for dec 25 at 10am" → calendar_create, confirm_create WITH event_date, event_time
@@ -109,7 +123,16 @@ A) pending_op_type = "create" (user has a pending event creation):
    - "change it to 2pm" → calendar_create, edit_pending_event (NOT calendar_edit!)
    - "make it at 7pm" → calendar_create, edit_pending_event
    - "change the time" → calendar_create, edit_pending_event
-   
+
+   BARE VALUE RESPONSES (Sprint 5.1.2):
+   When user provides a bare value without explicit "change" command, infer edit_field from value type:
+   → Date-like value ("10 de enero", "mañana", "next monday") → edit_field="event_date"
+   → Time-like value ("3pm", "15:00", "a las 3") → edit_field="event_time"
+   → Duration-like value ("2 horas", "30 minutes") → edit_field="duration_minutes"
+   → Location-like value ("en la oficina", "Room A") → edit_field="location"
+   → Google Docs URL ("https://docs.google.com/...") → edit_field="doc_url"
+   Use edit_value = the raw user input. The model knows how to classify value types - use that ability.
+
 B) pending_op_type = "edit" (user has a pending event edit):
    - "yes" / "confirm" → calendar_edit, confirm_edit
    - "no" / "cancel" → calendar_edit, cancel_edit
@@ -253,11 +276,25 @@ D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
    - "document to the left, calendar to the right" → display_content (Scene Graph layout)
    - "show the doc beside my meeting info" → display_content (multi-component layout)
    
-   vs doc_query (NO spatial positioning):
-   - "show me the document" → doc_query (open full doc)
-   - "open the meeting doc" → doc_query (open full doc)
-   - "what's in the document?" → doc_query (read/analyze doc)
-   
+   vs doc_query (NO spatial positioning, SPECIFIC doc reference):
+   - "open the meeting doc" → doc_query (open full doc, meeting_search="meeting")
+   - "what does the standup doc say?" → doc_query (read_doc, meeting_search="standup")
+   - "summarize the budget document" → doc_query (summarize, meeting_search="budget")
+
+   CRITICAL - GENERIC vs SPECIFIC document references (Sprint 5.1.1):
+   ================================================================
+   GENERIC references ("el documento", "the document", "this doc") + SCREEN/DISPLAY:
+   - "Muestra el documento en la pantalla" → display_content (uses context, NOT doc_query!)
+   - "Show the document on screen" → display_content (uses context)
+   - "Put the doc on the TV" → display_content (uses context)
+
+   SPECIFIC references (has meeting name like "standup", "budget", "project"):
+   - "Show the standup doc" → doc_query, meeting_search="standup"
+   - "Open the budget document" → doc_query, meeting_search="budget"
+
+   RULE: If document reference is GENERIC (no meeting name) + display/screen keyword:
+   → Use display_content, NOT doc_query (the scene service will use conversation context)
+
    DETECTION RULE: If request contains BOTH:
    1. Document reference (doc, documento, document, notes, meeting doc)
    2. Spatial keyword (left, right, next to, beside, corner, alongside, al lado, derecha, izquierda)
@@ -268,6 +305,11 @@ D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
    - "Show calendar on the left side with clock in the corner" → display_content (custom layout)
    - "Put my agenda on the TV" → device_command (simple display)
    - "Split the screen with calendar and weather" → display_content (multi-component layout)
+
+   SPECIFIC vs GENERIC events:
+   - "Show event [X] on screen" / "Muestra el evento [X]" → display_content (needs meeting_detail search)
+   - "Show the [X] day/meeting" / "Muestra el día de [X]" → display_content (specific event lookup)
+   - "Show my calendar" / "Muestra mi calendario" → device_command (generic calendar view)
    
    - "Show calendar on the left, clock in the corner" → display_content, display_scene
    - "Create a dashboard with my meetings and weather" → display_content, display_scene
@@ -318,6 +360,14 @@ D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
    - "Create a checklist for Y" → CONVERSATION (generating content, no display)
    - "Give me tips about Z" → CONVERSATION (generating content, no display)
    - "Hazme unas notas sobre X" → CONVERSATION (generating content, no display)
+
+   CONTENT GENERATION WITH DOCUMENT CONTEXT = CONVERSATION (Sprint 5.1.1):
+   When user asks to GENERATE content based on "el documento" → CONVERSATION
+   - "Genera un guion basándote en el documento" → CONVERSATION (generate using doc context)
+   - "Dame los puntos clave del documento" → CONVERSATION (generate using doc context)
+   - "Escribe un resumen del documento" → CONVERSATION (generate using doc context)
+   - "Basándote en el documento, hazme una lista" → CONVERSATION (generate using doc context)
+   The system has document context in memory - use CONVERSATION to generate content!
 
    BUT if user says "show/display on screen" → DISPLAY_CONTENT (scene with generated text):
    - "Create a plan AND show it on screen" → DISPLAY_CONTENT (scene with generated text_block)
@@ -409,9 +459,12 @@ Output: {"intent_type": "calendar_query", "action": "count_events", "date_range"
 Input: "What's my next meeting?"
 Output: {"intent_type": "calendar_query", "action": "next_event", "confidence": 0.95}
 
-# 5. CALENDAR_CREATE (2 examples)
+# 5. CALENDAR_CREATE (3 examples)
 Input: "Schedule a meeting tomorrow at 3pm"
 Output: {"intent_type": "calendar_create", "action": "create_event", "event_title": "Meeting", "event_date": "tomorrow", "event_time": "15:00", "confidence": 0.95}
+
+Input: "Crea reunion hoy 8pm Lanzamiento Matcha asocia https://docs.google.com/document/d/1ABC123"
+Output: {"intent_type": "calendar_create", "action": "create_event", "event_title": "Lanzamiento Matcha", "event_date": "today", "event_time": "20:00", "doc_url": "https://docs.google.com/document/d/1ABC123", "confidence": 0.95}
 
 Input: "yes"
 Context: pending_op_type="create"
@@ -431,19 +484,28 @@ Output: {"intent_type": "doc_query", "action": "open_doc", "meeting_search": "me
 Input: "Summarize the doc for my standup"
 Output: {"intent_type": "doc_query", "action": "summarize_meeting_doc", "meeting_search": "standup", "confidence": 0.9}
 
-# 8. DISPLAY_CONTENT (2 examples)
+# 8. DISPLAY_CONTENT (3 examples)
 Input: "Show calendar on the left and clock on the right"
 Output: {"intent_type": "display_content", "action": "display_scene", "layout_hints": ["calendar left", "clock right"], "info_type": "mixed", "confidence": 0.95}
 
 Input: "Create a plan for South Beach and show it on screen"
 Output: {"intent_type": "display_content", "action": "display_scene", "layout_hints": ["plan", "generated content"], "info_type": "custom", "confidence": 0.9}
 
-# 9. CONVERSATION (2 examples)
+Input: "Muestra el documento en la pantalla"
+Output: {"intent_type": "display_content", "action": "display_scene", "layout_hints": ["document"], "info_type": "document", "confidence": 0.9}
+
+# 9. CONVERSATION (4 examples)
 Input: "What's the weather in Miami?"
 Output: {"intent_type": "conversation", "action": "question", "confidence": 0.95}
 
 Input: "Hello!"
 Output: {"intent_type": "conversation", "action": "greeting", "confidence": 0.95}
+
+Input: "Genera un guion basándote en el documento"
+Output: {"intent_type": "conversation", "action": "question", "confidence": 0.95}
+
+Input: "Dame los puntos clave del documento para la reunión"
+Output: {"intent_type": "conversation", "action": "question", "confidence": 0.95}
 
 CRITICAL RULES FOR COMPLEX/LONG REQUESTS:
 1. Ignore conversational filler: "oh rayos", "wow", "que pena", "es que"

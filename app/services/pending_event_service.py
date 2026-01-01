@@ -314,7 +314,7 @@ class PendingEventService:
         if not pending:
             return None
         
-        # Editable fields
+        # Editable fields (Sprint 5.1.2: Added doc_url, doc_id for document association)
         editable_fields = {
             "event_title",
             "event_date",
@@ -323,6 +323,8 @@ class PendingEventService:
             "is_all_day",
             "location",
             "recurrence",
+            "doc_url",
+            "doc_id",
         }
         
         if field not in editable_fields:

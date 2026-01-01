@@ -316,25 +316,26 @@ Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
         
         text_lower = original_text.lower()
         today = datetime.now()
-        
-        # If user said "today", use actual today's date
-        if "today" in text_lower:
+
+        # Sprint 5.1.1: Added Spanish support for relative dates
+        # If user said "today"/"hoy", use actual today's date
+        if "today" in text_lower or "hoy" in text_lower:
             parameters["date"] = today.strftime("%Y-%m-%d")
-        elif "tomorrow" in text_lower:
+        elif "tomorrow" in text_lower or "mañana" in text_lower:
             tomorrow = today + timedelta(days=1)
             parameters["date"] = tomorrow.strftime("%Y-%m-%d")
-        elif "yesterday" in text_lower:
+        elif "yesterday" in text_lower or "ayer" in text_lower:
             yesterday = today - timedelta(days=1)
             parameters["date"] = yesterday.strftime("%Y-%m-%d")
         elif "date" in parameters:
-            # Resolve if the AI returned relative terms
+            # Resolve if the AI returned relative terms (EN + ES)
             date_value = str(parameters.get("date", "")).lower()
-            if date_value == "today":
+            if date_value in ("today", "hoy"):
                 parameters["date"] = today.strftime("%Y-%m-%d")
-            elif date_value == "tomorrow":
+            elif date_value in ("tomorrow", "mañana"):
                 tomorrow = today + timedelta(days=1)
                 parameters["date"] = tomorrow.strftime("%Y-%m-%d")
-            elif date_value == "yesterday":
+            elif date_value in ("yesterday", "ayer"):
                 yesterday = today - timedelta(days=1)
                 parameters["date"] = yesterday.strftime("%Y-%m-%d")
         
@@ -536,6 +537,8 @@ Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
         is_all_day = data.get("is_all_day", False)
         location = data.get("location")
         recurrence = data.get("recurrence")
+        # Sprint 5.1.1: Extract doc_url for document association
+        doc_url = data.get("doc_url")
         
         # Extract edit details (for edit_pending_event action)
         edit_field = data.get("edit_field")
@@ -581,6 +584,7 @@ Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
             recurrence=recurrence,
             edit_field=edit_field,
             edit_value=edit_value,
+            doc_url=doc_url,  # Sprint 5.1.1
         )
     
     def _create_calendar_edit(
@@ -868,23 +872,59 @@ Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
         
         date_str = date_str.lower().strip()
         today = datetime.now()
-        
-        # Already ISO format
-        if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
-            return date_str
-        
-        # Relative dates
-        if date_str == "today":
+        original_lower = original_text.lower() if original_text else ""
+
+        # Sprint 5.1.1: Check original_text FIRST for relative dates
+        # AI may return wrong ISO date (doesn't know current date)
+        # If user said "hoy/today", use actual today regardless of AI's date
+        if any(word in original_lower for word in ("hoy", "today")):
             return today.strftime("%Y-%m-%d")
-        if date_str == "tomorrow":
+        if any(word in original_lower for word in ("mañana", "tomorrow")):
             return (today + timedelta(days=1)).strftime("%Y-%m-%d")
-        if date_str == "day after tomorrow":
+        if any(word in original_lower for word in ("pasado mañana", "day after tomorrow")):
             return (today + timedelta(days=2)).strftime("%Y-%m-%d")
-        
-        # "next X" patterns
+        if any(word in original_lower for word in ("ayer", "yesterday")):
+            return (today - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # "la semana que viene" / "next week" → next Monday
+        if any(phrase in original_lower for phrase in (
+            "semana que viene", "próxima semana", "proxima semana", "next week"
+        )):
+            days_until_monday = (7 - today.weekday()) % 7
+            if days_until_monday == 0:
+                days_until_monday = 7  # If today is Monday, go to next Monday
+            return (today + timedelta(days=days_until_monday)).strftime("%Y-%m-%d")
+
+        # Already ISO format - but validate year (LLM may return stale year from training)
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+            try:
+                parsed = datetime.strptime(date_str, "%Y-%m-%d")
+                # If date is in the past, adjust to next occurrence
+                if parsed.date() < today.date():
+                    # Keep month/day, use next year
+                    parsed = parsed.replace(year=today.year)
+                    if parsed.date() < today.date():
+                        parsed = parsed.replace(year=today.year + 1)
+                return parsed.strftime("%Y-%m-%d")
+            except ValueError:
+                return date_str
+
+        # Relative dates from date_str (fallback)
+        if date_str in ("today", "hoy"):
+            return today.strftime("%Y-%m-%d")
+        if date_str in ("tomorrow", "mañana"):
+            return (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        if date_str in ("day after tomorrow", "pasado mañana"):
+            return (today + timedelta(days=2)).strftime("%Y-%m-%d")
+        if date_str in ("yesterday", "ayer"):
+            return (today - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # "next X" patterns (EN + ES)
         weekdays = {
             "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-            "friday": 4, "saturday": 5, "sunday": 6
+            "friday": 4, "saturday": 5, "sunday": 6,
+            "lunes": 0, "martes": 1, "miércoles": 2, "jueves": 3,
+            "viernes": 4, "sábado": 5, "domingo": 6
         }
         next_match = re.match(r"next\s+(\w+)", date_str)
         if next_match:
@@ -904,14 +944,21 @@ Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
                     days_ahead += 7
                 return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
         
-        # Month day format (e.g., "January 15")
+        # Month day format (e.g., "January 15", "15 de enero") - EN + ES
         months = {
             "january": 1, "february": 2, "march": 3, "april": 4,
             "may": 5, "june": 6, "july": 7, "august": 8,
-            "september": 9, "october": 10, "november": 11, "december": 12
+            "september": 9, "october": 10, "november": 11, "december": 12,
+            "enero": 1, "febrero": 2, "marzo": 3, "abril": 4,
+            "mayo": 5, "junio": 6, "julio": 7, "agosto": 8,
+            "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12
         }
         for month_name, month_num in months.items():
+            # English format: "December 31"
             month_match = re.search(rf"{month_name}\s+(\d{{1,2}})", date_str)
+            # Spanish format: "31 de diciembre"
+            if not month_match:
+                month_match = re.search(rf"(\d{{1,2}})\s+de\s+{month_name}", date_str)
             if month_match:
                 day = int(month_match.group(1))
                 year = today.year
@@ -998,7 +1045,7 @@ Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
             if keyword in text_lower:
                 return True
         
-        return True  # Default to all-day if no time specified
+        return False  # Don't assume all-day; let the flow ask for time
     
     def _extract_event_title(self, text: str) -> str:
         """
@@ -1048,21 +1095,23 @@ Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
         
         # If date_range is already set, use it but resolve relative terms
         if date_range:
-            if date_range.lower() == "today":
+            date_range_lower = date_range.lower()
+            if date_range_lower in ("today", "hoy"):
                 return today.strftime("%Y-%m-%d")
-            elif date_range.lower() == "tomorrow":
+            elif date_range_lower in ("tomorrow", "mañana"):
                 tomorrow = today + timedelta(days=1)
                 return tomorrow.strftime("%Y-%m-%d")
             # Keep "this_week" as-is for range queries
             return date_range
-        
-        # Try to extract from original text if not set
-        if "today" in text_lower:
+
+        # Try to extract from original text if not set (EN + ES)
+        # Sprint 5.1.1: Added Spanish support
+        if "today" in text_lower or "hoy" in text_lower:
             return today.strftime("%Y-%m-%d")
-        elif "tomorrow" in text_lower:
+        elif "tomorrow" in text_lower or "mañana" in text_lower:
             tomorrow = today + timedelta(days=1)
             return tomorrow.strftime("%Y-%m-%d")
-        elif "this week" in text_lower:
+        elif "this week" in text_lower or "esta semana" in text_lower:
             return "this_week"
         
         return None
@@ -1085,20 +1134,29 @@ Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
         text_lower = text_lower.rstrip("?").strip()
         
         # Pattern: "when is my X" or "when is the X"
+        # Sprint 5.1.1: Added Spanish patterns
         patterns = [
+            # English patterns
             r"when is (?:my|the) (.+)",
             r"when'?s (?:my|the) (.+)",
             r"what(?:'s| is) (?:my|the) next (.+)",
             r"do i have (?:any|a) (.+)",
             r"find (?:my|the) (.+)",
+            # Spanish patterns
+            r"cuando es (?:mi|el|la) (.+)",
+            r"cuándo es (?:mi|el|la) (.+)",
+            r"busca (?:mi|el|la|el evento|la cita) (.+)",
+            r"buscar (?:el evento|la cita)? ?(.+)",
+            r"tengo (?:algún?a?|un|una) (.+)",
+            r"encuentra (?:mi|el|la) (.+)",
         ]
-        
+
         for pattern in patterns:
             match = re.search(pattern, text_lower)
             if match:
                 term = match.group(1).strip()
-                # Clean up time/date suffixes using word boundaries
-                term = re.sub(r"\s+(?:today|tomorrow|this week|next week|on|in|at|for)\b.*$", "", term)
+                # Clean up time/date suffixes using word boundaries (EN + ES)
+                term = re.sub(r"\s+(?:today|tomorrow|this week|next week|on|in|at|for|hoy|mañana|esta semana|en|para)\b.*$", "", term)
                 if term:
                     return term
         

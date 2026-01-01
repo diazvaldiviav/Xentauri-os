@@ -3939,25 +3939,36 @@ IMPORTANT INSTRUCTIONS:
         highlight_field: Optional[str] = None,
     ) -> str:
         """
-        Build human-readable confirmation message.
-        
-        Example output:
+        Build human-readable confirmation message (multilingual - Sprint 5.1.2).
+
+        Example output (English):
         "Create 'Meeting' for December 13, 2025 at 7:00 PM (America/New_York)?
          Say 'yes' to confirm, 'no' to cancel, or edit like 'change time to 8 pm'"
+
+        Example output (Spanish):
+        "Crear 'Reunion' para December 13, 2025 a las 7:00 PM (America/New_York)?
+         Di 'sí' para confirmar, 'no' para cancelar, o edita como 'cambiar hora a 8 pm'"
         """
-        from datetime import datetime
-        
+        from app.ai.prompts.helpers import (
+            detect_user_language,
+            get_confirmation_suffix,
+            get_create_event_prefix,
+        )
+
+        # Detect language from original user text
+        lang = detect_user_language(pending.original_text or "")
+
         title = pending.event_title
-        
+
         # Format date
         if pending.event_date:
             date_str = pending.event_date.strftime("%B %d, %Y")
         else:
-            date_str = "a date to be determined"
-        
-        # Format time
+            date_str = "a date to be determined" if lang == "en" else "fecha por determinar"
+
+        # Format time (localized)
         if pending.is_all_day:
-            time_str = "(all day)"
+            time_str = "(all day)" if lang == "en" else "(todo el día)"
         elif pending.event_time:
             # Convert 24h to 12h format
             try:
@@ -3968,38 +3979,44 @@ IMPORTANT INSTRUCTIONS:
                 display_hour = hour if hour <= 12 else hour - 12
                 if display_hour == 0:
                     display_hour = 12
-                time_str = f"at {display_hour}:{minute:02d} {am_pm}"
+                at_word = "at" if lang == "en" else "a las"
+                time_str = f"{at_word} {display_hour}:{minute:02d} {am_pm}"
             except:
                 time_str = f"at {pending.event_time}"
         else:
             time_str = ""
-        
-        # Build base message
+
+        # Build base message with localized prefix
+        prefix = get_create_event_prefix(lang, pending.is_all_day)
+        for_word = "for" if lang == "en" else "para"
+
         if pending.is_all_day:
-            base = f"Create all-day event '{title}' for {date_str}"
+            base = f"{prefix} '{title}' {for_word} {date_str}"
         else:
-            base = f"Create '{title}' for {date_str} {time_str}"
-        
+            base = f"{prefix} '{title}' {for_word} {date_str} {time_str}"
+
         # Add timezone
         if not pending.is_all_day and pending.timezone != "UTC":
             base += f" ({pending.timezone})"
-        
+
         # Add recurrence
         if pending.recurrence:
-            recurrence_text = self._format_recurrence(pending.recurrence)
+            recurrence_text = self._format_recurrence(pending.recurrence, lang)
             base += f", {recurrence_text}"
-        
+
         # Add location
         if pending.location:
-            base += f", at {pending.location}"
+            at_location = "at" if lang == "en" else "en"
+            base += f", {at_location} {pending.location}"
 
         # Sprint 5.1.1: Show linked document
         if pending.doc_url:
-            base += f"\n📄 With linked document"
+            doc_text = "With linked document" if lang == "en" else "Con documento vinculado"
+            base += f"\n📄 {doc_text}"
 
         # Add highlight for edits
         if highlight_field:
-            field_display = {
+            field_display_en = {
                 "event_time": "time",
                 "event_date": "date",
                 "event_title": "title",
@@ -4007,44 +4024,77 @@ IMPORTANT INSTRUCTIONS:
                 "location": "location",
                 "recurrence": "recurrence",
             }
-            field_name = field_display.get(highlight_field, highlight_field)
-            message = f"Updated {field_name}. {base}?\n\nSay 'yes' to confirm or 'no' to cancel."
+            field_display_es = {
+                "event_time": "hora",
+                "event_date": "fecha",
+                "event_title": "título",
+                "duration_minutes": "duración",
+                "location": "ubicación",
+                "recurrence": "recurrencia",
+            }
+            field_map = field_display_en if lang == "en" else field_display_es
+            field_name = field_map.get(highlight_field, highlight_field)
+            updated_word = "Updated" if lang == "en" else "Actualizado"
+            suffix = get_confirmation_suffix(lang, include_edit_hint=False)
+            message = f"{updated_word} {field_name}. {base}?\n\n{suffix}"
         else:
-            message = f"{base}?\n\nSay 'yes' to confirm, 'no' to cancel, or edit like 'change time to 8 pm'"
-        
+            suffix = get_confirmation_suffix(lang, include_edit_hint=True)
+            message = f"{base}?\n\n{suffix}"
+
         return message
     
-    def _format_recurrence(self, recurrence: str) -> str:
-        """Format RRULE to human-readable text."""
+    def _format_recurrence(self, recurrence: str, lang: str = "en") -> str:
+        """Format RRULE to human-readable text (multilingual - Sprint 5.1.2)."""
         if not recurrence:
             return ""
-        
+
         recurrence = recurrence.upper()
-        
+
+        # Localized recurrence texts
+        if lang == "es":
+            daily = "repitiendo diariamente"
+            weekly = "repitiendo semanalmente"
+            monthly = "repitiendo mensualmente"
+            yearly = "repitiendo anualmente"
+            repeat = "repitiendo"
+            days = {
+                "MO": "repitiendo cada lunes",
+                "TU": "repitiendo cada martes",
+                "WE": "repitiendo cada miércoles",
+                "TH": "repitiendo cada jueves",
+                "FR": "repitiendo cada viernes",
+                "SA": "repitiendo cada sábado",
+                "SU": "repitiendo cada domingo",
+            }
+        else:
+            daily = "repeating daily"
+            weekly = "repeating weekly"
+            monthly = "repeating monthly"
+            yearly = "repeating yearly"
+            repeat = "repeating"
+            days = {
+                "MO": "repeating every Monday",
+                "TU": "repeating every Tuesday",
+                "WE": "repeating every Wednesday",
+                "TH": "repeating every Thursday",
+                "FR": "repeating every Friday",
+                "SA": "repeating every Saturday",
+                "SU": "repeating every Sunday",
+            }
+
         if "FREQ=DAILY" in recurrence:
-            return "repeating daily"
+            return daily
         elif "FREQ=WEEKLY" in recurrence:
-            if "BYDAY=MO" in recurrence:
-                return "repeating every Monday"
-            elif "BYDAY=TU" in recurrence:
-                return "repeating every Tuesday"
-            elif "BYDAY=WE" in recurrence:
-                return "repeating every Wednesday"
-            elif "BYDAY=TH" in recurrence:
-                return "repeating every Thursday"
-            elif "BYDAY=FR" in recurrence:
-                return "repeating every Friday"
-            elif "BYDAY=SA" in recurrence:
-                return "repeating every Saturday"
-            elif "BYDAY=SU" in recurrence:
-                return "repeating every Sunday"
-            return "repeating weekly"
+            for day_code, text in days.items():
+                if f"BYDAY={day_code}" in recurrence:
+                    return text
+            return weekly
         elif "FREQ=MONTHLY" in recurrence:
-            return "repeating monthly"
+            return monthly
         elif "FREQ=YEARLY" in recurrence:
-            return "repeating yearly"
-        
-        return "repeating"
+            return yearly
+
+        return repeat
     
     def _process_time_changes(
         self,
@@ -4159,25 +4209,37 @@ IMPORTANT INSTRUCTIONS:
         response: "EventCreateResponse",
     ) -> str:
         """
-        Build success message after calendar event creation.
-        
-        Example: "✓ Meeting scheduled for December 13, 2025 at 7:00 PM"
+        Build success message after calendar event creation (multilingual - Sprint 5.1.2).
+
+        Example (EN): "✓ Meeting scheduled for December 13, 2025 at 7:00 PM"
+        Example (ES): "✓ 'Reunion' programada para December 13, 2025 a las 7:00 PM"
         """
+        from app.ai.prompts.helpers import detect_user_language
+
+        # Detect language from original user text
+        lang = detect_user_language(pending.original_text or "")
+
         title = response.summary
-        
+
+        # Localized words
+        scheduled = "programada" if lang == "es" else "scheduled"
+        for_word = "para" if lang == "es" else "for"
+        all_day = "(todo el día)" if lang == "es" else "(all day)"
+        at_word = "a las" if lang == "es" else "at"
+
         # Format date/time
         if pending.is_all_day:
             if pending.event_date:
                 date_str = pending.event_date.strftime("%B %d, %Y")
             else:
-                date_str = "the scheduled date"
-            message = f"✓ '{title}' scheduled for {date_str} (all day)"
+                date_str = "la fecha programada" if lang == "es" else "the scheduled date"
+            message = f"✓ '{title}' {scheduled} {for_word} {date_str} {all_day}"
         else:
             if pending.event_date:
                 date_str = pending.event_date.strftime("%B %d, %Y")
             else:
                 date_str = ""
-            
+
             if pending.event_time:
                 try:
                     parts = pending.event_time.split(":")
@@ -4187,19 +4249,19 @@ IMPORTANT INSTRUCTIONS:
                     display_hour = hour if hour <= 12 else hour - 12
                     if display_hour == 0:
                         display_hour = 12
-                    time_str = f"at {display_hour}:{minute:02d} {am_pm}"
+                    time_str = f"{at_word} {display_hour}:{minute:02d} {am_pm}"
                 except:
-                    time_str = f"at {pending.event_time}"
+                    time_str = f"{at_word} {pending.event_time}"
             else:
                 time_str = ""
-            
-            message = f"✓ '{title}' scheduled for {date_str} {time_str}".strip()
-        
+
+            message = f"✓ '{title}' {scheduled} {for_word} {date_str} {time_str}".strip()
+
         # Add recurrence info
         if pending.recurrence:
-            recurrence_text = self._format_recurrence(pending.recurrence)
+            recurrence_text = self._format_recurrence(pending.recurrence, lang)
             message += f", {recurrence_text}"
-        
+
         return message
     
     @staticmethod

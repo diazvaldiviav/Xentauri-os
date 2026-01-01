@@ -348,3 +348,85 @@ CONVERSATION CONTEXT:
 {conversation_history}
 
 """
+
+
+# ---------------------------------------------------------------------------
+# MULTILINGUAL CONFIRMATION HELPERS (Sprint 5.1.2)
+# ---------------------------------------------------------------------------
+
+def detect_user_language(text: str) -> str:
+    """
+    Detect if the user's text is Spanish or English.
+
+    Uses word boundary matching for accurate detection.
+    Returns "es" for Spanish, "en" for English (default).
+
+    Args:
+        text: The user's original text
+
+    Returns:
+        "es" or "en"
+    """
+    if not text:
+        return "en"
+
+    import re
+
+    # Spanish words/phrases that are unlikely to appear in English
+    # Using word boundaries to avoid false positives (e.g. "crea" in "create")
+    spanish_patterns = [
+        r"\bnecesito\b", r"\bcrear\b", r"\breunión\b", r"\breunion\b",
+        r"\bevento\b", r"\bpara el\b", r"\bpara la\b",
+        r"\bayuda\b", r"\bquiero\b", r"\bmuestra\b", r"\bcalendario\b",
+        r"\bcrea\b", r"\bprograma\b", r"\bmañana\b", r"\bsemana\b",
+        r"\bhoy\b", r"\bcancelar\b", r"\bcambiar\b", r"\bhora\b",
+        r"\bpor favor\b", r"\bgracias\b", r"\bbuenos\b", r"\bhola\b",
+        r"\bque viene\b", r"\bpróxima\b", r"\bproxima\b",
+    ]
+    text_lower = text.lower()
+    spanish_count = sum(1 for pattern in spanish_patterns if re.search(pattern, text_lower))
+    return "es" if spanish_count >= 1 else "en"
+
+
+def get_confirmation_suffix(language: str, include_edit_hint: bool = True) -> str:
+    """
+    Get the confirmation prompt suffix in the appropriate language.
+
+    DRY helper to avoid hardcoded English strings throughout the codebase.
+
+    Args:
+        language: "es" for Spanish, "en" for English
+        include_edit_hint: Whether to include "or edit like..." hint
+
+    Returns:
+        Localized confirmation suffix string
+    """
+    if language == "es":
+        if include_edit_hint:
+            return "Di 'sí' para confirmar, 'no' para cancelar, o edita como 'cambiar hora a 8 pm'"
+        return "Di 'sí' para confirmar o 'no' para cancelar."
+    else:
+        if include_edit_hint:
+            return "Say 'yes' to confirm, 'no' to cancel, or edit like 'change time to 8 pm'"
+        return "Say 'yes' to confirm or 'no' to cancel."
+
+
+def get_create_event_prefix(language: str, is_all_day: bool = False) -> str:
+    """
+    Get the "Create event" prefix in the appropriate language.
+
+    Args:
+        language: "es" for Spanish, "en" for English
+        is_all_day: Whether this is an all-day event
+
+    Returns:
+        Localized prefix like "Create" or "Crear evento de todo el día"
+    """
+    if language == "es":
+        if is_all_day:
+            return "Crear evento de todo el día"
+        return "Crear"
+    else:
+        if is_all_day:
+            return "Create all-day event"
+        return "Create"
