@@ -114,29 +114,18 @@ Example Scenario:
 NOTE: This conflict resolution happens in context.py (lines 710-729).
 Router just needs to trust the pending_op_type shown in context.
 
-IMPORTANT - DISPLAY LAYOUT REQUESTS ARE SIMPLE (Sprint 4.0):
-Custom layout/arrangement requests go to the intent parser, NOT to complex execution!
-The intent parser has a DISPLAY_CONTENT intent type that handles these via Claude's Scene Graph.
-Layout keywords: "on the left", "on the right", "in the corner", "split screen", "dashboard"
-Component keywords: "timer", "countdown", "meeting details", "clock", "weather"
-- "Show calendar on the left, clock on the right" → SIMPLE (display_content intent)
-- "Put my meeting on the left, timer on the right" → SIMPLE (display_content intent)
-- "Create a dashboard with calendar and weather" → SIMPLE (display_content intent)
-- "Split the screen between agenda and clock" → SIMPLE (display_content intent)
-- "Show my next meeting with a countdown timer" → SIMPLE (display_content intent)
-These are NOT complex execution - they use the Scene Graph system which Claude handles!
+DISPLAY LAYOUT REQUESTS ARE SIMPLE:
+Custom layout/arrangement requests go to the intent parser, NOT to complex execution.
+The intent parser has a DISPLAY_CONTENT intent type that handles these via Scene Graph.
 
-CRITICAL - GENERATE + DISPLAY FLOW (Sprint 4.4.0 - GAP #13):
-When user says "Generate X AND show/display it":
-IMPORTANT: These are TWO separate steps that must be coordinated!
+LAYOUT DETECTION RULE:
+Requests describing visual arrangements (positions, layouts, dashboards, component
+combinations) are SIMPLE → Scene Graph system handles them.
 
+GENERATE + DISPLAY FLOW:
+When user says "Generate X AND show/display it" - these are TWO steps:
 Step 1: Generate content → CONVERSATION intent (Gemini generates)
 Step 2: Display content → system auto-triggers DISPLAY_CONTENT with generated_content
-
-Examples requiring generate→display flow:
-- "Create a plan for South Beach AND show it on screen" → CONVERSATION (store in generated_content)
-- "Generate impact phrases AND display them" → CONVERSATION (system will auto-display after)
-- "Diseña un itinerario Y muéstralo en pantalla" → CONVERSATION (Spanish: design + show)
 
 KEY DIFFERENCE from display-only requests:
 - "Show my South Beach plan" (plan exists) → DISPLAY_CONTENT (display existing)

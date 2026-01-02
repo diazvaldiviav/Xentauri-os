@@ -392,6 +392,205 @@ IMPORTANT: If the user asks to "show", "display", "present" or reference this co
 
 
 # ---------------------------------------------------------------------------
+# REQUEST CONTEXT - Unified context for processing requests (Sprint 5.1.4)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RequestContext:
+    """
+    Complete context for processing a user request.
+    
+    Unifies: devices, pending operations, conversation memory,
+    generated content, AND resolved anaphoric references.
+    
+    This is the SINGLE SOURCE OF TRUTH for request context,
+    replacing scattered context building in IntentService.process().
+    
+    Sprint 5.1.4: Unified context building with anaphoric resolution.
+    """
+    # Device context
+    devices: List[Dict[str, Any]]
+    user_id: str
+    
+    # Pending operations (create/edit/delete)
+    pending_operation: Optional[Dict[str, Any]] = None
+    
+    # Conversation memory (last event, doc, search, history)
+    conversation_context: Optional[Dict[str, Any]] = None
+    
+    # Generated content in memory
+    generated_content: Optional[Dict[str, Any]] = None
+    
+    # Resolved anaphoric references ("that doc", "esa reunión")
+    resolved_references: Optional[Dict[str, Any]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for downstream flows."""
+        return {
+            "devices": self.devices,
+            "user_id": self.user_id,
+            "pending_operation": self.pending_operation,
+            "conversation_context": self.conversation_context,
+            "generated_content": self.generated_content,
+            "resolved_references": self.resolved_references,
+        }
+    
+    def has_pending(self) -> bool:
+        """Check if any pending operation exists."""
+        if not self.pending_operation:
+            return False
+        return (
+            self.pending_operation.get("has_pending_create") or
+            self.pending_operation.get("has_pending_edit") or
+            self.pending_operation.get("has_pending_delete")
+        )
+    
+    def get_resolved_doc(self) -> Optional[Dict[str, Any]]:
+        """Get resolved document reference if available."""
+        if not self.resolved_references:
+            return None
+        return self.resolved_references.get("document")
+    
+    def get_resolved_event(self) -> Optional[Dict[str, Any]]:
+        """Get resolved event reference if available."""
+        if not self.resolved_references:
+            return None
+        return self.resolved_references.get("event")
+
+
+# ---------------------------------------------------------------------------
+# ANAPHORIC REFERENCE RESOLUTION (Sprint 5.1.4)
+# ---------------------------------------------------------------------------
+
+# Registry of resolvable entity types - EXTENSIBLE
+# Add new entity types here, resolution logic stays the same
+RESOLVABLE_ENTITIES = {
+    "document": {
+        "context_getter": "get_last_doc",
+        "resolve_fields": ["url", "id", "title"],
+    },
+    "event": {
+        "context_getter": "get_last_event",
+        "resolve_fields": ["id", "title", "date"],
+    },
+    # FUTURE: Add new types here, resolution logic stays the same
+    # "slide": {"context_getter": "get_last_slide", "resolve_fields": ["id", "url"]},
+    # "spreadsheet": {"context_getter": "get_last_spreadsheet", "resolve_fields": ["id", "url"]},
+}
+
+
+def _resolve_anaphoric_references(
+    text: str,
+    user_id: str,
+    conversation_context: Optional[ConversationContext],
+) -> Dict[str, Any]:
+    """
+    Return all available recent context for potential anaphoric resolution.
+    
+    Sprint 5.1.4 Simplification: Rather than trying to detect anaphoric 
+    references via keyword matching (which fails for Spanish enclitic pronouns
+    like "cámbialo", "ábrelo", "muéstramelo"), we simply return all available
+    recent context and let handlers decide whether to use it.
+    
+    This follows PROMPT_OPTIMIZATION.md principles:
+    - No brittle keyword matching
+    - Context getters already handle TTL (300s expiry)
+    - Handlers use context as fallback when explicit values missing
+    
+    Args:
+        text: User's request text (unused - kept for API compatibility)
+        user_id: User identifier
+        conversation_context: Current conversation context
+    
+    Returns:
+        Dict with all available recent context: {"document": {...}, "event": {...}}
+        Empty dict if no context service or no recent context
+    
+    Example:
+        >>> resolved = _resolve_anaphoric_references(text, user_id, ctx)
+        >>> resolved.get("document")  # {"url": "...", "id": "...", "title": "..."} or None
+    """
+    from app.services.conversation_context_service import conversation_context_service
+    
+    # Note: We don't check conversation_context here because the service
+    # maintains its own in-memory context with TTL validation
+    
+    resolved = {}
+    
+    # Get all available recent context - getters return None if expired
+    for entity_type, config in RESOLVABLE_ENTITIES.items():
+        getter = getattr(conversation_context_service, config["context_getter"], None)
+        if getter:
+            context_data = getter(user_id)
+            if context_data:
+                resolved[entity_type] = {
+                    field: context_data.get(field)
+                    for field in config["resolve_fields"]
+                }
+    
+    return resolved
+
+
+def build_request_context(
+    text: str,
+    user_id: str,
+    devices: List[Dict[str, Any]],
+) -> RequestContext:
+    """
+    Build complete request context including anaphoric resolution.
+    
+    This is the SINGLE ENTRY POINT for context building.
+    All context-related logic lives here, not scattered in handlers.
+    
+    Replaces manual context building in IntentService.process() (lines 241-273)
+    with a single unified call.
+    
+    Args:
+        text: User's request text (needed for anaphoric detection)
+        user_id: User identifier (as string)
+        devices: List of user's devices (already fetched)
+    
+    Returns:
+        RequestContext with all context unified and references resolved
+    
+    Example:
+        >>> context = build_request_context(text, str(user_id), device_context)
+        >>> context.to_dict()  # Use for downstream flows
+        >>> context.get_resolved_doc()  # {"url": "...", "id": "...", "title": "..."}
+    """
+    from app.services.conversation_context_service import conversation_context_service
+    
+    # 1. Build pending operation state
+    pending_state = _build_pending_state(user_id)
+    
+    # 2. Build conversation context
+    conversation_context = _build_conversation_context(user_id)
+    
+    # 3. Get generated content
+    generated_content = conversation_context_service.get_generated_content(user_id)
+    if generated_content and "timestamp" in generated_content:
+        ts = generated_content["timestamp"]
+        if hasattr(ts, 'isoformat'):
+            generated_content = {**generated_content, "timestamp": ts.isoformat()}
+    
+    # 4. Resolve anaphoric references (the key addition)
+    resolved_references = _resolve_anaphoric_references(
+        text=text,
+        user_id=user_id,
+        conversation_context=conversation_context,
+    )
+    
+    return RequestContext(
+        devices=devices,
+        user_id=user_id,
+        pending_operation=pending_state.to_dict() if pending_state else None,
+        conversation_context=conversation_context.to_dict() if conversation_context else None,
+        generated_content=generated_content,
+        resolved_references=resolved_references if resolved_references else None,
+    )
+
+
+# ---------------------------------------------------------------------------
 # CONTEXT BUILDER
 # ---------------------------------------------------------------------------
 

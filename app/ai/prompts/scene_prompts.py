@@ -109,12 +109,13 @@ LAYOUT INTENT SELECTION:
 - "overlay" → layered components with absolute positioning
 - "stack" → vertical stack using flex column
 
-CRITICAL - SPATIAL KEYWORD DETECTION:
-=====================================
-Spatial positions = SEPARATE COMPONENTS. Count the positions to determine layout:
-- left/right (izquierda/derecha) → two_column (grid_column="1", "2")
-- top/bottom (arriba/abajo) → stack (flex layout)
-- left/center/right → three_column (grid_column="1", "2", "3")
+SPATIAL LAYOUT MAPPING:
+=======================
+Spatial positions = SEPARATE COMPONENTS. Map positions to layouts:
+- Two positions (horizontal) → two_column with grid_column="1", "2"
+- Two positions (vertical) → stack with flex layout  
+- Three positions → three_column with grid_column="1", "2", "3"
+- Four+ positions → dashboard grid
 
 NEVER create fullscreen when user specifies MULTIPLE positions!
 

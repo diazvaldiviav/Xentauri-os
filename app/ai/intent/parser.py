@@ -144,36 +144,30 @@ class IntentParser:
                 if conv_lines:
                     context_parts.append("Recent conversation:\n" + "\n".join(conv_lines))
 
-                # Sprint 5.1.3: Add last_event context for anaphoric references ("esa reunión", "that meeting")
+                # Sprint 5.1.4: Add last_event context for reference resolution
                 if conv_ctx.get("last_event"):
                     event = conv_ctx["last_event"]
                     if event.get("title") and event.get("is_recent"):
-                        event_context = f"""LAST REFERENCED EVENT IN CONTEXT:
+                        event_context = f"""ACTIVE EVENT IN CONVERSATION:
 Title: {event.get('title')}
 Event ID: {event.get('id', 'unknown')}
 Date: {event.get('date', 'unknown')}
 
-IMPORTANT: If user references "esa reunión", "that meeting", "the event", "la reunión", "this event" etc.,
-they are referring to the event above. Set meeting_search: null to use context resolution."""
+The user is discussing this event. Any reference to it - explicit ("esa reunión")
+or implicit ("cámbiala", "elimínalo", "modifícalo") - refers to this event."""
                         context_parts.append(event_context)
 
-                # Sprint 5.1.3: Add last_doc context for anaphoric references ("ese documento", "that doc")
+                # Sprint 5.1.4: Add last_doc context for reference resolution
                 if conv_ctx.get("last_doc"):
                     doc = conv_ctx["last_doc"]
                     if doc.get("id") and doc.get("is_recent"):
-                        doc_context = f"""LAST REFERENCED DOCUMENT IN CONTEXT:
-Doc ID: {doc.get('id')}
+                        doc_context = f"""ACTIVE DOCUMENT IN CONVERSATION:
 Title: {doc.get('title', 'unknown')}
+Doc ID: {doc.get('id')}
 URL: {doc.get('url', 'unknown')}
 
-ANAPHORIC REFERENCE RESOLUTION:
-When user says "ese documento", "that document", "the doc", "el documento", "abre el documento", etc.:
-- For DOC_QUERY intents: Set doc_id="{doc.get('id')}" and doc_url="{doc.get('url', '')}"
-- For DISPLAY_CONTENT intents: The scene service will use this context automatically
-- DO NOT require meeting_search when doc context is available - use the doc_id/doc_url directly!
-
-CRITICAL: "abre ese documento" or "open that document" = DOC_QUERY with doc_id from context above.
-"abre ese documento en la pantalla" = DOC_QUERY with also_display=true (compound intent)."""
+The user is discussing this document. Any reference to it - explicit ("el documento")
+or implicit ("muéstramelo", "ponlo", "ábrelo") - refers to this document."""
                         context_parts.append(doc_context)
             
             # Sprint 4.2: Add generated content context (CRITICAL for "show that note" references)
@@ -206,6 +200,33 @@ this refers to the content above (in WORKING MEMORY), NOT Google Docs.
 Use DISPLAY_CONTENT intent to show this content, NOT DOC_QUERY."""
                 
                 context_parts.append(gen_context)
+            
+            # Sprint 5.1.4: Add pre-resolved anaphoric references
+            # These were resolved by build_request_context() in intent_service.py
+            if "resolved_references" in context and context["resolved_references"]:
+                resolved = context["resolved_references"]
+                resolved_context = "ALREADY RESOLVED ANAPHORIC REFERENCES:\n"
+                
+                if resolved.get("document"):
+                    doc = resolved["document"]
+                    resolved_context += f"""
+Document Reference Resolved:
+  - doc_url: {doc.get('url', 'N/A')}
+  - doc_id: {doc.get('id', 'N/A')}
+  - title: {doc.get('title', 'N/A')}
+When user mentions "that document", "ese doc", etc., use these values directly.
+"""
+                
+                if resolved.get("event"):
+                    event = resolved["event"]
+                    resolved_context += f"""
+Event Reference Resolved:
+  - event_id: {event.get('id', 'N/A')}
+  - title: {event.get('title', 'N/A')}
+  - date: {event.get('date', 'N/A')}
+When user mentions "that meeting", "esa reunión", etc., use these values directly.
+"""
+                context_parts.append(resolved_context)
         
         context_str = ""
         if context_parts:

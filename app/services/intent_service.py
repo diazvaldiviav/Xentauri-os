@@ -238,47 +238,34 @@ class IntentService:
             devices = self._get_user_devices(db, user_id)
             device_context = device_mapper.to_device_context(devices)
             
-            # Build pending operation state for context-aware routing (Sprint 3.9.1)
-            from app.ai.context import _build_pending_state
-            pending_state = _build_pending_state(str(user_id))
+            # Sprint 5.1.4: Unified context building with anaphoric resolution
+            # Replaces 30+ lines of manual context assembly with single call
+            from app.ai.context import build_request_context
             
-            # Sprint 4.2 FIX: Add conversation context and generated content for context-aware parsing
-            from app.services.conversation_context_service import conversation_context_service
-            from app.ai.context import _build_conversation_context
+            request_context = build_request_context(
+                text=text,
+                user_id=str(user_id),
+                devices=device_context,
+            )
             
-            # Get conversation context (history, last messages)
-            conversation_context = _build_conversation_context(str(user_id))
-            
-            # Get generated content from memory (for "show that note" references)
-            generated_content = conversation_context_service.get_generated_content(str(user_id))
-            
-            # Serialize generated_content timestamp to ISO string for JSON compatibility
-            if generated_content and "timestamp" in generated_content:
-                ts = generated_content["timestamp"]
-                if hasattr(ts, 'isoformat'):
-                    generated_content = {
-                        **generated_content,
-                        "timestamp": ts.isoformat()
-                    }
-            
-            context = {
-                "devices": device_context,
-                "user_id": str(user_id),
-                # Add pending operation context for routing and parsing
-                "pending_operation": pending_state.to_dict() if pending_state else None,
-                # Sprint 4.2: Add conversation context for multi-turn awareness
-                "conversation_context": conversation_context.to_dict() if conversation_context else None,
-                # Sprint 4.2: Add generated content for memory-aware references
-                "generated_content": generated_content,
-            }
+            # Convert to dict for downstream compatibility
+            context = request_context.to_dict()
             
             # Log pending state for debugging
-            if pending_state and pending_state.has_any_pending():
+            if request_context.has_pending():
+                pending_op = request_context.pending_operation
                 logger.info(
                     f"[PENDING_STATE] request_id={request_id}, "
-                    f"pending_op_type={pending_state.pending_op_type}, "
-                    f"pending_op_age={pending_state.pending_op_age_seconds}s, "
-                    f"hint={pending_state.pending_op_hint}"
+                    f"pending_op_type={pending_op.get('pending_op_type')}, "
+                    f"pending_op_age={pending_op.get('pending_op_age_seconds')}s, "
+                    f"hint={pending_op.get('pending_op_hint')}"
+                )
+            
+            # Log resolved references for debugging
+            if request_context.resolved_references:
+                logger.info(
+                    f"[ANAPHORIC_RESOLUTION] request_id={request_id}, "
+                    f"resolved={list(request_context.resolved_references.keys())}"
                 )
             
             # Analyze complexity and get routing decision
@@ -421,6 +408,7 @@ class IntentService:
                 start_time=start_time,
                 original_text=text,
                 db=db,
+                context=context,  # Sprint 5.1.4: Pass context for anaphoric resolution
             )
         
         elif isinstance(intent, CalendarCreateIntent):
@@ -439,6 +427,7 @@ class IntentService:
                 user_id=user_id,
                 start_time=start_time,
                 db=db,
+                context=context,  # Sprint 5.1.4: Pass context for anaphoric resolution
             )
         
         elif isinstance(intent, DocQueryIntent):
@@ -448,6 +437,7 @@ class IntentService:
                 user_id=user_id,
                 start_time=start_time,
                 db=db,
+                context=context,  # Sprint 5.1.4: Pass context for anaphoric resolution
             )
         
         elif isinstance(intent, DisplayContentIntent):
@@ -458,6 +448,7 @@ class IntentService:
                 devices=devices,
                 start_time=start_time,
                 db=db,
+                context=context,  # Sprint 5.1.4: Pass context for anaphoric resolution
             )
         
         elif isinstance(intent, ConversationIntent):
@@ -731,6 +722,7 @@ Respond in the SAME language as their request.'''
         start_time: float,
         original_text: str = "",
         db: Session = None,
+        context: Optional[Dict[str, Any]] = None,  # Sprint 5.1.4: For anaphoric resolution
     ) -> IntentResult:
         """
         Handle calendar query intents - questions about calendar events.
@@ -743,6 +735,7 @@ Respond in the SAME language as their request.'''
         
         Sprint 3.9: Uses smart semantic search for typos/translations/synonyms.
         Sprint 4.1: Returns context-aware, multilingual responses.
+        Sprint 5.1.4: Supports anaphoric event references ("that meeting", "esa reunión").
         """
         from app.services.calendar_search_service import calendar_search_service
         from app.models.oauth_credential import OAuthCredential
@@ -752,6 +745,15 @@ Respond in the SAME language as their request.'''
         action = self._get_action_value(intent.action) or "count_events"
         date_range = intent.date_range
         search_term = intent.search_term
+        
+        # Sprint 5.1.4: Resolve anaphoric reference if no explicit search_term
+        if not search_term and context and context.get("resolved_references"):
+            resolved_event = context["resolved_references"].get("event")
+            if resolved_event and resolved_event.get("title"):
+                search_term = resolved_event["title"]
+                logger.info(
+                    f"[ANAPHORIC_RESOLUTION] Resolved event from context: {search_term}"
+                )
         
         # Get or create DB session
         owns_db = db is None
@@ -3153,6 +3155,7 @@ IMPORTANT INSTRUCTIONS:
         user_id: UUID,
         start_time: float,
         db: Session,
+        context: Optional[Dict[str, Any]] = None,  # Sprint 5.1.4: For anaphoric resolution
     ) -> IntentResult:
         """
         Handle calendar event edit/delete with confirmation flow.
@@ -3164,6 +3167,8 @@ IMPORTANT INSTRUCTIONS:
         4. CONFIRM_EDIT: Get pending → Execute update via API → Return success
         5. CONFIRM_DELETE: Get pending → Execute delete via API → Return success
         6. CANCEL_EDIT: Clear pending → Return cancellation message
+        
+        Sprint 5.1.4: Supports anaphoric event references ("that meeting", "esa reunión").
         """
         action = intent.action
         
@@ -3175,6 +3180,7 @@ IMPORTANT INSTRUCTIONS:
                 user_id=user_id,
                 start_time=start_time,
                 db=db,
+                context=context,  # Sprint 5.1.4: Pass context
             )
         elif action == ActionType.DELETE_EXISTING_EVENT:
             return await self._handle_delete_existing_event(
@@ -3183,6 +3189,7 @@ IMPORTANT INSTRUCTIONS:
                 user_id=user_id,
                 start_time=start_time,
                 db=db,
+                context=context,  # Sprint 5.1.4: Pass context
             )
         elif action == ActionType.SELECT_EVENT:
             return await self._handle_select_event(
@@ -3228,18 +3235,30 @@ IMPORTANT INSTRUCTIONS:
         user_id: UUID,
         start_time: float,
         db: Session,
+        context: Optional[Dict[str, Any]] = None,  # Sprint 5.1.4: For anaphoric resolution
     ) -> IntentResult:
         """
         Search for events matching criteria and initiate edit flow.
         
         Uses smart semantic search (LLM matching) to find events,
         handling typos, translations, and synonyms.
+        
+        Sprint 5.1.4: Supports anaphoric event references ("that meeting", "esa reunión").
         """
         from app.services.pending_edit_service import pending_edit_service
         from app.services.calendar_search_service import calendar_search_service
         
         search_term = intent.search_term
         date_filter = intent.date_filter
+        
+        # Sprint 5.1.4: Resolve anaphoric reference if no explicit search_term
+        if not search_term and context and context.get("resolved_references"):
+            resolved_event = context["resolved_references"].get("event")
+            if resolved_event and resolved_event.get("title"):
+                search_term = resolved_event["title"]
+                logger.info(
+                    f"[ANAPHORIC_RESOLUTION] Resolved event from context: {search_term}"
+                )
         
         if not search_term:
             processing_time = (time.time() - start_time) * 1000
@@ -3283,8 +3302,6 @@ IMPORTANT INSTRUCTIONS:
         matching_events = result.events[:5]
         
         # DEBUG: Log the extracted changes dict for troubleshooting
-        import logging
-        logger = logging.getLogger(__name__)
         logger.info(
             f"[CALENDAR_EDIT] request_id={request_id}, "
             f"search_term='{search_term}', "
@@ -3339,18 +3356,30 @@ IMPORTANT INSTRUCTIONS:
         user_id: UUID,
         start_time: float,
         db: Session,
+        context: Optional[Dict[str, Any]] = None,  # Sprint 5.1.4: For anaphoric resolution
     ) -> IntentResult:
         """
         Search for events matching criteria and initiate delete flow.
         
         Uses smart semantic search (LLM matching) to find events,
         handling typos, translations, and synonyms.
+        
+        Sprint 5.1.4: Supports anaphoric event references ("that meeting", "esa reunión").
         """
         from app.services.pending_edit_service import pending_edit_service
         from app.services.calendar_search_service import calendar_search_service
         
         search_term = intent.search_term
         date_filter = intent.date_filter
+        
+        # Sprint 5.1.4: Resolve anaphoric reference if no explicit search_term
+        if not search_term and context and context.get("resolved_references"):
+            resolved_event = context["resolved_references"].get("event")
+            if resolved_event and resolved_event.get("title"):
+                search_term = resolved_event["title"]
+                logger.info(
+                    f"[ANAPHORIC_RESOLUTION] Resolved event from context: {search_term}"
+                )
         
         if not search_term:
             processing_time = (time.time() - start_time) * 1000
@@ -4304,6 +4333,7 @@ IMPORTANT INSTRUCTIONS:
         user_id: UUID,
         start_time: float,
         db: Session,
+        context: Optional[Dict[str, Any]] = None,  # Sprint 5.1.4: For anaphoric resolution
     ) -> IntentResult:
         """
         Handle Google Docs intelligence queries.
@@ -4316,6 +4346,9 @@ IMPORTANT INSTRUCTIONS:
         
         Sprint 4.0.2: Compound intent support
         If intent.also_display is True, ALSO sends show_content command to device.
+        
+        Sprint 5.1.4: Anaphoric resolution support
+        If intent.doc_url is None, attempts to resolve from context.resolved_references.
         """
         action = intent.action
         result: Optional[IntentResult] = None
@@ -4328,6 +4361,7 @@ IMPORTANT INSTRUCTIONS:
                 user_id=user_id,
                 start_time=start_time,
                 db=db,
+                context=context,  # Sprint 5.1.4: Pass context for anaphoric resolution
             )
         elif action == ActionType.OPEN_DOC:
             result = await self._handle_open_doc(
@@ -4336,6 +4370,7 @@ IMPORTANT INSTRUCTIONS:
                 user_id=user_id,
                 start_time=start_time,
                 db=db,
+                context=context,  # Sprint 5.1.4: Pass context for anaphoric resolution
             )
         elif action == ActionType.READ_DOC:
             result = await self._handle_read_doc(
@@ -4344,6 +4379,7 @@ IMPORTANT INSTRUCTIONS:
                 user_id=user_id,
                 start_time=start_time,
                 db=db,
+                context=context,  # Sprint 5.1.4: Pass context for anaphoric resolution
             )
         elif action == ActionType.SUMMARIZE_MEETING_DOC:
             result = await self._handle_summarize_meeting_doc(
@@ -4509,18 +4545,31 @@ IMPORTANT INSTRUCTIONS:
         user_id: UUID,
         start_time: float,
         db: Session,
+        context: Optional[Dict[str, Any]] = None,  # Sprint 5.1.4: For anaphoric resolution
     ) -> IntentResult:
         """
         Link a Google Doc to a calendar event.
         
         Note: This feature requires updating calendar event extended properties,
         which needs a calendar API update method. For now, we provide helpful feedback.
+        
+        Sprint 5.1.4: Supports anaphoric references for both doc and meeting.
         """
         from app.services.meeting_link_service import meeting_link_service
         from app.environments.google.docs import GoogleDocsClient
         
         doc_url = intent.doc_url
         meeting_search = intent.meeting_search
+        
+        # Sprint 5.1.4: Resolve anaphoric references from context
+        if context and context.get("resolved_references"):
+            resolved = context["resolved_references"]
+            if not doc_url and resolved.get("document"):
+                doc_url = resolved["document"].get("url")
+                logger.info(f"[ANAPHORIC_RESOLUTION] Resolved doc from context: {doc_url}")
+            if not meeting_search and resolved.get("event"):
+                meeting_search = resolved["event"].get("title")
+                logger.info(f"[ANAPHORIC_RESOLUTION] Resolved event from context: {meeting_search}")
         
         processing_time = (time.time() - start_time) * 1000
         
@@ -4662,6 +4711,7 @@ IMPORTANT INSTRUCTIONS:
         user_id: UUID,
         start_time: float,
         db: Session,
+        context: Optional[Dict[str, Any]] = None,  # Sprint 5.1.4: For anaphoric resolution
     ) -> IntentResult:
         """
         Get the document linked to a calendar event.
@@ -4670,12 +4720,20 @@ IMPORTANT INSTRUCTIONS:
         Returns the document URL for the client to open.
         
         Sprint 3.9: If device_name is specified, displays the doc on that device.
+        Sprint 5.1.4: Supports anaphoric event references ("that meeting", "esa reunión").
         """
         from app.services.meeting_link_service import meeting_link_service
         
         meeting_search = intent.meeting_search
         meeting_time = intent.meeting_time
         device_name = intent.device_name  # Sprint 3.9: Support device display
+        
+        # Sprint 5.1.4: Resolve anaphoric reference from context
+        if not meeting_search and not meeting_time and context and context.get("resolved_references"):
+            resolved_event = context["resolved_references"].get("event")
+            if resolved_event and resolved_event.get("title"):
+                meeting_search = resolved_event["title"]
+                logger.info(f"[ANAPHORIC_RESOLUTION] Resolved event from context: {meeting_search}")
         
         processing_time = (time.time() - start_time) * 1000
         
@@ -4935,11 +4993,16 @@ IMPORTANT INSTRUCTIONS:
         user_id: UUID,
         start_time: float,
         db: Session,
+        context: Optional[Dict[str, Any]] = None,  # Sprint 5.1.4: For anaphoric resolution
     ) -> IntentResult:
         """
         Read and analyze a Google Doc.
         
         Uses DocIntelligenceService to process the document with AI.
+        
+        Sprint 5.1.4: Anaphoric resolution support
+        If intent.doc_url is None, attempts to resolve from context.resolved_references.
+        Enables "what does that document say?" to work after referencing a doc.
         """
         from app.services.doc_intelligence_service import doc_intelligence_service
         from app.environments.google.docs import GoogleDocsClient
@@ -4949,6 +5012,15 @@ IMPORTANT INSTRUCTIONS:
         question = intent.question
         
         processing_time = (time.time() - start_time) * 1000
+        
+        # Sprint 5.1.4: Resolve anaphoric reference if no explicit doc_url
+        if not doc_url and context and context.get("resolved_references"):
+            resolved_doc = context["resolved_references"].get("document")
+            if resolved_doc:
+                doc_url = resolved_doc.get("url")
+                logger.info(
+                    f"[ANAPHORIC_RESOLUTION] Resolved doc from context: {doc_url}"
+                )
         
         if not doc_url:
             return IntentResult(
@@ -5482,15 +5554,16 @@ IMPORTANT INSTRUCTIONS:
 
             # Gemini fetches weather as natural text (simple task)
             # Claude will extract structured data when generating the scene (complex task)
-            prompt = f"What is the current weather in {location}? Include temperature in Fahrenheit, sky conditions, humidity percentage, and wind speed in mph."
+            # Sprint 5.1.4: Simplified prompt works better with grounding
+            prompt = f"What is the current temperature and weather conditions in {location} right now?"
 
             try:
                 response = await gemini_provider.generate_with_grounding(
                     prompt=prompt,
-                    system_prompt="You are a weather reporter. Provide current weather conditions concisely.",
+                    system_prompt=None,  # No system prompt - let grounding work naturally
                     use_search=True,
                     temperature=0.1,
-                    max_tokens=200,
+                    max_tokens=300,  # More tokens to avoid truncation
                 )
 
                 if response.success and response.content:
@@ -5580,12 +5653,14 @@ IMPORTANT INSTRUCTIONS:
         devices: List[Device],
         start_time: float,
         db: Session,
+        context: Optional[Dict[str, Any]] = None,  # Sprint 5.1.4: For anaphoric resolution
     ) -> IntentResult:
         """
         Handle display content intents by generating and sending scene graphs.
         
         Sprint 4.0: Scene Graph implementation for creative device layouts.
         Sprint 4.2: Memory-aware content display - check generated content first.
+        Sprint 5.1.4: Uses context for anaphoric resolution instead of manual get_last_* calls.
         
         Flow:
         1. Check for recently generated content in memory (Sprint 4.2)
@@ -5871,13 +5946,25 @@ IMPORTANT INSTRUCTIONS:
                 conversation_context_dict["last_response"] = context_state.last_assistant_response
 
             # Sprint 4.3.2: Include last event context (for "mi plan", "my meeting", etc.)
-            last_event = conversation_context_service.get_last_event(str(user_id))
+            # Sprint 5.1.4: Also include resolved_references from context
+            last_event = None
+            if context and (context.get("resolved_references") or {}).get("event"):
+                last_event = context["resolved_references"]["event"]
+                logger.info(f"[{request_id}] Using resolved event from context: {last_event.get('title')}")
+            else:
+                last_event = conversation_context_service.get_last_event(str(user_id))
             if last_event:
                 conversation_context_dict["last_event"] = last_event
                 logger.info(f"[{request_id}] Including last event in scene context: {last_event.get('title')}")
 
             # Sprint 4.3.2: Include last doc context
-            last_doc = conversation_context_service.get_last_doc(str(user_id))
+            # Sprint 5.1.4: Also include resolved_references from context
+            last_doc = None
+            if context and (context.get("resolved_references") or {}).get("document"):
+                last_doc = context["resolved_references"]["document"]
+                logger.info(f"[{request_id}] Using resolved doc from context: {last_doc.get('title')}")
+            else:
+                last_doc = conversation_context_service.get_last_doc(str(user_id))
             if last_doc:
                 conversation_context_dict["last_doc"] = last_doc
                 logger.info(f"[{request_id}] Including last doc in scene context: {last_doc.get('title')}")

@@ -53,6 +53,16 @@ CRITICAL PARSING RULES:
    - "show meetings for tomorrow" → parameters: {"date": "YYYY-MM-DD", "search": "meeting"}
    - Search terms filter events by title/description
 
+⚠️ ANAPHORIC REFERENCE RULE (CRITICAL - READ FIRST!):
+=====================================================
+When context contains "ALREADY RESOLVED ANAPHORIC REFERENCES" with a document:
+→ User is referring to THAT SPECIFIC document from context
+→ Any action meaning "show/open/display/put on screen" → DISPLAY_CONTENT (NOT doc_query!)
+→ This includes: ábrelo, muéstramelo, ponlo, enséñamelo, show it, open it, display it, etc.
+
+WHY? doc_query is for SEARCHING documents. display_content is for SHOWING known documents.
+When we already HAVE the document in resolved_references, we don't need to search - just display it!
+
 SUPPORTED INTENT TYPES:
 
 1. DEVICE_COMMAND - Control a display device
@@ -182,6 +192,22 @@ D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
    Actions: link_doc, open_doc, read_doc, summarize_meeting_doc, create_event_from_doc
    IMPORTANT: These commands work with Google Docs linked to calendar events!
 
+   RESOLVED REFERENCES ROUTING PRINCIPLE (CRITICAL):
+   =================================================
+   ALWAYS check resolved_references FIRST before routing!
+   
+   If resolved_references.document EXISTS:
+   - User is referring to THIS SPECIFIC document from context
+   - Any "show/open/display/put" action → display_content (to SHOW it on screen)
+   - Do NOT route to doc_query - that's for SEARCHING, not showing known docs
+   - Example: "open that document" with doc in context → display_content
+   
+   If NO resolved reference exists:
+   - Route to doc_query for document SEARCH operations
+   - Example: "open the standup doc" → doc_query (search by meeting name)
+   
+   This applies to pronouns, demonstratives, and enclitic forms in any language.
+
    CRITICAL DISTINCTION - DOC_QUERY vs CONVERSATION:
    ==========================================
    DOC_QUERY requires SPECIFIC DOCUMENT REFERENCE:
@@ -236,23 +262,24 @@ D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
    When user asks for BOTH information AND display in the same request, capture BOTH intents!
    The user wants a TEXT response (summary) PLUS the document displayed on screen.
    
-   Detection keywords for display alongside doc operations:
-   Spanish: 'en la pantalla', 'ábreme', 'ábrelo', 'muéstrame', 'muéstralo', 'ponlo en', 'en el TV', 'en la sala'
-   English: 'on the screen', 'open it', 'show it', 'display it', 'on the TV', 'on display', 'put it on'
+   DISPLAY INTENT DETECTION:
+   ==========================
+   Display intent exists when user requests visual output on a device. Recognize:
+   1. Any verb requesting visual output + a display target
+   2. Pronoun references to context items + display action
+   3. Enclitic forms where pronouns attach to verbs
    
-   When these keywords appear alongside doc_query, add to response:
+   When display intent is detected alongside doc_query, add to response:
    - also_display: true
    - display_device: device name if mentioned, otherwise null
    
-   Compound examples:
-   - "dame un resumen rápido y ábreme el documento en la pantalla" → doc_query, summarize_meeting_doc, also_display=true
-   - "summarize this AND show it on the TV" → doc_query, summarize_meeting_doc, also_display=true, display_device="TV"
-   - "what does this doc say? show it on the living room TV" → doc_query, read_doc, also_display=true, display_device="living room TV"
-   - "tell me about the meeting doc and put it on screen" → doc_query, summarize_meeting_doc, also_display=true
+   Compound examples (showing JSON structure):
+   - "summarize this AND show it on the TV" → also_display=true, display_device="TV"
+   - "what does this doc say? show it on the living room TV" → also_display=true, display_device="living room TV"
    
-   Without display keywords (also_display=false):
-   - "summarize the meeting doc" → doc_query, summarize_meeting_doc, also_display=false
-   - "what's in the document?" → doc_query, read_doc, also_display=false
+   Without display intent (also_display=false):
+   - "summarize the meeting doc" → also_display=false
+   - "what's in the document?" → also_display=false
 
 8. DISPLAY_CONTENT - Creative display layout commands (Sprint 4.0)
    Actions: display_scene, refresh_display
@@ -281,23 +308,21 @@ D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
    - "what does the standup doc say?" → doc_query (read_doc, meeting_search="standup")
    - "summarize the budget document" → doc_query (summarize, meeting_search="budget")
 
-   CRITICAL - GENERIC vs SPECIFIC document references :
-   ================================================================
-   GENERIC references ("el documento", "the document", "this doc") + SCREEN/DISPLAY:
-   - "Muestra el documento en la pantalla" → display_content (uses context, NOT doc_query!)
-   - "Show the document on screen" → display_content (uses context)
-   - "Put the doc on the TV" → display_content (uses context)
+   CONTEXT-AWARE REFERENCE RESOLUTION:
+   ====================================
+   When context includes a document or event, any pronoun or demonstrative
+   reference resolves to that context item. The system provides resolved_references.
+   
+   Anaphoric references include pronouns, demonstratives, and enclitic forms.
+   If context has a recent entity and user refers to "it"/"that"/"this" (any form),
+   resolve from context automatically.
 
-   SPECIFIC references (has meeting name like "standup", "budget", "project"):
+   SPECIFIC references bypass context (has entity name like "standup", "budget"):
    - "Show the standup doc" → doc_query, meeting_search="standup"
-   - "Open the budget document" → doc_query, meeting_search="budget"
-
-   RULE: If document reference is GENERIC (no meeting name) + display/screen keyword:
-   → Use display_content, NOT doc_query (the scene service will use conversation context)
 
    DETECTION RULE: If request contains BOTH:
-   1. Document reference (doc, documento, document, notes, meeting doc)
-   2. Spatial keyword (left, right, next to, beside, corner, alongside, al lado, derecha, izquierda)
+   1. Document reference (doc, documento, document, notes, meeting doc, OR pronoun reference)
+   2. Spatial positioning (any word indicating position/layout)
    → Then it's DISPLAY_CONTENT, NOT doc_query!
    
    vs. device_command (show_calendar):
@@ -409,25 +434,18 @@ DOCUMENT REQUESTS - CRITICAL DISAMBIGUATION:
 - "What does the doc say?" → DOC_QUERY (read/analyze)
 - "Document ALONGSIDE my calendar" → DISPLAY_CONTENT (layout)
 
-SPATIAL KEYWORDS (trigger DISPLAY_CONTENT when combined with document):
-English: left, right, top, bottom, corner, next to, beside, alongside, near
-Spanish: izquierda, derecha, arriba, abajo, esquina, al lado, junto a
+SPATIAL POSITIONING → DISPLAY_CONTENT:
+When user describes WHERE to place content on screen, that indicates DISPLAY_CONTENT.
+Spatial positioning includes positions, directions, and relative arrangements.
 
-MULTI-ACTION REQUESTS - SEQUENTIAL ACTIONS (Sprint 4.0.3):
-
-Users often request MULTIPLE actions in a single sentence using connectors:
-- Spanish: 'Y', 'y luego', 'después', 'también', 'además'
-- English: 'AND', 'then', 'also', 'after that'
+MULTI-ACTION REQUESTS:
+Users often request MULTIPLE actions in a single sentence. Detect through:
+- Conjunctions and sequence words
+- Multiple verbs in the same request
 
 When you detect multiple actions, structure them as:
 1. Primary intent_type and action (first action mentioned)
 2. sequential_actions array for additional actions
-
-DETECTION RULES:
-- Look for action connectors: 'y', 'and', 'then', 'después', 'also', 'también'
-- Each distinct verb is likely a separate action
-- 'limpia Y muestra' = 2 actions (clear + show)
-- 'apaga X Y enciende Y' = 2 actions (power_off + power_on)
 
 FEW-SHOT EXAMPLES (Sprint 4.4.0 - Reduced from 137 to 18):
 

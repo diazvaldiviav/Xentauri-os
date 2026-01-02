@@ -54,14 +54,15 @@ birthday/cumpleaños/anniversaire are translations of the same concept."
 | `router_prompts.py` | 252 | ✅ Optimizado | -144 líneas |
 | `calendar_search_prompts.py` | 136 | ✅ Optimizado | -46 líneas |
 | `assistant_prompts.py` | 240 | ✅ Optimizado (Sprint 5.1.3) | -51 líneas |
-| `scene_prompts.py` | 746 | ✅ Optimizado (Sprint 5.1.3) | -54 líneas |
+| `scene_prompts.py` | 751 | ✅ Optimizado (Sprint 5.1.4) | -54 + semantic rules |
 | `execution_prompts.py` | 517 | ✅ Optimizado (Sprint 5.1.3) | -199 líneas |
-| `intent_prompts.py` | 570 | ✅ Ya optimizado (Sprint 5.1.2) | - |
+| `intent_prompts.py` | 581 | ✅ Optimizado (Sprint 5.1.4) | semantic rules |
+| `router_prompts.py` | 248 | ✅ Optimizado (Sprint 5.1.4) | semantic rules |
 | `doc_prompts.py` | 305 | ✅ Aceptable | - |
 | `base_prompt.py` | 457 | ✅ Aceptable | - |
 | `helpers.py` | 432 | ✅ Contiene helpers inteligentes | - |
 
-**Total reducido hasta ahora: -494 líneas**
+**Total reducido hasta ahora: -494 líneas + semantic rule improvements**
 
 ---
 
@@ -167,6 +168,73 @@ Los prompts optimizados fueron testeados con ejemplos NO listados explícitament
 | "silencia" | Acción no listada | ✅ Mapeó a mute |
 
 **Conclusión:** Las reglas inteligentes permiten que el LLM generalice correctamente sin necesidad de listas exhaustivas de ejemplos.
+
+---
+
+## Sprint 5.1.4 - Fase 2: Eliminación de Keyword Matching
+
+### Problema Detectado
+A pesar de la optimización anterior, algunos prompts seguían usando listas de keywords disfrazadas de reglas semánticas:
+
+**Evidencia del problema:**
+- ✅ "muéstramelo en la pantalla" → Funciona (keyword listado)
+- ❌ "ponlo en la pantalla" → Falla (keyword NO listado)
+
+### Anti-Patrones Identificados
+
+| Archivo | Líneas | Anti-Patrón | Impacto |
+|---------|--------|-------------|---------|
+| `intent_prompts.py` | 240-241 | Lista de keywords de display (Spanish/English) | "ponlo" falla |
+| `intent_prompts.py` | 287-288 | Lista de referencias implícitas | Enclíticos fallan |
+| `intent_prompts.py` | 412-413 | Lista de spatial keywords | Variaciones fallan |
+| `router_prompts.py` | 120-121 | Lista de layout/component keywords | Variaciones fallan |
+| `scene_prompts.py` | 114-117 | Lista de spatial mappings | Variaciones fallan |
+
+### Solución Aplicada: Reglas Semánticas
+
+**ANTES (Anti-patrón):**
+```python
+Spanish: 'en la pantalla', 'ábreme', 'ábrelo', 'muéstrame', 'ponlo en'
+English: 'on the screen', 'open it', 'show it', 'display it', 'put it on'
+```
+
+**DESPUÉS (Regla Semántica):**
+```python
+DISPLAY INTENT DETECTION (Semantic Rule):
+Detect display intent through MEANING, not keyword matching. Display intent exists when:
+1. User uses ANY verb requesting visual output (show, display, put, open, present, etc.)
+2. User references a display location (screen, TV, monitor, room name, "pantalla", etc.)
+3. User uses object pronouns with display verbs ("muéstramelo", "ponlo", "enséñamelo")
+
+The LLM understands display-related language across all forms and languages.
+This includes enclitic pronouns in Spanish where the pronoun attaches to the verb.
+```
+
+### Cambios Sprint 5.1.4
+
+| Archivo | Cambio | Líneas Afectadas |
+|---------|--------|------------------|
+| `intent_prompts.py` | Display keywords → Semantic rule | -8 líneas, +10 líneas |
+| `intent_prompts.py` | Implicit refs → Anaphoric detection | -6 líneas, +12 líneas |
+| `intent_prompts.py` | Spatial keywords → Semantic spatial | -3 líneas, +5 líneas |
+| `router_prompts.py` | Layout keywords → Semantic layout | -6 líneas, +5 líneas |
+| `scene_prompts.py` | Spatial mapping → Semantic spatial | -4 líneas, +7 líneas |
+
+### Tests de Generalización Sprint 5.1.4
+
+| Test | Antes | Después |
+|------|-------|---------|
+| "ponlo en la pantalla" | ❌ UNKNOWN | ✅ display_content |
+| "ábrelo" (enclítico) | ❌ falla | ✅ resuelve contexto |
+| "enséñamelo" (no listado) | ❌ falla | ✅ display_content |
+| "colócalo en el monitor" | ❌ falla | ✅ display_content |
+
+### Principio Clave
+
+> **El LLM conoce el idioma mejor que cualquier lista de keywords.**
+> 
+> Una regla que dice "detecta intención de display a través del SIGNIFICADO"
+> es infinitamente más robusta que una lista de 20 frases específicas.
 
 ---
 
