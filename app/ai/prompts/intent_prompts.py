@@ -80,7 +80,7 @@ SUPPORTED INTENT TYPES:
    - "List my events" → calendar_query, list_events
    - "When is my birthday?" → calendar_query, find_event, search_term="birthday"
 
-5. CALENDAR_CREATE - Create a new calendar event (Sprint 3.8)
+5. CALENDAR_CREATE - Create a new calendar event
    Actions: create_event, confirm_create, cancel_create, edit_pending_event
    IMPORTANT: These are REQUESTS TO CREATE events, not questions!
    Keywords: schedule, add event, create meeting, book, set up, add to calendar, remind me
@@ -88,14 +88,14 @@ SUPPORTED INTENT TYPES:
    - "add team standup every Monday at 9 am" → calendar_create, create_event (with recurrence)
    - "schedule birthday on January 15" → calendar_create, create_event (all-day)
 
-   EVENT TITLE EXTRACTION (Sprint 5.1.2):
+   EVENT TITLE EXTRACTION:
    → Preserve the user's language! Do NOT translate titles.
    → "crear reunion" → event_title="Reunion" (NOT "Meeting")
    → "agendar junta" → event_title="Junta" (NOT "Meeting")
    → "schedule meeting" → event_title="Meeting"
    → If no clear title, use "Evento" (Spanish) or "Event" (English) based on user's language.
 
-   DOCUMENT ASSOCIATION (Sprint 5.1.1):
+   DOCUMENT ASSOCIATION:
    If user includes a Google Docs URL with "asocia", "link", "attach", "con este documento":
    - Extract the URL to doc_url field
    - "Crea reunion para hoy y asocia este doc https://docs..." → calendar_create, doc_url="https://..."
@@ -114,7 +114,7 @@ SUPPORTED INTENT TYPES:
    - "make it weekly" → calendar_create, edit_pending_event, edit_field="recurrence"
    - "add location Conference Room A" → calendar_create, edit_pending_event, edit_field="location"
 
-CRITICAL - PENDING OPERATION CONTEXT RULES (Sprint 3.9.1):
+CRITICAL - PENDING OPERATION CONTEXT RULES :
 When context includes "pending_operation" field, use these disambiguation rules:
 
 A) pending_op_type = "create" (user has a pending event creation):
@@ -124,7 +124,7 @@ A) pending_op_type = "create" (user has a pending event creation):
    - "make it at 7pm" → calendar_create, edit_pending_event
    - "change the time" → calendar_create, edit_pending_event
 
-   BARE VALUE RESPONSES (Sprint 5.1.2):
+   BARE VALUE RESPONSES :
    When user provides a bare value without explicit "change" command, infer edit_field from value type:
    → Date-like value ("10 de enero", "mañana", "next monday") → edit_field="event_date"
    → Time-like value ("3pm", "15:00", "a las 3") → edit_field="event_time"
@@ -281,7 +281,7 @@ D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
    - "what does the standup doc say?" → doc_query (read_doc, meeting_search="standup")
    - "summarize the budget document" → doc_query (summarize, meeting_search="budget")
 
-   CRITICAL - GENERIC vs SPECIFIC document references (Sprint 5.1.1):
+   CRITICAL - GENERIC vs SPECIFIC document references :
    ================================================================
    GENERIC references ("el documento", "the document", "this doc") + SCREEN/DISPLAY:
    - "Muestra el documento en la pantalla" → display_content (uses context, NOT doc_query!)

@@ -130,7 +130,7 @@ class IntentParser:
             if "conversation_context" in context and context["conversation_context"]:
                 conv_ctx = context["conversation_context"]
                 conv_lines = []
-                
+
                 # Add recent conversation if available
                 if conv_ctx.get("conversation"):
                     conv = conv_ctx["conversation"]
@@ -140,9 +140,41 @@ class IntentParser:
                         conv_lines.append(f"Last assistant response: {conv['last_assistant'][:150]}...")
                     if conv.get("last_intent"):
                         conv_lines.append(f"Last intent type: {conv['last_intent']}")
-                
+
                 if conv_lines:
                     context_parts.append("Recent conversation:\n" + "\n".join(conv_lines))
+
+                # Sprint 5.1.3: Add last_event context for anaphoric references ("esa reunión", "that meeting")
+                if conv_ctx.get("last_event"):
+                    event = conv_ctx["last_event"]
+                    if event.get("title") and event.get("is_recent"):
+                        event_context = f"""LAST REFERENCED EVENT IN CONTEXT:
+Title: {event.get('title')}
+Event ID: {event.get('id', 'unknown')}
+Date: {event.get('date', 'unknown')}
+
+IMPORTANT: If user references "esa reunión", "that meeting", "the event", "la reunión", "this event" etc.,
+they are referring to the event above. Set meeting_search: null to use context resolution."""
+                        context_parts.append(event_context)
+
+                # Sprint 5.1.3: Add last_doc context for anaphoric references ("ese documento", "that doc")
+                if conv_ctx.get("last_doc"):
+                    doc = conv_ctx["last_doc"]
+                    if doc.get("id") and doc.get("is_recent"):
+                        doc_context = f"""LAST REFERENCED DOCUMENT IN CONTEXT:
+Doc ID: {doc.get('id')}
+Title: {doc.get('title', 'unknown')}
+URL: {doc.get('url', 'unknown')}
+
+ANAPHORIC REFERENCE RESOLUTION:
+When user says "ese documento", "that document", "the doc", "el documento", "abre el documento", etc.:
+- For DOC_QUERY intents: Set doc_id="{doc.get('id')}" and doc_url="{doc.get('url', '')}"
+- For DISPLAY_CONTENT intents: The scene service will use this context automatically
+- DO NOT require meeting_search when doc context is available - use the doc_id/doc_url directly!
+
+CRITICAL: "abre ese documento" or "open that document" = DOC_QUERY with doc_id from context above.
+"abre ese documento en la pantalla" = DOC_QUERY with also_display=true (compound intent)."""
+                        context_parts.append(doc_context)
             
             # Sprint 4.2: Add generated content context (CRITICAL for "show that note" references)
             if "generated_content" in context and context["generated_content"]:

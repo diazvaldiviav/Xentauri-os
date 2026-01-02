@@ -251,234 +251,35 @@ PARAMETER FORMATS:
 # ---------------------------------------------------------------------------
 
 EXECUTION_EXAMPLES = """
-EXAMPLE REQUESTS & RESPONSES:
-==============================
+EXAMPLE RESPONSES (5 strategic patterns):
+=========================================
 
-Example 1: Clear calendar request
-----------------------------------
+1. SINGLE ACTION (clear request):
 User: "Show my calendar for December 6th on the living room TV"
-Context: Living Room TV exists and is online, Google Calendar connected
+→ {"type": "action", "action_name": "show_calendar", "parameters": {"target_device": "Living Room TV", "date": "2025-12-06"}, "confidence": 1.0}
 
-Response:
-```json
-{
-  "type": "action",
-  "action_name": "show_calendar",
-  "parameters": {
-    "target_device": "Living Room TV",
-    "date": "2025-12-06"
-  },
-  "confidence": 1.0
-}
-```
+2. CLARIFICATION (ambiguous/missing info):
+User: "Show my calendar" (multiple devices exist)
+→ {"type": "clarification", "message": "Which device?", "suggested_options": ["Living Room TV", "Bedroom Monitor"], "missing_info": "target_device"}
 
-Example 2: Missing device
-----------------------------------
-User: "Show my calendar for tomorrow"
-Context: Multiple devices available (Living Room TV, Bedroom Monitor)
-
-Response:
-```json
-{
-  "type": "clarification",
-  "message": "Which device would you like to display the calendar on?",
-  "suggested_options": ["Living Room TV", "Bedroom Monitor"],
-  "missing_info": "target_device"
-}
-```
-
-Example 3: Missing date
-----------------------------------
-User: "Display my calendar on the TV"
-Context: Living Room TV exists, Google Calendar connected
-
-Response:
-```json
-{
-  "type": "action",
-  "action_name": "show_calendar",
-  "parameters": {
-    "target_device": "Living Room TV"
-  },
-  "reasoning": "No date specified, will default to today",
-  "confidence": 0.9
-}
-```
-
-Example 4: Service not connected
-----------------------------------
-User: "Show calendar on TV"
-Context: Living Room TV exists, but Google Calendar NOT connected
-
-Response:
-```json
-{
-  "type": "clarification",
-  "message": "Your Google Calendar is not connected yet. Would you like instructions on how to connect it?",
-  "missing_info": "google_calendar_connection"
-}
-```
-
-Example 5: Multi-step sequence
-----------------------------------
+3. ACTION SEQUENCE (multi-step):
 User: "Turn on the bedroom TV and show my calendar"
-Context: Bedroom TV exists, Google Calendar connected
+→ {"type": "action_sequence", "actions": [{"action_name": "power_on", "parameters": {"target_device": "Bedroom TV"}}, {"action_name": "show_calendar", "parameters": {"target_device": "Bedroom TV"}}]}
 
-Response:
-```json
-{
-  "type": "action_sequence",
-  "actions": [
-    {
-      "action_name": "power_on",
-      "parameters": {"target_device": "Bedroom TV"}
-    },
-    {
-      "action_name": "show_calendar",
-      "parameters": {"target_device": "Bedroom TV"}
-    }
-  ],
-  "reasoning": "User wants TV powered on before showing calendar"
-}
-```
+4. SERVICE NOT AVAILABLE:
+User: "Show calendar" (Google Calendar NOT connected)
+→ {"type": "clarification", "message": "Google Calendar is not connected yet.", "missing_info": "google_calendar_connection"}
 
-Example 6: Fuzzy device match
-----------------------------------
-User: "Show calendar on the TV"
-Context: Only one TV: "Living Room TV"
+5. CONTEXT-AWARE (using last_event):
+User: "Reschedule my meeting" (conversation has last_event: "Board meeting", event_id: abc123)
+→ {"type": "action", "action_name": "reschedule_event", "parameters": {"event_id": "abc123", ...}, "reasoning": "Using last_event from context"}
 
-Response:
-```json
-{
-  "type": "action",
-  "action_name": "show_calendar",
-  "parameters": {
-    "target_device": "Living Room TV"
-  },
-  "reasoning": "Matched 'the TV' to only available TV device",
-  "confidence": 0.95
-}
-```
-
-Example 7: Ambiguous device
-----------------------------------
-User: "Show calendar on the TV"
-Context: Multiple TVs: "Living Room TV", "Bedroom TV"
-
-Response:
-```json
-{
-  "type": "clarification",
-  "message": "You have multiple TVs. Which one would you like to use?",
-  "suggested_options": ["Living Room TV", "Bedroom TV"],
-  "missing_info": "target_device"
-}
-```
-
-Example 8: Unsupported feature (IMPORTANT!)
-----------------------------------
-User: "Schedule a meeting for tomorrow at 2pm"
-Context: Living Room TV exists, Google Calendar connected (read-only)
-
-Response:
-```json
-{
-  "type": "clarification",
-  "message": "I can display your Google Calendar on your screens, but I cannot create calendar events or schedule meetings yet. Would you like me to show your calendar for tomorrow instead?",
-  "missing_info": "unsupported_feature"
-}
-```
-
-Example 9: Calendar with search filter (Sprint 3.7)
-----------------------------------
-User: "Show my birthday on the living room TV"
-Context: Living Room TV exists, Google Calendar connected
-
-Response:
-```json
-{
-  "type": "action",
-  "action_name": "show_calendar",
-  "parameters": {
-    "target_device": "Living Room TV",
-    "search": "birthday"
-  },
-  "reasoning": "Display calendar filtered by 'birthday' events",
-  "confidence": 0.95
-}
-```
-
-Example 10: Calendar search with date (Sprint 3.7)
-----------------------------------
-User: "Show my anniversary on March 26, 2026 on bedroom monitor"
-Context: Bedroom Monitor exists, Google Calendar connected
-
-Response:
-```json
-{
-  "type": "action",
-  "action_name": "show_calendar",
-  "parameters": {
-    "target_device": "Bedroom Monitor",
-    "date": "2026-03-26",
-    "search": "anniversary"
-  },
-  "reasoning": "Display calendar for specific date filtered by 'anniversary'",
-  "confidence": 0.95
-}
-```
-
-Example 9: Partial support with alternative
-----------------------------------
-User: "I need to see my screen and schedule a meeting for December 11"
-Context: Living Room TV exists, Google Calendar connected
-
-Response:
-```json
-{
-  "type": "clarification",
-  "message": "I can show your calendar for December 11th on the Living Room TV, but I cannot create meetings or events. Would you like me to display your calendar so you can see your schedule for that day?",
-  "missing_info": "unsupported_feature"
-}
-```
-
-Example 10: Using last_event context (Sprint 4.4.0)
-----------------------------------
-User: "Reschedule my meeting for tomorrow at 2pm"
-Context: Living Room TV exists, Google Calendar connected
-Conversation history shows:
-  - last_event: "Board meeting" (event_id: abc123, date: 2025-12-28)
-
-Response:
-```json
-{
-  "type": "action",
-  "action_name": "reschedule_event",
-  "parameters": {
-    "event_id": "abc123",
-    "new_date": "2025-12-29",
-    "new_time": "14:00"
-  },
-  "reasoning": "User said 'my meeting' - conversation shows last_event is 'Board meeting'. Using that event_id instead of asking which meeting.",
-  "confidence": 0.95
-}
-```
-
-Example 11: last_event expired - ask for clarification
-----------------------------------
-User: "Show my meeting on the TV"
-Context: Living Room TV exists, Google Calendar connected
-Conversation history shows:
-  - last_event: "Board meeting" (created 6 minutes ago - EXPIRED)
-
-Response:
-```json
-{
-  "type": "clarification",
-  "message": "Which meeting would you like to display? I don't have recent context about a specific meeting (last reference was over 5 minutes ago).",
-  "missing_info": "event_specification"
-}
-```"""
+RULES:
+- If only ONE device matches "the TV", use it (fuzzy match OK)
+- If MULTIPLE devices match, ask for clarification
+- If service not connected, explain and offer alternatives
+- If last_event/last_doc in context and <5min old, USE IT - don't ask "which one?"
+- Extract search terms from request: "show my birthday" → search="birthday\""""
 
 
 # ---------------------------------------------------------------------------

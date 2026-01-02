@@ -4620,9 +4620,18 @@ IMPORTANT INSTRUCTIONS:
                     "doc_id": doc_id,
                 }
             )
-            
+
+            # Sprint 5.1.3: Store doc in context for future references ("ese documento", "that doc")
+            from app.services.conversation_context_service import conversation_context_service
+            conversation_context_service.set_last_doc(
+                user_id=str(user_id),
+                doc_id=doc_id,
+                doc_url=doc_url,
+                doc_title=meeting_result.event.summary,  # Use event title as doc context
+            )
+
             processing_time = (time.time() - start_time) * 1000
-            
+
             return IntentResult(
                 success=True,
                 intent_type=IntentResultType.DOC_QUERY,
@@ -5507,15 +5516,19 @@ IMPORTANT INSTRUCTIONS:
     def _extract_location_from_request(self, user_request: str) -> Optional[str]:
         """
         Extract location from user request.
-        
+
         Examples:
             "clima de Alaska" → "Alaska"
             "weather in Miami" → "Miami"
             "temperatura en New York" → "New York"
             "show weather for London" → "London"
+            "muestra el clima en la pantalla" → None (not a location!)
         """
         import re
-        
+
+        # Words that are display destinations, NOT locations
+        display_words = ["pantalla", "screen", "tv", "monitor", "display", "tele", "television"]
+
         # Spanish patterns - greedy capture up to end of sentence or punctuation
         spanish_match = re.search(
             r'(?:clima|tiempo|temperatura)\s+(?:de|en)\s+([A-Za-z][A-Za-z\s]*[A-Za-z])',
@@ -5527,7 +5540,11 @@ IMPORTANT INSTRUCTIONS:
             location = spanish_match.group(1).strip()
             # Remove common trailing words that aren't part of place names
             location = re.sub(r'\s+(en|on|the|la|el|para|for).*$', '', location, flags=re.IGNORECASE)
-            return location.strip()
+            location = location.strip()
+            # Sprint 5.1.3: Exclude display destinations from being treated as locations
+            if location.lower() in display_words or any(dw in location.lower() for dw in display_words):
+                return None
+            return location
         
         # English patterns - greedy capture
         english_match = re.search(
@@ -5539,7 +5556,11 @@ IMPORTANT INSTRUCTIONS:
             location = english_match.group(1).strip()
             # Remove common trailing words
             location = re.sub(r'\s+(on|the|screen|tv|display|pantalla).*$', '', location, flags=re.IGNORECASE)
-            return location.strip()
+            location = location.strip()
+            # Sprint 5.1.3: Exclude display destinations from being treated as locations
+            if location.lower() in display_words or any(dw in location.lower() for dw in display_words):
+                return None
+            return location
         
         # Try to find capitalized place names after show/display
         place_match = re.search(

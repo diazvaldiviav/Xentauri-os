@@ -53,15 +53,15 @@ birthday/cumpleaños/anniversaire are translations of the same concept."
 |---------|--------|--------|-----------|
 | `router_prompts.py` | 252 | ✅ Optimizado | -144 líneas |
 | `calendar_search_prompts.py` | 136 | ✅ Optimizado | -46 líneas |
-| `assistant_prompts.py` | 290 | ⏳ Pendiente | ~25 líneas est. |
-| `scene_prompts.py` | 800 | ⏳ Pendiente | ~50 líneas est. |
-| `execution_prompts.py` | 716 | ⏳ Pendiente | ~80 líneas est. |
+| `assistant_prompts.py` | 240 | ✅ Optimizado (Sprint 5.1.3) | -51 líneas |
+| `scene_prompts.py` | 746 | ✅ Optimizado (Sprint 5.1.3) | -54 líneas |
+| `execution_prompts.py` | 517 | ✅ Optimizado (Sprint 5.1.3) | -199 líneas |
 | `intent_prompts.py` | 570 | ✅ Ya optimizado (Sprint 5.1.2) | - |
 | `doc_prompts.py` | 305 | ✅ Aceptable | - |
 | `base_prompt.py` | 457 | ✅ Aceptable | - |
 | `helpers.py` | 432 | ✅ Contiene helpers inteligentes | - |
 
-**Total reducido hasta ahora: -190 líneas**
+**Total reducido hasta ahora: -494 líneas**
 
 ---
 
@@ -104,20 +104,22 @@ birthday/cumpleaños/anniversaire are translations of the same concept."
 
 ---
 
-## Pendientes de Optimización
+## Cambios Sprint 5.1.3 (Completado)
 
-### `assistant_prompts.py` (Prioridad 1)
-- Líneas 31-45: `UNIVERSAL_MULTILINGUAL_RULE` con 5 ejemplos de idiomas
-- Líneas 113-124: Ejemplos duplicados EN/ES para web search
-- Líneas 132-148: Ejemplos duplicados para content generation
+### `assistant_prompts.py` (-51 líneas)
+- `UNIVERSAL_MULTILINGUAL_RULE`: De 14 líneas a 3 líneas (regla inteligente)
+- Web Search: De 15 líneas a 3 líneas
+- Content Generation: De 18 líneas a 3 líneas
+- Few-shot examples: De 12 líneas a 2 líneas
 
-### `scene_prompts.py` (Prioridad 2)
-- Líneas 112-128: Ejemplos verbosos de spatial keywords
-- Líneas 169-219: Múltiples ejemplos de content generation vs extraction
-- Líneas 295-312: Ejemplo detallado redundante
+### `scene_prompts.py` (-54 líneas)
+- Spatial keywords: De 17 líneas a 8 líneas
+- Content Gen vs Extract: De 19 líneas a 5 líneas
+- Document Intelligence: De 27 líneas a 4 líneas
+- Meeting+Doc Combinations: De 9 líneas a 4 líneas
 
-### `execution_prompts.py` (Prioridad 3)
-- Líneas 253-481: 11 ejemplos cuando 3-4 bastarían
+### `execution_prompts.py` (-199 líneas)
+- EXECUTION_EXAMPLES: De 228 líneas (13 ejemplos) a 29 líneas (5 patrones + reglas)
 
 ---
 
@@ -148,10 +150,24 @@ curl -X POST http://localhost:8000/intent \
 
 | Métrica | Antes | Después | Mejora |
 |---------|-------|---------|--------|
-| Total líneas en prompts | ~4,031 | ~3,841 | -190 (5%) |
-| Ejemplos redundantes | ~80 | ~30 | -62% |
+| Total líneas en prompts | ~4,031 | ~3,537 | -494 (12%) |
+| Ejemplos redundantes | ~80 | ~15 | -81% |
 | Tiempo de contexto LLM | - | - | Reducido |
+
+### Tests de Generalización (Sprint 5.1.3)
+
+Los prompts optimizados fueron testeados con ejemplos NO listados explícitamente:
+
+| Test | Descripción | Resultado |
+|------|-------------|-----------|
+| Italiano | Idioma no en prompt | ✅ Respondió en italiano |
+| "tendencias" | Keyword no listado | ✅ Buscó inmediatamente |
+| "elabora" | Verbo no listado | ✅ Generó contenido |
+| "esquina superior" | Posición no listada | ✅ Layout correcto |
+| "silencia" | Acción no listada | ✅ Mapeó a mute |
+
+**Conclusión:** Las reglas inteligentes permiten que el LLM generalice correctamente sin necesidad de listas exhaustivas de ejemplos.
 
 ---
 
-*Última actualización: 2026-01-01*
+*Última actualización: 2026-01-02*
