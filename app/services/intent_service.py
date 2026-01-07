@@ -5991,10 +5991,57 @@ IMPORTANT INSTRUCTIONS:
             # Send scene to device via WebSocket
             scene_dict = scene.model_dump(mode="json")
             
+            # Sprint 5.2: Generate custom HTML layout via GPT-5.2 (if enabled)
+            custom_layout = None
+            if settings.CUSTOM_LAYOUT_ENABLED:
+                try:
+                    from app.ai.scene.custom_layout import custom_layout_service, layout_validator
+                    
+                    logger.info(f"[{request_id}] Generating custom HTML layout via GPT-5.2...")
+                    layout_result = await custom_layout_service.generate_html(
+                        scene=scene_dict,
+                        user_request=intent.original_text or "",
+                    )
+                    
+                    if layout_result.success and layout_result.html:
+                        # Validate HTML with Playwright (if enabled)
+                        if settings.CUSTOM_LAYOUT_VALIDATION_ENABLED:
+                            logger.info(f"[{request_id}] Validating custom HTML with Playwright...")
+                            validation_result = await layout_validator.validate(layout_result.html)
+                            
+                            if validation_result.is_valid:
+                                custom_layout = layout_result.html
+                                logger.info(
+                                    f"[{request_id}] Custom HTML layout validated successfully "
+                                    f"(render: {validation_result.render_time_ms:.0f}ms)"
+                                )
+                            else:
+                                logger.warning(
+                                    f"[{request_id}] Custom HTML validation failed: {validation_result.errors}. "
+                                    f"Falling back to SceneGraph."
+                                )
+                        else:
+                            # Skip validation, use generated HTML directly
+                            custom_layout = layout_result.html
+                            logger.info(f"[{request_id}] Using custom HTML layout (validation skipped)")
+                    else:
+                        logger.warning(
+                            f"[{request_id}] Custom layout generation failed: {layout_result.error}. "
+                            f"Falling back to SceneGraph."
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"[{request_id}] Custom layout error (falling back to SceneGraph): {e}",
+                        exc_info=True
+                    )
+                    # Continue with custom_layout = None (fallback to scene)
+            
             # Send scene to device using the display_scene command
+            # Sprint 5.2: Include custom_layout if generated successfully
             result = await command_service.display_scene(
                 device_id=target_device.id,
                 scene=scene_dict,
+                custom_layout=custom_layout,
             )
             
             if not result.success:

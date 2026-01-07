@@ -219,3 +219,216 @@ class AIProvider(ABC):
         except Exception as e:
             logger.error(f"Health check failed for {self.provider_type.value}: {e}")
             return False
+
+    # -------------------------------------------------------------------------
+    # JSON VALIDATION AND REPAIR HELPERS (Sprint 5.3)
+    # -------------------------------------------------------------------------
+    
+    def _clean_markdown_wrapper(self, content: str) -> str:
+        """
+        Remove markdown code block wrappers from JSON content.
+        
+        LLMs sometimes wrap JSON in ```json ... ``` blocks despite instructions.
+        This method cleans that up for consistent parsing.
+        
+        Args:
+            content: Raw content that may contain markdown wrappers
+            
+        Returns:
+            Cleaned content with markdown wrappers removed
+        """
+        if not content:
+            return content
+        
+        content = content.strip()
+        
+        # Remove opening markdown code block
+        if content.startswith("```json"):
+            content = content[7:]
+        elif content.startswith("```"):
+            content = content[3:]
+        
+        # Remove closing markdown code block
+        if content.endswith("```"):
+            content = content[:-3]
+        
+        return content.strip()
+    
+    async def _validate_json_with_repair(
+        self,
+        content: str,
+        original_prompt: str,
+        original_system_prompt: Optional[str] = None,
+    ) -> tuple:
+        """
+        Validate JSON content and attempt repair if invalid.
+        
+        This method implements the intelligent JSON repair flow:
+        1. Clean markdown wrappers
+        2. Try to parse JSON
+        3. If valid, return success
+        4. If invalid and repair enabled, attempt diagnosis + repair
+        5. Return result with repaired content or error
+        
+        Args:
+            content: Raw JSON string from LLM
+            original_prompt: The original user prompt (for repair context)
+            original_system_prompt: The original system prompt (for repair context)
+            
+        Returns:
+            Tuple of (is_valid: bool, content_or_repaired: str, error_if_failed: Optional[str])
+        """
+        import json
+        from app.core.config import settings
+        
+        # Step 1: Clean markdown wrappers
+        cleaned_content = self._clean_markdown_wrapper(content)
+        
+        # Step 2: Try to parse JSON
+        try:
+            json.loads(cleaned_content)
+            return (True, cleaned_content, None)
+        except json.JSONDecodeError as e:
+            original_error = e
+            logger.warning(f"[{self.provider_type.value}] Invalid JSON received: {e}")
+        
+        # Step 3: Check if repair is enabled
+        if not getattr(settings, 'JSON_REPAIR_ENABLED', False):
+            return (False, cleaned_content, f"Invalid JSON response: {original_error}")
+        
+        # Step 4: Attempt repair
+        max_retries = getattr(settings, 'JSON_REPAIR_MAX_RETRIES', 1)
+        
+        for attempt in range(max_retries):
+            logger.info(f"[{self.provider_type.value}] Attempting JSON repair (attempt {attempt + 1}/{max_retries})")
+            
+            try:
+                # Step 4a: Diagnose the error using Gemini (fast, cheap)
+                diagnosis = await self._diagnose_json_error(cleaned_content, original_error)
+                
+                if not diagnosis:
+                    logger.warning(f"[{self.provider_type.value}] JSON diagnosis failed, cannot repair")
+                    continue
+                
+                logger.info(f"[{self.provider_type.value}] JSON diagnosis: {diagnosis}")
+                
+                # Step 4b: Repair using the original provider
+                repaired_content = await self._repair_json(
+                    content=cleaned_content,
+                    diagnosis=diagnosis,
+                    original_prompt=original_prompt,
+                    original_system_prompt=original_system_prompt,
+                )
+                
+                if not repaired_content:
+                    logger.warning(f"[{self.provider_type.value}] JSON repair returned empty result")
+                    continue
+                
+                # Step 4c: Validate repaired content
+                repaired_cleaned = self._clean_markdown_wrapper(repaired_content)
+                try:
+                    json.loads(repaired_cleaned)
+                    logger.info(f"[{self.provider_type.value}] JSON repair successful!")
+                    return (True, repaired_cleaned, None)
+                except json.JSONDecodeError as repair_error:
+                    logger.warning(f"[{self.provider_type.value}] Repaired JSON still invalid: {repair_error}")
+                    # Update error for next attempt
+                    original_error = repair_error
+                    cleaned_content = repaired_cleaned
+                    
+            except Exception as repair_exception:
+                logger.error(f"[{self.provider_type.value}] JSON repair exception: {repair_exception}")
+                continue
+        
+        # All repair attempts failed
+        logger.error(f"[{self.provider_type.value}] JSON repair failed after {max_retries} attempts")
+        return (False, cleaned_content, f"Invalid JSON response: {original_error}")
+    
+    async def _diagnose_json_error(
+        self,
+        content: str,
+        error: Exception,
+    ) -> Optional[str]:
+        """
+        Diagnose a JSON parsing error using Gemini (fast, cheap).
+        
+        Args:
+            content: The malformed JSON string
+            error: The JSONDecodeError that was raised
+            
+        Returns:
+            Diagnosis string or None if diagnosis failed
+        """
+        try:
+            # Lazy import to avoid circular imports
+            from app.ai.providers.gemini import gemini_provider
+            from app.ai.prompts.json_repair_prompts import build_diagnosis_prompt
+            
+            diagnosis_prompt = build_diagnosis_prompt(
+                json_content=content,
+                error_message=str(error),
+            )
+            
+            response = await gemini_provider.generate(
+                prompt=diagnosis_prompt,
+                temperature=0.1,  # Very low for consistent diagnosis
+                max_tokens=150,   # Diagnosis should be brief
+            )
+            
+            if response.success and response.content:
+                return response.content.strip()
+            else:
+                logger.warning(f"Gemini diagnosis failed: {response.error}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"JSON diagnosis exception: {e}")
+            return None
+    
+    async def _repair_json(
+        self,
+        content: str,
+        diagnosis: str,
+        original_prompt: str,
+        original_system_prompt: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Repair malformed JSON using the current provider.
+        
+        This default implementation uses self.generate() to repair.
+        Providers can override this for custom repair logic.
+        
+        Args:
+            content: The malformed JSON string
+            diagnosis: The diagnosis from Gemini
+            original_prompt: The original user prompt
+            original_system_prompt: The original system prompt
+            
+        Returns:
+            Repaired JSON string or None if repair failed
+        """
+        try:
+            from app.ai.prompts.json_repair_prompts import build_repair_prompt
+            
+            repair_prompt = build_repair_prompt(
+                json_content=content,
+                diagnosis=diagnosis,
+                original_prompt=original_prompt,
+                original_system_prompt=original_system_prompt,
+            )
+            
+            response = await self.generate(
+                prompt=repair_prompt,
+                temperature=0.1,  # Very low for accurate repair
+                max_tokens=2048,  # May need to regenerate full JSON
+            )
+            
+            if response.success and response.content:
+                return response.content.strip()
+            else:
+                logger.warning(f"JSON repair generation failed: {response.error}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"JSON repair exception: {e}")
+            return None

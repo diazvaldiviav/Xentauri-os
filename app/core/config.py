@@ -91,7 +91,10 @@ class Settings(BaseSettings):
     # Default models for each provider (can be overridden per-request)
     GEMINI_MODEL: str = "gemini-2.5-flash"  # Fast, cheap orchestrator
     OPENAI_MODEL: str = "gpt-5.2"  # Capable model for complex tasks
-    ANTHROPIC_MODEL: str = "claude-opus-4-5-20251101"  # Most powerful Claude model
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-5-20250929"  # Most powerful Claude model
+
+    #Fallback model if the specified one is unavailable
+    GPT_FALLBACK_MODEL: str = "gpt-5-mini-2025-08-07"
     
     # AI Request timeout in seconds
     AI_REQUEST_TIMEOUT: int = 30
@@ -120,6 +123,57 @@ class Settings(BaseSettings):
     # - For local dev: http://localhost:8000/auth/google/callback
     # - For production: https://your-domain.com/auth/google/callback
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/auth/google/callback"
+
+    # ---------------------------------------------------------------------------
+    # CUSTOM LAYOUT FEATURE (Sprint 5.2)
+    # ---------------------------------------------------------------------------
+    # Enable GPT-5.2 powered custom HTML layouts for Scene Graphs
+    # When enabled, after Claude generates a SceneGraph, GPT-5.2 creates enhanced HTML
+    
+    # CUSTOM_LAYOUT_ENABLED: Master switch for the feature
+    # - False: Use SceneGraph rendering only (current behavior)
+    # - True: Generate custom HTML layouts via GPT-5.2
+    CUSTOM_LAYOUT_ENABLED: bool = True
+    
+    # CUSTOM_LAYOUT_TIMEOUT_SECONDS: Max time for HTML generation
+    # - GPT-5.2 call + Playwright validation combined
+    CUSTOM_LAYOUT_TIMEOUT_SECONDS: int = 10
+    
+    # CUSTOM_LAYOUT_VALIDATION_ENABLED: Whether to validate HTML with Playwright
+    # - True: Validate HTML renders without JS errors and is not blank
+    # - False: Skip validation (use generated HTML directly)
+    CUSTOM_LAYOUT_VALIDATION_ENABLED: bool = True
+
+    # ---------------------------------------------------------------------------
+    # JSON REPAIR SETTINGS (Sprint 5.3)
+    # ---------------------------------------------------------------------------
+    # Enable intelligent JSON repair when LLMs return malformed JSON
+    # Uses Gemini for fast diagnosis, then original provider for repair
+    
+    # JSON_REPAIR_ENABLED: Master switch for JSON repair feature
+    # - False: Return error on invalid JSON (current behavior)
+    # - True: Attempt to diagnose and repair malformed JSON
+    JSON_REPAIR_ENABLED: bool = True
+    
+    # JSON_REPAIR_MAX_RETRIES: Maximum repair attempts before giving up
+    # - 1 is usually sufficient (diagnosis + single repair)
+    # - Higher values increase latency but may fix complex issues
+    JSON_REPAIR_MAX_RETRIES: int = 1
+
+    # ---------------------------------------------------------------------------
+    # HTML REPAIR SETTINGS (Sprint 5.2.1)
+    # ---------------------------------------------------------------------------
+    # Enable intelligent HTML repair when GPT-5.2 generates invalid HTML
+    # Uses Gemini for fast diagnosis, then GPT-5.2 for repair
+    
+    # HTML_REPAIR_ENABLED: Master switch for HTML repair feature
+    # - False: Return error on invalid HTML (fallback to SceneGraph immediately)
+    # - True: Attempt to diagnose and repair malformed HTML before fallback
+    HTML_REPAIR_ENABLED: bool = True
+    
+    # HTML_REPAIR_MAX_RETRIES: Maximum repair attempts before giving up
+    # - 1 is usually sufficient (diagnosis + single repair)
+    HTML_REPAIR_MAX_RETRIES: int = 1
 
 
 # ---------------------------------------------------------------------------

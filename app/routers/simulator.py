@@ -264,7 +264,24 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
             font-family: monospace;
             color: #4a90d9;
         }}
-        
+
+        /* Sandboxed iframe for custom layouts (Sprint 5.2) */
+        .custom-layout-iframe {{
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: transparent;
+            display: block;
+        }}
+
+        #content-frame .custom-layout-iframe {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }}
+
         /* Log panel */
         .log-panel {{
             position: fixed;
@@ -552,11 +569,17 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
                 
                 case 'display_scene':
                     const scene = data.parameters?.scene;
-                    if (scene) {{
+                    const customLayout = data.parameters?.custom_layout;
+                    
+                    // Sprint 5.2: Use custom HTML layout if available, otherwise render SceneGraph
+                    if (customLayout) {{
+                        log(`Rendering custom HTML layout (GPT-5.2)`, 'command');
+                        renderCustomLayout(customLayout);
+                    }} else if (scene) {{
                         log(`Rendering scene: ${{scene.scene_id}} with ${{scene.components?.length || 0}} components`, 'command');
                         renderScene(scene);
                     }} else {{
-                        log('display_scene: No scene data received', 'error');
+                        log('display_scene: No scene or custom layout received', 'error');
                     }}
                     sendAck(data.command_id, 'completed');
                     break;
@@ -749,6 +772,70 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
             window.currentScene = scene;
             
             log(`Scene rendered: ${{scene.layout?.intent || 'default'}} layout with ${{scene.components?.length || 0}} components`, 'success');
+        }}
+        
+        // =========================================================================
+        // CUSTOM LAYOUT RENDERER (Sprint 5.2 - GPT-5.2 HTML layouts)
+        // =========================================================================
+
+        function renderCustomLayout(html) {{
+            // Clear current content
+            contentFrame.innerHTML = '';
+
+            // ================================================================
+            // SECURITY: Render HTML in sandboxed iframe
+            // ================================================================
+            // Using iframe with srcdoc + sandbox attribute for XSS protection:
+            // - sandbox="allow-same-origin": Enables CSS to work properly
+            // - Scripts are BLOCKED (no allow-scripts)
+            // - Forms are BLOCKED (no allow-forms)
+            // - Popups are BLOCKED (no allow-popups)
+            // - Navigation is BLOCKED (no allow-top-navigation)
+            // ================================================================
+
+            const iframe = document.createElement('iframe');
+            iframe.id = 'custom-layout-frame';
+            iframe.className = 'custom-layout-iframe';
+
+            // Full viewport sizing
+            iframe.style.cssText = `
+                width: 100%;
+                height: 100%;
+                border: none;
+                background: transparent;
+                display: block;
+            `;
+
+            // SECURITY: Sandbox blocks script execution and other dangerous capabilities
+            iframe.sandbox = 'allow-same-origin';
+
+            // srcdoc injects HTML directly without network request
+            iframe.srcdoc = html;
+
+            // Handle successful load
+            iframe.onload = function() {{
+                log('Custom layout iframe loaded successfully', 'success');
+            }};
+
+            // Handle errors - fallback to SceneGraph if available
+            iframe.onerror = function(e) {{
+                log('Custom layout iframe error: ' + (e.message || 'unknown'), 'error');
+                if (window.currentScene) {{
+                    log('Falling back to SceneGraph render', 'info');
+                    renderScene(window.currentScene);
+                }}
+            }};
+
+            contentFrame.appendChild(iframe);
+
+            // Hide idle screen
+            if (idleScreen) idleScreen.style.display = 'none';
+
+            // Store references
+            window.currentCustomLayout = html;
+            window.currentScene = null;  // Clear scene reference when using custom layout
+
+            log('Custom layout rendered in sandbox (GPT-5.2)', 'success');
         }}
         
         function applyLayout(container, layout) {{

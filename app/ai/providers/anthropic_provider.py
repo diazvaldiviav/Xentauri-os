@@ -214,22 +214,16 @@ class AnthropicProvider(AIProvider):
                         content += block.text
             content = content.strip()
             
-            # Clean up markdown if present
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
+            # Sprint 5.3: Validate JSON with intelligent repair
+            is_valid, content, error = await self._validate_json_with_repair(
+                content=content,
+                original_prompt=prompt,
+                original_system_prompt=system_prompt,
+            )
             
-            # Validate JSON
-            try:
-                json.loads(content)
-            except json.JSONDecodeError as e:
-                logger.warning(f"Anthropic returned invalid JSON: {e}")
+            if not is_valid:
                 return self._create_error_response(
-                    error=f"Invalid JSON response: {e}",
+                    error=error,
                     model=self.model,
                     latency_ms=latency_ms
                 )

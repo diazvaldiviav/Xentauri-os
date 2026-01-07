@@ -202,18 +202,33 @@ class CommandService:
         """Clear the currently displayed content."""
         return await self.send_command(device_id, CommandType.CLEAR_CONTENT)
     
-    async def display_scene(self, device_id: UUID, scene: dict) -> CommandResult:
+    async def display_scene(
+        self,
+        device_id: UUID,
+        scene: dict,
+        custom_layout: Optional[str] = None,
+    ) -> CommandResult:
         """
         Display a scene graph layout on the device screen.
         
+        Sprint 5.2: Optionally includes custom HTML layout from GPT-5.2.
+        The frontend uses custom_layout if available, falls back to scene.
+        
         Args:
             device_id: Target device
-            scene: Scene graph JSON containing layout and components
+            scene: Scene graph JSON containing layout and components (ALWAYS required - fallback)
+            custom_layout: Optional HTML string from GPT-5.2 (used if valid, else scene is used)
         """
+        parameters = {"scene": scene}
+        
+        # Include custom_layout only if provided (keeps message size smaller when not used)
+        if custom_layout is not None:
+            parameters["custom_layout"] = custom_layout
+        
         return await self.send_command(
             device_id,
             CommandType.DISPLAY_SCENE,
-            {"scene": scene}
+            parameters,
         )
 
 
