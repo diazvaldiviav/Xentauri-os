@@ -73,6 +73,21 @@ SCENE_GRAPH_SCHEMA = """
         "text_color": "#ffffff (REQUIRED)",
         "accent_color": "#7b2cbf (REQUIRED)"
     },
+    "animation_hints": [
+        {
+            "target": "element selector or description (e.g., 'planets', 'electrons', 'data-flow')",
+            "type": "orbit | rotate | flow | pulse | scale | bounce",
+            "duration_range": "fast: 2-5s | medium: 5-15s | slow: 15-60s",
+            "description": "What motion represents and why it helps understanding"
+        }
+    ],
+    "scroll_hints": [
+        {
+            "target": "component id or content area description",
+            "type": "vertical | horizontal | snap-carousel | paginated",
+            "reason": "Why scrolling is needed (e.g., 'list exceeds viewport', 'multiple sections')"
+        }
+    ],
     "metadata": {
         "created_at": "ISO datetime",
         "refresh_seconds": 60 | 300,
@@ -148,6 +163,89 @@ POSITIONING GUIDELINES:
 - Dashboard: grid with columns=2, rows=2, gap="16px"
 - Fullscreen: flex engine with flex=1
 - Corner overlays: absolute positioning with top/right/bottom/left
+
+ANIMATION HINTS (add ONLY when motion is essential to understand the concept):
+=============================================================================
+Include "animation_hints" array when the topic involves inherent movement or process flow.
+Do NOT add animations for static content (facts, definitions, lists, schedules).
+
+RULES for when to include animation_hints:
+
+1. ORBITAL/CIRCULAR MOTION → type: "orbit"
+   - Bodies moving around a center point (planets, moons, electrons, satellites)
+   - Include: target elements, relative speeds (inner=faster, outer=slower)
+   - Duration: proportional to distance (inner 5-10s, outer 30-60s)
+
+2. ROTATION/SPIN → type: "rotate"
+   - Objects spinning on their axis (Earth rotation, wheels, turbines, molecules)
+   - Include: rotation direction, speed
+   - Duration: 2-10s depending on what's being shown
+
+3. FLOW/SEQUENCE → type: "flow"
+   - Movement from point A to B (blood circulation, data pipelines, water cycle, electricity)
+   - Include: path description, direction
+   - Duration: 3-8s for one complete cycle
+
+4. PULSING/BREATHING → type: "pulse"
+   - Rhythmic expansion/contraction (heartbeat, sound waves, emphasis)
+   - Include: scale range (e.g., 1.0 to 1.1)
+   - Duration: 1-3s
+
+5. GROWTH/SCALING → type: "scale"
+   - Size changes over time (population growth, cell division, statistics)
+   - Include: start and end scale
+   - Duration: 5-15s
+
+6. BOUNCE/OSCILLATION → type: "bounce"
+   - Back-and-forth motion (pendulum, springs, vibration)
+   - Include: amplitude, axis
+   - Duration: 1-4s
+
+ANIMATION HINT EXAMPLE (solar system):
+"animation_hints": [
+    {"target": "mercury", "type": "orbit", "duration_range": "fast", "description": "Closest planet, fastest orbit ~10s"},
+    {"target": "earth", "type": "orbit", "duration_range": "medium", "description": "Reference orbit ~20s"},
+    {"target": "jupiter", "type": "orbit", "duration_range": "slow", "description": "Outer planet, slow orbit ~45s"},
+    {"target": "saturn-rings", "type": "rotate", "duration_range": "slow", "description": "Ring rotation ~30s"}
+]
+
+IMPORTANT: animation_hints is OPTIONAL. Only include when animations add educational value.
+Static topics (history facts, vocabulary, math formulas) should have empty array or omit the field.
+
+SCROLL HINTS (add when content may exceed viewport):
+====================================================
+Include "scroll_hints" array when content is likely too large for 1920x1080 display.
+Do NOT add scroll for content that fits comfortably on screen.
+
+RULES for when to include scroll_hints:
+
+1. LONG LISTS → type: "vertical"
+   - More than 8-10 items in a list (events, bullet points, steps)
+   - Timeline with many entries
+   - Tables with many rows
+
+2. WIDE CONTENT → type: "horizontal"
+   - Timelines, processes, or sequences that flow left-to-right
+   - Comparison tables with many columns
+   - Galleries or image rows
+
+3. MULTIPLE SECTIONS/CARDS → type: "snap-carousel"
+   - Content naturally divided into discrete "pages" or "cards"
+   - Step-by-step tutorials where each step is a screen
+   - Slideshows, galleries, or multiple topics to explore
+
+4. VERY LONG TEXT → type: "paginated"
+   - Long articles, stories, or detailed explanations
+   - Documents that need page-by-page reading
+   - Content where user needs to read sequentially
+
+SCROLL HINT EXAMPLES:
+- Event list with 15 items: {"target": "events_list", "type": "vertical", "reason": "15 events exceed viewport"}
+- Tutorial with 5 steps: {"target": "tutorial_steps", "type": "snap-carousel", "reason": "5 discrete step cards"}
+- Wide timeline: {"target": "history_timeline", "type": "horizontal", "reason": "timeline spans 100 years"}
+
+IMPORTANT: scroll_hints is OPTIONAL. Only include when content genuinely needs scrolling.
+Short content (3-5 items, single paragraph) should NOT have scroll hints.
 
 DOCUMENT COMPONENT GUIDANCE:
 When user asks for a document related to a meeting/event, use these props:

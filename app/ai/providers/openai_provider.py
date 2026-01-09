@@ -85,42 +85,52 @@ class OpenAIProvider(AIProvider):
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        reasoning: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> AIResponse:
         """
         Generate a response using OpenAI GPT.
-        
+
         Args:
             prompt: The user's message
             system_prompt: Optional system instructions
             temperature: Creativity (0-1)
             max_tokens: Maximum response length
-            
+            reasoning: Optional reasoning config (e.g., {"effort": "high"})
+
         Returns:
             AIResponse with the generated content
         """
         start_time = time.time()
-        
+
         if not self._client:
             return self._create_error_response(
                 error="OpenAI API key not configured",
                 model=self.model,
                 latency_ms=self._measure_latency(start_time)
             )
-        
+
         try:
             # Combine system prompt and user prompt into single input
             input_text = prompt
             if system_prompt:
                 input_text = f"{system_prompt}\n\n{prompt}"
-            
+
+            # Build API request params
+            request_params = {
+                "model": self.model,
+                "input": input_text,
+                "max_output_tokens": max_tokens,
+            }
+
+            # Add reasoning if provided (disables temperature)
+            if reasoning:
+                request_params["reasoning"] = reasoning
+            else:
+                request_params["temperature"] = temperature
+
             # Make the API request with new responses API
-            response = await self._client.responses.create(
-                model=self.model,
-                input=input_text,
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-            )
+            response = await self._client.responses.create(**request_params)
             
             latency_ms = self._measure_latency(start_time)
             
@@ -239,6 +249,79 @@ class OpenAIProvider(AIProvider):
             return self._create_error_response(
                 error=str(e),
                 model=self.model,
+                latency_ms=latency_ms
+            )
+
+    async def generate_with_reasoning(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        effort: str = "high",
+        max_tokens: int = 16384,
+        **kwargs
+    ) -> AIResponse:
+        """
+        Generate using Codex-Max with reasoning for complex code generation.
+
+        Sprint 5.2.2: Optimized for HTML/CSS layout generation.
+
+        Args:
+            prompt: The user's message
+            system_prompt: Optional system instructions
+            effort: Reasoning effort ("low", "medium", "high")
+            max_tokens: Maximum response length
+
+        Returns:
+            AIResponse with the generated content
+        """
+        start_time = time.time()
+        model = settings.OPENAI_CODE_MODEL
+
+        if not self._client:
+            return self._create_error_response(
+                error="OpenAI API key not configured",
+                model=model,
+                latency_ms=self._measure_latency(start_time)
+            )
+
+        try:
+            input_text = prompt
+            if system_prompt:
+                input_text = f"{system_prompt}\n\n{prompt}"
+
+            response = await self._client.responses.create(
+                model=model,
+                input=input_text,
+                reasoning={"effort": effort},
+                max_output_tokens=max_tokens,
+            )
+
+            latency_ms = self._measure_latency(start_time)
+            content = response.output_text or ""
+
+            usage = TokenUsage(
+                prompt_tokens=response.usage.input_tokens if response.usage else 0,
+                completion_tokens=response.usage.output_tokens if response.usage else 0,
+            )
+
+            logger.info(f"Codex-Max completed in {latency_ms:.0f}ms, tokens: {usage.total_tokens}")
+
+            return AIResponse(
+                content=content,
+                provider=self.provider_type,
+                model=model,
+                usage=usage,
+                latency_ms=latency_ms,
+                success=True,
+                raw_response=response,
+            )
+
+        except Exception as e:
+            latency_ms = self._measure_latency(start_time)
+            logger.error(f"Codex-Max generation failed: {e}")
+            return self._create_error_response(
+                error=str(e),
+                model=model,
                 latency_ms=latency_ms
             )
 

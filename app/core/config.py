@@ -92,9 +92,13 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-2.5-flash"  # Fast, cheap orchestrator
     OPENAI_MODEL: str = "gpt-5.2"  # Capable model for complex tasks
     ANTHROPIC_MODEL: str = "claude-sonnet-4-5-20250929"  # Most powerful Claude model
-
+    ANTHROPIC_REASONING_MODEL: str = "claude-opus-4-5-20251101"  # For complex reasoning tasks
+    GEMINI_REASONING_MODEL: str = "gemini-3-flash-preview"  # For complex reasoning tasks
+    OPENAI_CODE_MODEL: str = "gpt-5.1-codex-max"  # Specialized for code generation
     #Fallback model if the specified one is unavailable
     GPT_FALLBACK_MODEL: str = "gpt-5-mini-2025-08-07"
+    
+
     
     # AI Request timeout in seconds
     AI_REQUEST_TIMEOUT: int = 30

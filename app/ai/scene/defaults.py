@@ -443,8 +443,8 @@ def detect_default_scene_type(
 
     if has_generation_request:
         source = "hints" if has_generation_in_hints else "user_request"
-        logger.info(f"Detected content generation keywords in {source}. Skipping defaults, will use Claude.")
-        return None  # Force Claude generation
+        logger.info(f"Detected content generation keywords in {source}. Skipping defaults, will use Gemini 3 Flash.")
+        return None  # Force AI generation (Gemini 3 Flash primary)
     
     # Check for dashboard keywords
     if "dashboard" in hints_text:

@@ -567,10 +567,21 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
                     sendAck(data.command_id, 'completed');
                     break;
                 
+                case 'loading_start':
+                    // Sprint 5.2.3: Show loading screen while content is being generated
+                    const message = data.parameters?.message || 'Generating content...';
+                    log(`Loading started: ${{message}}`, 'command');
+                    showLoadingScreen(message);
+                    sendAck(data.command_id, 'completed');
+                    break;
+
                 case 'display_scene':
                     const scene = data.parameters?.scene;
                     const customLayout = data.parameters?.custom_layout;
-                    
+
+                    // Hide loading if showing
+                    hideLoadingScreen();
+
                     // Sprint 5.2: Use custom HTML layout if available, otherwise render SceneGraph
                     if (customLayout) {{
                         log(`Rendering custom HTML layout (GPT-5.2)`, 'command');
@@ -734,9 +745,107 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
         console.log('[Xentauri Simulator] connect() called');
         
         // =========================================================================
+        // LOADING SCREEN (Sprint 5.2.3)
+        // =========================================================================
+
+        function showLoadingScreen(message) {{
+            // Clear current content
+            contentFrame.innerHTML = '';
+
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'loading-screen';
+            loadingDiv.style.cssText = `
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(135deg, #0f0f23 0%, #1a1a3e 50%, #0f0f23 100%);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                font-family: 'Inter', sans-serif;
+            `;
+
+            loadingDiv.innerHTML = `
+                <style>
+                    @keyframes spin {{
+                        0% {{ transform: rotate(0deg); }}
+                        100% {{ transform: rotate(360deg); }}
+                    }}
+                    @keyframes pulse {{
+                        0%, 100% {{ opacity: 0.4; transform: scale(1); }}
+                        50% {{ opacity: 1; transform: scale(1.05); }}
+                    }}
+                    @keyframes dots {{
+                        0%, 20% {{ content: '.'; }}
+                        40% {{ content: '..'; }}
+                        60%, 100% {{ content: '...'; }}
+                    }}
+                    .loading-spinner {{
+                        width: 80px;
+                        height: 80px;
+                        border: 4px solid rgba(123, 44, 191, 0.2);
+                        border-top: 4px solid #7b2cbf;
+                        border-radius: 50%;
+                        animation: spin 1s linear infinite;
+                        margin-bottom: 40px;
+                    }}
+                    .loading-message {{
+                        font-size: 28px;
+                        color: #ffffff;
+                        margin-bottom: 16px;
+                        animation: pulse 2s ease-in-out infinite;
+                    }}
+                    .loading-hint {{
+                        font-size: 16px;
+                        color: rgba(255, 255, 255, 0.5);
+                        max-width: 400px;
+                        text-align: center;
+                    }}
+                    .loading-progress {{
+                        margin-top: 40px;
+                        display: flex;
+                        gap: 8px;
+                    }}
+                    .loading-dot {{
+                        width: 12px;
+                        height: 12px;
+                        background: #7b2cbf;
+                        border-radius: 50%;
+                        animation: pulse 1.5s ease-in-out infinite;
+                    }}
+                    .loading-dot:nth-child(2) {{ animation-delay: 0.3s; }}
+                    .loading-dot:nth-child(3) {{ animation-delay: 0.6s; }}
+                </style>
+                <div class="loading-spinner"></div>
+                <div class="loading-message">${{message}}</div>
+                <div class="loading-hint">Creating an engaging visual experience...</div>
+                <div class="loading-progress">
+                    <div class="loading-dot"></div>
+                    <div class="loading-dot"></div>
+                    <div class="loading-dot"></div>
+                </div>
+            `;
+
+            contentFrame.appendChild(loadingDiv);
+
+            // Hide idle screen
+            if (idleScreen) idleScreen.style.display = 'none';
+
+            log('Loading screen displayed', 'info');
+        }}
+
+        function hideLoadingScreen() {{
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen) {{
+                loadingScreen.remove();
+                log('Loading screen hidden', 'info');
+            }}
+        }}
+
+        // =========================================================================
         // SCENE GRAPH RENDERER (Sprint 4.0)
         // =========================================================================
-        
+
         function renderScene(scene) {{
             // Clear current content
             contentFrame.innerHTML = '';

@@ -5675,7 +5675,8 @@ IMPORTANT INSTRUCTIONS:
         from app.ai.scene.defaults import detect_default_scene_type
         from app.services.conversation_context_service import conversation_context_service
         from app.services.commands import command_service  # Import at function level for all code paths
-        
+        from app.services.websocket_manager import connection_manager  # Sprint 5.2.3: Loading signals
+
         # DEBUG: Log entry into _handle_display_content
         logger.info(f"[{request_id}] ENTERING _handle_display_content for user {str(user_id)[:8]}...")
         
@@ -5887,7 +5888,15 @@ IMPORTANT INSTRUCTIONS:
                     processing_time_ms=processing_time,
                     request_id=request_id,
                 )
-            
+
+            # Sprint 5.2.3: Send initial loading signal - Phase 1
+            await connection_manager.send_command(
+                device_id=target_device.id,
+                command_type="loading_start",
+                parameters={"message": "Preparando visualización...", "phase": 1},
+            )
+            logger.info(f"[{request_id}] Loading Phase 1: Preparing")
+
             # Detect default scene type for optimized generation
             # Sprint 4.4.0: Pass user_request to detect generation keywords
             default_type = detect_default_scene_type(
@@ -5975,6 +5984,14 @@ IMPORTANT INSTRUCTIONS:
                 conversation_context_dict["content_memory"] = content_memory
                 logger.info(f"[{request_id}] Including content memory in scene context: {len(content_memory)} items")
 
+            # Sprint 5.2.3: Loading Phase 2 - Generating scene
+            await connection_manager.send_command(
+                device_id=target_device.id,
+                command_type="loading_start",
+                parameters={"message": "Analizando contenido...", "phase": 2},
+            )
+            logger.info(f"[{request_id}] Loading Phase 2: Analyzing")
+
             # Generate scene via SceneService (now with real-time data AND conversation context)
             logger.info(f"[{request_id}] Generating scene with {len(normalized_hints)} layout hints")
             scene = await scene_service.generate_scene(
@@ -5996,8 +6013,14 @@ IMPORTANT INSTRUCTIONS:
             if settings.CUSTOM_LAYOUT_ENABLED:
                 try:
                     from app.ai.scene.custom_layout import custom_layout_service, layout_validator
-                    
-                    logger.info(f"[{request_id}] Generating custom HTML layout via GPT-5.2...")
+
+                    # Sprint 5.2.3: Loading Phase 3 - Designing layout
+                    await connection_manager.send_command(
+                        device_id=target_device.id,
+                        command_type="loading_start",
+                        parameters={"message": "Diseñando experiencia...", "phase": 3},
+                    )
+                    logger.info(f"[{request_id}] Loading Phase 3: Designing")
                     layout_result = await custom_layout_service.generate_html(
                         scene=scene_dict,
                         user_request=intent.original_text or "",

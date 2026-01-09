@@ -3,7 +3,7 @@ Scene Service - Core service for generating and populating Scene Graphs.
 
 Sprint 4.0: This service orchestrates scene generation by:
 1. Normalizing layout hints from user requests
-2. Generating layouts via Claude (for custom requests)
+2. Generating layouts via Gemini 3 Flash (primary) or Claude (fallback)
 3. Fetching data for each component (calendar events, etc.)
 4. Validating the final Scene Graph
 
@@ -45,6 +45,7 @@ from app.ai.scene.schemas import (
     GlobalStyle,
 )
 from app.ai.scene.registry import component_registry
+from app.ai.providers.gemini import gemini_provider
 
 
 logger = logging.getLogger("jarvis.ai.scene.service")
@@ -133,9 +134,16 @@ class SceneService:
             }
         )
         
+        from app.core.config import settings
+        
+        scene = None
+        generated_by = "unknown"
+        last_validation_error = None
+        last_invalid_json = None
+        
+        # Sprint 5.1.2: Try Gemini 3 Flash first (faster, native JSON schema)
         try:
-            # Attempt Claude generation for custom layouts (Sprint 4.1: with realtime_data)
-            scene = await self._generate_layout_via_claude(
+            scene = await self._generate_layout_via_gemini(
                 hints=layout_hints,
                 info_type=info_type,
                 user_request=user_request,
@@ -143,26 +151,49 @@ class SceneService:
                 realtime_data=realtime_data or {},
                 conversation_context=conversation_context or {},
             )
+            generated_by = "gemini_3_flash"
             
             # Validate generated scene
-            is_valid, error = self._validate_scene(scene)
-            if not is_valid:
-                logger.warning(f"Claude scene validation failed: {error}, falling back to default")
-                scene = await self._get_fallback_scene(
-                    info_type=info_type,
-                    layout_hints=layout_hints,
-                    target_devices=target_devices,
-                    user_request=user_request,
-                )
-            
+            if scene:
+                is_valid, error = self._validate_scene(scene)
+                if not is_valid:
+                    logger.warning(f"Gemini scene validation failed: {error}, attempting repair")
+                    last_validation_error = error
+                    scene = None
+                    
         except Exception as e:
-            logger.error(f"Claude scene generation failed: {e}, falling back to default")
+            logger.warning(f"Gemini scene generation failed: {e}, attempting repair")
+            last_validation_error = str(e)
+            scene = None
+        
+        # Sprint 5.1.2: Intelligent repair with Gemini (NO Claude)
+        if scene is None:
+            if getattr(settings, 'JSON_REPAIR_ENABLED', True):
+                try:
+                    scene = await self._repair_scene_with_gemini(
+                        validation_error=last_validation_error,
+                        invalid_json=last_invalid_json,
+                        hints=layout_hints,
+                        info_type=info_type,
+                        user_request=user_request,
+                        target_devices=target_devices,
+                        realtime_data=realtime_data or {},
+                        conversation_context=conversation_context or {},
+                    )
+                    if scene:
+                        generated_by = "gemini_3_flash_repaired"
+                except Exception as e:
+                    logger.warning(f"Scene repair failed: {e}")
+        
+        # Final fallback to default template
+        if scene is None:
             scene = await self._get_fallback_scene(
                 info_type=info_type,
                 layout_hints=layout_hints,
                 target_devices=target_devices,
                 user_request=user_request,
             )
+            generated_by = "default_template"
         
         # Apply default styles to any components with null/missing styles
         scene = self._apply_default_styles(scene)
@@ -279,7 +310,236 @@ class SceneService:
         )
     
     # -------------------------------------------------------------------------
-    # CLAUDE GENERATION
+    # GEMINI 3 FLASH GENERATION (Primary)
+    # -------------------------------------------------------------------------
+    
+    async def _generate_layout_via_gemini(
+        self,
+        hints: List[LayoutHint],
+        info_type: str,
+        user_request: str,
+        target_devices: List[str],
+        realtime_data: Dict[str, Any] = None,
+        conversation_context: Dict[str, Any] = None,
+    ) -> SceneGraph:
+        """
+        Use Gemini 3 Flash to generate a layout with native JSON schema support.
+        
+        Sprint 5.1.2: This is the new high-performance path using Gemini's 
+        structured output with schema validation. Faster than Claude with
+        native JSON mode.
+        
+        Args:
+            hints: Normalized layout hints
+            info_type: Content type
+            user_request: Original user request
+            target_devices: Target device IDs
+            realtime_data: Pre-fetched real-time data from Gemini
+            conversation_context: Previous conversation history and generated content
+            
+        Returns:
+            SceneGraph from Gemini's response
+            
+        Raises:
+            Exception: If Gemini fails or returns invalid JSON
+        """
+        from app.ai.prompts.scene_prompts import (
+            build_scene_system_prompt,
+            build_scene_generation_prompt,
+        )
+        from app.core.config import settings
+        
+        # Build prompts (reuse existing prompt logic)
+        system_prompt = build_scene_system_prompt(
+            components_context=component_registry.to_prompt_context()
+        )
+        
+        # Pass realtime_data and conversation_context to prompt builder
+        generation_prompt = build_scene_generation_prompt(
+            user_request=user_request,
+            layout_hints=hints,
+            info_type=info_type,
+            device_count=len(target_devices),
+            realtime_data=realtime_data or {},
+            conversation_context=conversation_context or {},
+        )
+        
+        logger.debug("Calling Gemini 3 Flash for scene generation")
+        
+        # NOTE: We use response_mime_type="application/json" WITHOUT response_schema
+        # because SceneGraph contains Dict[str, Any] fields (props, data) which
+        # Gemini's structured output rejects as "should be non-empty for OBJECT type".
+        # We validate the JSON ourselves after generation.
+        response = await gemini_provider.generate(
+            prompt=generation_prompt,
+            system_prompt=system_prompt,
+            temperature=0.3,
+            max_tokens=4096,
+            response_mime_type="application/json",
+            model_override=settings.GEMINI_REASONING_MODEL,  # Use Gemini 3 Flash
+        )
+        
+        if not response.success:
+            raise Exception(f"Gemini generation failed: {response.error}")
+        
+        # Parse response into SceneGraph
+        try:
+            scene_data = json.loads(response.content)
+            
+            # Check if Gemini returned an error object
+            if "error" in scene_data and "message" in scene_data:
+                error_type = scene_data.get("error", "unknown_error")
+                error_message = scene_data.get("message", "Unknown error")
+                logger.warning(f"Gemini returned error: {error_type} - {error_message}")
+                raise Exception(error_message)
+            
+            scene = self._parse_scene_response(
+                scene_data,
+                target_devices,
+                user_request,
+                generated_by_model="gemini_3_flash"
+            )
+            
+            logger.info(f"Gemini scene generation successful, latency: {response.latency_ms}ms")
+            return scene
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Gemini JSON parsing failed: {e}")
+            logger.debug(f"Raw Gemini response: {response.content[:500]}...")
+            raise Exception(f"Gemini returned invalid JSON: {e}")
+        except Exception as e:
+            raise Exception(f"Failed to parse Gemini response: {e}")
+    
+    # -------------------------------------------------------------------------
+    # GEMINI REPAIR (Sprint 5.1.2)
+    # -------------------------------------------------------------------------
+    
+    async def _repair_scene_with_gemini(
+        self,
+        validation_error: Optional[str],
+        invalid_json: Optional[str],
+        hints: List[LayoutHint],
+        info_type: str,
+        user_request: str,
+        target_devices: List[str],
+        realtime_data: Dict[str, Any],
+        conversation_context: Dict[str, Any],
+    ) -> Optional[SceneGraph]:
+        """
+        Repair failed Scene Graph using Gemini 2.5 (diagnosis) + Gemini 3 (repair).
+        
+        Sprint 5.1.2: This is the intelligent repair path that replaces Claude fallback.
+        Uses Gemini 2.5 Flash for fast diagnosis, then Gemini 3 Flash for repair.
+        
+        Args:
+            validation_error: The error from validation or exception
+            invalid_json: The invalid JSON that was produced (if any)
+            hints: Normalized layout hints
+            info_type: Content type
+            user_request: Original user request
+            target_devices: Target device IDs
+            realtime_data: Pre-fetched real-time data
+            conversation_context: Conversation history and generated content
+            
+        Returns:
+            Repaired SceneGraph or None if repair fails
+        """
+        from app.ai.prompts.scene_prompts import (
+            build_scene_system_prompt,
+            build_scene_generation_prompt,
+        )
+        from app.core.config import settings
+        
+        max_retries = getattr(settings, 'JSON_REPAIR_MAX_RETRIES', 1)
+        
+        for attempt in range(max_retries):
+            logger.info(f"Scene repair attempt {attempt + 1}/{max_retries}")
+            
+            # Step 1: Diagnosis with Gemini 2.5 Flash (fast, cheap)
+            diagnosis_prompt = f"""Analyze this Scene Graph error in 1-2 sentences.
+
+ERROR: {validation_error or "Unknown error"}
+
+INVALID JSON:
+{(invalid_json or "No JSON produced")[:1500]}
+
+What's wrong? (1-2 sentences):"""
+            
+            diagnosis_response = await gemini_provider.generate(
+                prompt=diagnosis_prompt,
+                temperature=0.1,
+                max_tokens=150,
+            )
+            
+            if not diagnosis_response.success:
+                logger.warning(f"Diagnosis failed: {diagnosis_response.error}")
+                continue
+            
+            diagnosis = diagnosis_response.content.strip()
+            logger.info(f"Scene diagnosis: {diagnosis}")
+            
+            # Step 2: Repair with Gemini 3 Flash - same prompt + diagnosis context
+            system_prompt = build_scene_system_prompt(
+                components_context=component_registry.to_prompt_context()
+            )
+            
+            generation_prompt = build_scene_generation_prompt(
+                user_request=user_request,
+                layout_hints=hints,
+                info_type=info_type,
+                device_count=len(target_devices),
+                realtime_data=realtime_data,
+                conversation_context=conversation_context,
+            )
+            
+            # Add repair context to prompt
+            repair_prompt = f"""{generation_prompt}
+
+## PREVIOUS ATTEMPT FAILED
+Diagnosis: {diagnosis}
+Fix the issue and generate a valid Scene Graph."""
+            
+            # NOTE: Use response_mime_type without schema (see _generate_layout_via_gemini)
+            repair_response = await gemini_provider.generate(
+                prompt=repair_prompt,
+                system_prompt=system_prompt,
+                temperature=0.2,
+                max_tokens=4096,
+                response_mime_type="application/json",
+                model_override=settings.GEMINI_REASONING_MODEL,
+            )
+            
+            if not repair_response.success:
+                logger.warning(f"Repair generation failed: {repair_response.error}")
+                continue
+            
+            # Parse and validate
+            try:
+                scene_data = json.loads(repair_response.content)
+                scene = self._parse_scene_response(
+                    scene_data, target_devices, user_request, "gemini_3_flash_repaired"
+                )
+                
+                is_valid, error = self._validate_scene(scene)
+                if is_valid:
+                    logger.info(f"Scene repair successful on attempt {attempt + 1}")
+                    return scene
+                
+                # Update for next iteration
+                validation_error = error
+                invalid_json = repair_response.content
+                logger.warning(f"Repaired scene still invalid: {error}")
+                
+            except Exception as e:
+                validation_error = str(e)
+                invalid_json = repair_response.content
+                logger.warning(f"Repair parsing failed: {e}")
+        
+        logger.warning(f"Scene repair failed after {max_retries} attempts")
+        return None
+    
+    # -------------------------------------------------------------------------
+    # CLAUDE GENERATION (Legacy - kept for backwards compatibility)
     # -------------------------------------------------------------------------
     
     async def _generate_layout_via_claude(
@@ -293,6 +553,9 @@ class SceneService:
     ) -> SceneGraph:
         """
         Use Claude to generate a creative layout.
+        
+        NOTE: This method is kept for backwards compatibility but is no longer
+        used in the main flow. Gemini 3 Flash + repair is now the primary path.
         
         Builds a prompt with component registry context and calls
         anthropic_provider.generate_json() to get the scene structure.

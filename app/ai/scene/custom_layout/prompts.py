@@ -1,176 +1,198 @@
 """
-Custom Layout Prompts - Prompt templates for GPT-5.2 HTML generation.
+Custom Layout Prompts - Optimized prompt templates for GPT-5.2 HTML generation.
 
-Sprint 5.2: These prompts instruct GPT-5.2 to generate standalone HTML
-layouts based on SceneGraph data from Claude.
+Sprint 5.2.2: Optimized prompts with:
+- ~70% fewer tokens than original
+- CSS-only interactivity (touch-enabled, no JS for security)
+- Educational, visually engaging layouts
+- Chromium-compatible CSS techniques
 
 Design Goals:
 =============
 - Generate standalone HTML (inline CSS, no external dependencies)
-- Optimize for TV screens (1920x1080)
+- Optimize for touchscreen TV (1920x1080)
 - Dark theme matching SceneGraph global_style
-- Support all SceneGraph component types
+- Support CSS-only interactivity patterns
 """
 
 import json
 from typing import Dict, Any
 
 
-def build_custom_layout_prompt(scene: Dict[str, Any], user_request: str) -> str:
+def build_custom_layout_prompt(scene: Dict[str, Any], user_request: str = None) -> str:
     """
-    Build the prompt for GPT-5.2 to generate custom HTML layout.
-    
+    Build optimized prompt for GPT-5.2 to generate custom HTML layout.
+
+    Sprint 5.2.2: Reduced token count by ~70% while adding CSS interactivity.
+    Sprint 5.2.3: Added animation_hints support for CSS @keyframes animations.
+
     Args:
-        scene: SceneGraph dictionary from Claude
-        user_request: Original user request for context
-        
+        scene: SceneGraph dictionary from Gemini
+        user_request: Original user request (falls back to scene metadata)
+
     Returns:
         Complete prompt string for GPT-5.2
     """
-    # Extract global styles for consistency
+    # Get user request from parameter or scene metadata
+    if not user_request:
+        metadata = scene.get("metadata", {})
+        user_request = metadata.get("user_request", "Display content")
+
+    # Extract only essential data (reduce tokens)
     global_style = scene.get("global_style", {})
-    background = global_style.get("background", "#0f0f23")
-    font_family = global_style.get("font_family", "Inter")
-    text_color = global_style.get("text_color", "#ffffff")
-    accent_color = global_style.get("accent_color", "#7b2cbf")
-    
-    # Extract layout info
     layout = scene.get("layout", {})
-    layout_intent = layout.get("intent", "fullscreen")
-    
-    # Extract components for rendering instructions
-    components = scene.get("components", [])
-    component_descriptions = []
-    
-    for comp in components:
-        comp_type = comp.get("type", "unknown")
-        comp_data = comp.get("data", {})
-        comp_props = comp.get("props", {})
-        comp_style = comp.get("style", {})
 
-        desc = f"""
-- **{comp_type}** (id: {comp.get('id', 'unknown')}):
-  - Data: {json.dumps(comp_data, ensure_ascii=False, default=str)}
-  - Props: {json.dumps(comp_props, ensure_ascii=False)}
-  - Style: {json.dumps(comp_style, ensure_ascii=False)}"""
-        component_descriptions.append(desc)
-    
-    components_text = "\n".join(component_descriptions) if component_descriptions else "No components defined"
-    
-    prompt = f"""You are an expert HTML/CSS designer creating a display layout for a large TV screen (1920x1080).
+    # Build minimal component list with only necessary data
+    components_data = []
+    for comp in scene.get("components", []):
+        components_data.append({
+            "type": comp.get("type"),
+            "data": comp.get("data", {}),
+        })
 
-## USER REQUEST
-"{user_request}"
+    # Extract animation hints if present
+    animation_hints = scene.get("animation_hints", [])
 
-## SCENE GRAPH DATA (from Claude)
-The following SceneGraph describes the layout structure and data:
+    # Extract scroll hints if present
+    scroll_hints = scene.get("scroll_hints", [])
 
+    # Minimal scene for prompt
+    minimal_scene = {
+        "layout_intent": layout.get("intent", "fullscreen"),
+        "style": {
+            "background": global_style.get("background", "#0f0f23"),
+            "text_color": global_style.get("text_color", "#ffffff"),
+            "accent": global_style.get("accent_color", "#7b2cbf"),
+        },
+        "components": components_data,
+    }
+
+    # Add animation hints only if present
+    if animation_hints:
+        minimal_scene["animation_hints"] = animation_hints
+
+    # Add scroll hints only if present
+    if scroll_hints:
+        minimal_scene["scroll_hints"] = scroll_hints
+
+    prompt = f"""Create STUDENT-FACING content for a classroom display board.
+
+## CONTEXT
+- A TEACHER requested: "{user_request}"
+- Your HTML will be shown on a CLASSROOM BOARD for STUDENTS to learn from
+- Create VISUAL LEARNING CONTENT like an interactive whiteboard
+
+## SCENE DATA
 ```json
-{json.dumps(scene, ensure_ascii=False, indent=2, default=str)}
+{json.dumps(minimal_scene, ensure_ascii=False, default=str)}
 ```
 
-## LAYOUT INTENT
-{layout_intent}
+## WHAT TO CREATE
+Visual content that helps STUDENTS understand the topic:
+- Clear visual explanations with icons/emojis/diagrams
+- Concepts broken into simple, digestible pieces
+- Examples and visual demonstrations
+- Interactive elements (tabs, expandable sections) for exploration
 
-## COMPONENTS TO RENDER
-{components_text}
+## WHAT NOT TO CREATE
+- Lesson plans, schedules, or teacher notes
+- "Learning objectives" or curriculum goals
+- Task lists or homework assignments
+- Tips for teachers on how to teach
 
-## DESIGN REQUIREMENTS
+## CSS INTERACTIVITY (Chromium, NO JavaScript)
+Use as needed for student engagement:
+- `<details>/<summary>` - Expandable sections
+- Checkbox/Radio hack - Tabs, toggles
+- `:target` - Navigation anchors
+- `:hover/:active` - Touch feedback
+- CSS Scroll Snap - Carousels
+- Transitions/@keyframes - Animations
 
-### CRITICAL: NON-INTERACTIVE DISPLAY
-This is a PASSIVE DISPLAY SCREEN. The user CANNOT interact with it:
-- NO clicks, NO scrolls, NO hover effects, NO touch
-- NO buttons that say "Click here", "Tap to continue", "Learn more"
-- NO links or interactive elements
-- NO pagination or "next/previous" controls
-- ALL content must be visible at once without scrolling
-- If content is too long, use smaller fonts or summarize - NEVER require scrolling
+## CSS ANIMATIONS (when animation_hints present in SCENE DATA)
+If "animation_hints" array exists, implement CSS @keyframes:
+- "orbit" → `transform: rotate()` around center point, `transform-origin` for radius
+- "rotate" → `transform: rotate(360deg)` on element axis
+- "flow" → `transform: translateX/Y()` along path
+- "pulse" → `transform: scale()` expansion/contraction
+- "scale" → gradual size change
+- "bounce" → `translateY()` oscillation
 
-### Technical Requirements
-1. Generate STANDALONE HTML - all CSS must be inline or in <style> tags
-2. NO external dependencies (no CDN links, no external fonts except system fonts)
-3. Target resolution: 1920x1080 (TV screen)
-4. Use semantic HTML5 elements where appropriate
-5. Ensure all text is readable from 3 meters away (large fonts, good contrast)
-6. COMPLETE HTML - always include closing </html> tag
+Duration mapping:
+- "fast" → 2-5s
+- "medium" → 5-15s
+- "slow" → 15-60s
 
-### Style Requirements
-1. Background: {background}
-2. Font Family: {font_family}, -apple-system, BlinkMacSystemFont, sans-serif
-3. Text Color: {text_color}
-4. Accent Color: {accent_color}
-5. Use modern, clean design with rounded corners (border-radius: 16px)
-6. Add subtle shadows for depth (box-shadow with low opacity)
-7. Ensure proper padding (32px on containers)
+Use `animation: name duration linear infinite;` for continuous motion.
 
-### Component Rendering Guidelines
+## CSS SCROLLING (when scroll_hints present in SCENE DATA)
+If "scroll_hints" array exists, implement appropriate scroll behavior:
+- "vertical" → `overflow-y: auto; max-height: 100vh;` with styled scrollbar
+- "horizontal" → `overflow-x: auto; white-space: nowrap;` or flex row
+- "snap-carousel" → `scroll-snap-type: x mandatory;` with `scroll-snap-align: start;` on children
+- "paginated" → Use CSS scroll-snap with full-page snaps, optional page indicators
 
-**calendar_week / calendar_agenda / calendar_month:**
-- Display events as cards with time, title, and optional description
-- Use accent color for event indicators
-- Show date headers clearly
+Touch-friendly scrollbar styling (example):
+- ::-webkit-scrollbar with width: 8px
+- ::-webkit-scrollbar-thumb with background: rgba(255,255,255,0.3), border-radius: 4px
 
-**clock_digital / clock_analog:**
-- Large, centered display
-- Show static time from data (no JavaScript - display is sandboxed for security)
-- Use large, readable font (minimum 72px for TV viewing)
+For snap-carousel, add navigation dots or swipe indicators for discoverability.
 
-**weather_current / weather_forecast:**
-- Show temperature prominently
-- Include weather icon or emoji
-- Display location and conditions
+## TECHNICAL
+- Standalone HTML, inline CSS, no external deps
+- 1920x1080, dark theme, large readable fonts
+- Complete: <!DOCTYPE html> to </html>
 
-**text_block:**
-- Render markdown-like content
-- Support titles and body text
-- Preserve line breaks and formatting
+Output ONLY raw HTML."""
 
-**countdown_timer:**
-- Large countdown display
-- Show event name and remaining time
-
-**meeting_detail:**
-- Show meeting title, time, and attendees
-- Include join link if available
-
-**doc_summary / doc_preview:**
-- Display document content with proper formatting
-- Show title and source
-
-### Layout Guidelines (based on intent: {layout_intent})
-- **fullscreen**: Single component centered, fills viewport
-- **sidebar**: Main content 70%, sidebar 30%
-- **two_column**: Two equal columns
-- **dashboard**: 2x2 or 3x2 grid of widgets
-- **stack**: Vertical stack with gaps
-
-## OUTPUT FORMAT
-Return ONLY the HTML code, starting with <!DOCTYPE html> and ending with </html>.
-Do NOT include any explanation, markdown code blocks, or additional text.
-The HTML must be complete and self-contained.
-"""
-    
     return prompt
 
 
 def get_system_prompt() -> str:
     """
-    Get the system prompt for GPT-5.2 HTML generation.
+    Get optimized system prompt for GPT-5.2 HTML generation.
 
     Returns:
         System prompt string
     """
-    return """You are an expert HTML/CSS designer specializing in TV display layouts.
-Your task is to generate beautiful, functional HTML layouts for smart TV screens.
+    return """You are an expert HTML/CSS designer creating STUDENT-FACING educational displays.
 
-Key principles:
-1. STANDALONE: No external dependencies - everything inline
-2. READABLE: Large fonts, high contrast for viewing from distance
-3. MODERN: Clean design with rounded corners and subtle shadows
-4. RESPONSIVE: Works well on 1920x1080 screens
-5. DARK THEME: Optimized for ambient lighting in living rooms
-6. NON-INTERACTIVE: This is a passive display - NO clicks, NO scrolls, NO buttons, NO "click here" text
-7. COMPLETE: Always generate complete HTML with proper closing tags (</body>, </html>)
+CRITICAL CONTEXT:
+- The INPUT comes from a TEACHER/INSTRUCTOR
+- The OUTPUT (your HTML) is displayed on a CLASSROOM BOARD for STUDENTS to see
+- You are creating VISUAL LEARNING CONTENT, not lesson plans or teacher notes
 
-You output ONLY valid HTML code, no explanations or markdown.
-The HTML MUST be complete - always end with </html>."""
+Create content that STUDENTS will look at to LEARN - like an interactive whiteboard:
+- Visual explanations with diagrams, icons, illustrations
+- Simple, clear concepts broken into digestible pieces
+- Examples and demonstrations
+- Interactive elements students can explore (tabs, expandable sections)
+- Engaging visuals that capture student attention
+
+DO NOT create:
+- Lesson plans or class schedules
+- Teacher tips or teaching strategies
+- "Objectives" lists or curriculum goals
+- "Tasks for students" or homework lists
+- Meta-content about HOW to teach
+
+ANIMATIONS (when animation_hints provided):
+If the scene data includes "animation_hints", implement CSS @keyframes animations:
+- Match target elements to the "target" field
+- Use appropriate transform for the "type" (orbit/rotate/flow/pulse/scale/bounce)
+- Map duration_range: fast=2-5s, medium=5-15s, slow=15-60s
+- Use `animation: name duration linear infinite;` for continuous motion
+- Animations help students visualize dynamic concepts (orbits, flows, cycles)
+
+SCROLLING (when scroll_hints provided):
+If the scene data includes "scroll_hints", implement appropriate overflow handling:
+- "vertical" → scrollable list with styled scrollbar
+- "horizontal" → horizontally scrollable row
+- "snap-carousel" → swipeable cards with scroll-snap
+- "paginated" → full-page sections with snap points
+- Always style scrollbars for dark theme (subtle, touch-friendly)
+- Add visual indicators (dots, arrows) for carousels
+
+Target: 1920x1080 Chromium touchscreen, dark theme.
+Technical: Standalone HTML, inline CSS, NO JavaScript.
+Output: ONLY valid HTML code, no explanations."""

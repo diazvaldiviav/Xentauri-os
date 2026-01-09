@@ -119,3 +119,108 @@ def get_repair_system_prompt() -> str:
 Fix HTML structural issues while preserving all content and styling.
 Output ONLY the corrected HTML, starting with <!DOCTYPE html> and ending with </html>.
 No explanations or markdown - just raw, valid HTML."""
+
+
+# ---------------------------------------------------------------------------
+# CSS INTERACTIVITY DEBUG PROMPTS (Sprint 5.2.2)
+# ---------------------------------------------------------------------------
+
+def build_css_debug_diagnosis_prompt(html: str, expected_interactions: str = None) -> str:
+    """
+    Build prompt for Gemini to diagnose CSS interactivity issues.
+
+    Focus: FUNCTIONAL errors only, not best practices.
+
+    Args:
+        html: The HTML to analyze
+        expected_interactions: Optional description of what interactions should work
+
+    Returns:
+        Prompt for Gemini diagnosis
+    """
+    # Truncate HTML but keep CSS and interactive elements
+    html_preview = html
+    if len(html) > 3000:
+        html_preview = html[:1500] + "\n\n... [truncated] ...\n\n" + html[-1000:]
+
+    # Build expected behavior section if provided
+    expected_section = ""
+    if expected_interactions:
+        expected_section = f"""
+## EXPECTED BEHAVIOR
+The developer intended these interactions:
+{expected_interactions}
+
+Verify the DOM structure supports these behaviors.
+"""
+
+    return f"""Analyze this HTML for CSS INTERACTIVITY BUGS.
+
+```html
+{html_preview}
+```
+{expected_section}
+## RULES TO CHECK
+
+1. **Sibling selectors (`~`, `+`) require same-parent elements.** If CSS uses `:checked ~ X` or `:checked + X`, the input and target X MUST share the same parent node.
+
+2. **Checkbox/radio hack requires:** input with `id`, label with matching `for`, and correct DOM structure per rule 1.
+
+3. **<details> requires <summary>** as first child.
+
+4. **:target links** must point to existing element IDs.
+
+5. **Hidden elements** (display:none, opacity:0) must have a CSS rule that reveals them.
+
+## RESPONSE
+- "NO ISSUES" if interactivity works
+- Or 1-2 sentences describing functional bugs only"""
+
+
+def build_css_debug_repair_prompt(html: str, diagnosis: str) -> str:
+    """
+    Build prompt for Codex-Max to fix CSS interactivity bugs.
+
+    Args:
+        html: The HTML with bugs
+        diagnosis: Gemini's diagnosis of functional issues
+
+    Returns:
+        Prompt for Codex-Max repair
+    """
+    return f"""Fix the CSS interactivity bugs in this HTML.
+
+## DIAGNOSIS
+{diagnosis}
+
+## HTML TO FIX
+```html
+{html}
+```
+
+## FIX RULES
+
+1. **Sibling selector fix:** Move inputs to be direct siblings of target elements. Hide moved inputs with CSS.
+
+2. **Preserve everything else:** Keep all visual design, content, animations, colors unchanged.
+
+3. **Minimal changes:** Fix ONLY what's broken, don't refactor working code.
+
+## OUTPUT
+Return ONLY the fixed HTML from <!DOCTYPE html> to </html>. No explanations."""
+
+
+def get_css_debug_diagnosis_system_prompt() -> str:
+    """System prompt for Gemini CSS interactivity diagnosis."""
+    return """You are a CSS interactivity debugger. Find FUNCTIONAL bugs only.
+Focus on: checkbox hacks, radio hacks, details/summary, :target navigation, :checked selectors.
+Respond "NO ISSUES" if everything works, or describe bugs in 1-2 sentences.
+Do NOT suggest improvements or best practices - only report broken functionality."""
+
+
+def get_css_debug_repair_system_prompt() -> str:
+    """System prompt for Codex-Max CSS interactivity repair."""
+    return """You are a CSS interactivity repair specialist.
+Fix ONLY the functional bugs identified. Do not change visual design or refactor code.
+Output ONLY corrected HTML from <!DOCTYPE html> to </html>.
+No explanations or markdown."""
