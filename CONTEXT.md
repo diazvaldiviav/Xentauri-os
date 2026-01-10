@@ -1613,4 +1613,36 @@ SVG Structural Rule: SVG graphic nodes (`<path>`, `<rect>`, `<circle>`) can NEVE
 
 ---
 
+## ⚠️ Technical Debt
+
+### TD-001: Synchronous Validation Pipeline (Sprint 6.1)
+**Status:** OPEN
+**Severity:** Medium
+**Added:** January 10, 2026
+
+**Problem:**
+The visual validation pipeline (Opus generation + validation + repair + re-validation) can take 3-5 minutes, which exceeds typical HTTP timeouts.
+
+**Current Workaround:**
+Increased Gunicorn worker timeout from 120s to 300s in `start.sh`.
+
+**Proper Solution:**
+Implement async/background job processing:
+1. Return immediately with `{"status": "processing", "job_id": "xxx"}`
+2. Process validation in background worker (Celery/RQ)
+3. Send result via WebSocket when complete
+4. Client polls or receives push notification
+
+**Files Affected:**
+- `start.sh` - timeout=300 workaround
+- `app/ai/scene/custom_layout/service.py` - sync pipeline
+- `app/services/intent_service.py` - calls sync pipeline
+
+**Impact:**
+- Long HTTP requests block the single Gunicorn worker
+- Poor UX (user waits 3-5 minutes with no feedback)
+- Risk of timeout on slower generations
+
+---
+
 This context file is the foundation for AI-assisted coding. It provides scope, architecture, and assumptions so future tasks can scaffold the repo (API, agent, and iOS stubs), implement minimal features, and prepare a reliable investor demo.

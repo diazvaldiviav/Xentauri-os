@@ -2,9 +2,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright with Chromium browser and system dependencies
+# Required for Sprint 6 visual validation pipeline
+RUN playwright install --with-deps chromium
 
 # Copy application
 COPY . .

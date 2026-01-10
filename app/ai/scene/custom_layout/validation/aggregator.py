@@ -31,10 +31,8 @@ logger = logging.getLogger("jarvis.ai.scene.custom_layout.validation.aggregator"
 # LAYOUT TYPE CLASSIFICATION
 # ---------------------------------------------------------------------------
 
-# Layout types that require interactive elements
-INTERACTIVE_LAYOUT_TYPES = {"trivia", "mini_game", "dashboard", "game", "quiz", "educational", "interactive"}
-
 # Layout types that don't require interactive elements
+# (Phase 5 is skipped entirely for these in __init__.py)
 STATIC_LAYOUT_TYPES = {"static", "info", "display", "content"}
 
 # Minimum ratio of responsive inputs to pass validation
@@ -103,14 +101,14 @@ class ValidationAggregator:
                 interaction_results=interaction_results,
             )
 
-        # Check interaction phase for interactive layouts
-        # If layout is unknown but has inputs, treat it as interactive
-        is_interactive_layout = (
-            layout_type.lower() in INTERACTIVE_LAYOUT_TYPES
-            or (layout_type.lower() == "unknown" and inputs_tested > 0)
-        )
-
-        if is_interactive_layout and inputs_tested > 0:
+        # Check interaction phase for any layout with detected inputs
+        # ─────────────────────────────────────────────────────────────
+        # "Si el sistema vio un botón, ese botón debe responder.
+        #  Ningún nombre lo exime de funcionar."
+        # ─────────────────────────────────────────────────────────────
+        # Sprint 6.1 Fix: The layout type name is irrelevant.
+        # If inputs were detected and tested, they must work.
+        if inputs_tested > 0:
             responsive_ratio = inputs_responsive / inputs_tested
 
             if inputs_responsive == 0:
@@ -211,11 +209,8 @@ class ValidationAggregator:
             if layout_type.lower() in STATIC_LAYOUT_TYPES:
                 # Static content - high confidence is fine
                 base_confidence = 0.9
-            elif layout_type.lower() in INTERACTIVE_LAYOUT_TYPES:
-                # Interactive but no inputs found - low confidence
-                base_confidence = 0.4
             else:
-                # Unknown type - moderate confidence
+                # Non-static with no inputs - moderate confidence
                 base_confidence = 0.6
 
         # Reduce for phase warnings
