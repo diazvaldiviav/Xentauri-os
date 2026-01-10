@@ -192,6 +192,27 @@ class InteractionValidator:
                     duration_ms=(time.time() - start_time) * 1000,
                 )
 
+            # ─────────────────────────────────────────────────────────────
+            # Sprint 6.1 Fix: Skip disabled elements
+            # ─────────────────────────────────────────────────────────────
+            # Playwright can physically click disabled buttons, but the JS
+            # handler won't execute. Visual changes from hover/cursor don't
+            # mean the button actually works. A disabled button is NOT
+            # a valid interactive element.
+            # ─────────────────────────────────────────────────────────────
+            is_disabled = await locator.is_disabled()
+            if is_disabled:
+                return InteractionResult(
+                    input=input_candidate,
+                    action="click",
+                    visual_delta=None,
+                    scene_before=before_scene,
+                    scene_after=None,
+                    responsive=False,
+                    error=f"Element is disabled: {input_candidate.selector}",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+
             # Perform click
             await locator.click(timeout=contract.interaction_timeout_ms)
 
