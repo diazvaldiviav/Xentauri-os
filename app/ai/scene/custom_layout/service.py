@@ -24,6 +24,8 @@ Usage:
 
 import logging
 import time
+import os
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
@@ -40,6 +42,18 @@ from app.ai.scene.custom_layout.html_repair_prompts import (
     build_css_debug_repair_prompt,
     get_css_debug_diagnosis_system_prompt,
     get_css_debug_repair_system_prompt,
+    build_validation_diagnosis_prompt,
+    build_validation_repair_prompt,
+    get_validation_diagnosis_system_prompt,
+    get_validation_repair_system_prompt,
+)
+from app.ai.scene.custom_layout.validator import ValidationResult
+from app.ai.scene.custom_layout.validation import (
+    VisualValidator,
+    ValidationContract,
+    SandboxResult,
+    visual_validator,
+    direct_fixer,
 )
 from app.core.config import settings
 
@@ -48,6 +62,40 @@ opus_provider = AnthropicProvider(model=settings.ANTHROPIC_REASONING_MODEL)
 
 
 logger = logging.getLogger("jarvis.ai.scene.custom_layout")
+
+# Directory to save generated HTML for debugging
+HTML_DEBUG_DIR = "/app/debug_html"
+
+
+def save_html_for_debug(html: str, request_id: str = None, suffix: str = "") -> Optional[str]:
+    """
+    Save generated HTML to a file for manual inspection.
+
+    Args:
+        html: The HTML content to save
+        request_id: Optional request ID for the filename
+        suffix: Optional suffix (e.g., 'repaired', 'original')
+
+    Returns:
+        Path to saved file, or None if save failed
+    """
+    try:
+        os.makedirs(HTML_DEBUG_DIR, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        req_part = f"_{request_id[:8]}" if request_id else ""
+        suffix_part = f"_{suffix}" if suffix else ""
+        filename = f"layout_{timestamp}{req_part}{suffix_part}.html"
+        filepath = os.path.join(HTML_DEBUG_DIR, filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        logger.info(f"HTML saved for debug: {filepath}")
+        return filepath
+    except Exception as e:
+        logger.warning(f"Failed to save debug HTML: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -152,12 +200,18 @@ class CustomLayoutService:
             # Single pass - GPT-5.2 generates working CSS interactivity
             # =========================================================
 
-            logger.info("Generating HTML layout with Opus 4.5")
+            thinking_budget = getattr(settings, 'CUSTOM_LAYOUT_THINKING_BUDGET', 10000)
+            if thinking_budget > 0:
+                logger.info(f"Generating HTML layout with Opus 4.5 (thinking budget: {thinking_budget})")
+            else:
+                logger.info("Generating HTML layout with Opus 4.5")
+
             response = await opus_provider.generate(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=0.7,
                 max_tokens=16384,
+                thinking_budget=thinking_budget,
             )
 
             if not response.success:
@@ -212,7 +266,10 @@ class CustomLayoutService:
                     "latency_ms": latency_ms,
                 }
             )
-            
+
+            # Save HTML for debugging/inspection
+            save_html_for_debug(html, suffix="final")
+
             return CustomLayoutResult(
                 html=html,
                 success=True,
@@ -481,6 +538,279 @@ class CustomLayoutService:
         except Exception as e:
             logger.error(f"CSS debug error: {e}", exc_info=True)
             return html  # Return original on any error
+
+    async def repair_validation_errors(
+        self,
+        html: str,
+        validation_result: ValidationResult,
+        user_request: str,
+    ) -> Optional[str]:
+        """
+        Repair HTML that failed Playwright validation.
+
+        Sprint 5.3: When layout_validator.validate() fails, this method:
+        1. Uses Gemini (fast) to diagnose the validation errors
+        2. Uses GPT Codex-Max to repair based on the diagnosis
+        3. Returns repaired HTML or None if repair failed
+
+        Args:
+            html: The HTML that failed validation
+            validation_result: ValidationResult with errors and behavior_report
+            user_request: Original user request for context
+
+        Returns:
+            Repaired HTML string or None if repair failed
+        """
+        if not getattr(settings, 'HTML_REPAIR_ENABLED', True):
+            logger.debug("HTML repair is disabled")
+            return None
+
+        max_retries = getattr(settings, 'VALIDATION_REPAIR_MAX_RETRIES', 2)
+
+        # Prepare behavior report string if available
+        behavior_report_str = None
+        if validation_result.behavior_report and validation_result.behavior_report.phase_executed:
+            behavior_report_str = validation_result.behavior_report.to_diagnosis_string()
+
+        current_html = html
+
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Validation repair attempt {attempt + 1}/{max_retries}")
+
+                # Step 1: Gemini diagnoses the validation errors (fast, cheap)
+                diagnosis_prompt = build_validation_diagnosis_prompt(
+                    html=current_html,
+                    validation_errors=validation_result.errors,
+                    behavior_report_str=behavior_report_str,
+                )
+
+                diagnosis_response = await gemini_provider.generate(
+                    prompt=diagnosis_prompt,
+                    system_prompt=get_validation_diagnosis_system_prompt(),
+                    temperature=0.1,
+                    max_tokens=512,
+                )
+
+                if not diagnosis_response.success:
+                    logger.warning(f"Gemini diagnosis failed: {diagnosis_response.error}")
+                    continue
+
+                diagnosis = diagnosis_response.content.strip()
+                logger.info(f"Validation diagnosis: {diagnosis}")
+
+                # Step 2: GPT Codex-Max repairs based on diagnosis
+                repair_prompt = build_validation_repair_prompt(
+                    html=current_html,
+                    diagnosis=diagnosis,
+                    validation_errors=validation_result.errors,
+                    user_request=user_request,
+                )
+
+                repair_response = await openai_provider.generate(
+                    prompt=repair_prompt,
+                    system_prompt=get_validation_repair_system_prompt(),
+                    temperature=0.2,
+                    max_tokens=16384,
+                )
+
+                if not repair_response.success:
+                    logger.warning(f"Codex-Max repair failed: {repair_response.error}")
+                    continue
+
+                # Step 3: Clean and validate repaired HTML
+                repaired_html = self._clean_html_response(repair_response.content)
+
+                if repaired_html and self._is_valid_html_structure(repaired_html):
+                    logger.info(f"Validation repair produced valid HTML on attempt {attempt + 1}")
+                    return repaired_html
+                else:
+                    logger.warning(f"Repaired HTML still invalid structure on attempt {attempt + 1}")
+                    if repaired_html:
+                        current_html = repaired_html
+
+            except Exception as e:
+                logger.error(f"Validation repair error on attempt {attempt + 1}: {e}", exc_info=True)
+                continue
+
+        logger.error(f"Validation repair failed after {max_retries} attempts")
+        return None
+
+    async def generate_and_validate_html(
+        self,
+        scene: Dict[str, Any],
+        user_request: str,
+        layout_type: Optional[str] = None,
+    ) -> CustomLayoutResult:
+        """
+        Generate HTML and validate with visual validation pipeline.
+
+        Sprint 6: Uses the new 7-phase visual validation system that
+        compares screenshots before/after clicks to detect real changes.
+
+        Flow:
+        1. Generate HTML with Opus 4.5
+        2. Validate with VisualValidator (screenshot comparison)
+        3. If fails, repair with DirectFixer (Codex-Max)
+        4. Re-validate repaired HTML
+        5. Return result
+
+        Args:
+            scene: SceneGraph dictionary
+            user_request: Original user request
+            layout_type: Optional layout type hint (trivia, dashboard, etc.)
+
+        Returns:
+            CustomLayoutResult with validated HTML
+        """
+        start_time = time.time()
+
+        # Check if visual validation is enabled
+        use_visual_validation = getattr(settings, 'VISUAL_VALIDATION_ENABLED', True)
+
+        # Step 1: Generate HTML
+        result = await self.generate_html(scene, user_request)
+
+        if not result.success or not result.html:
+            return result
+
+        if not use_visual_validation:
+            logger.info("Visual validation disabled, returning generated HTML")
+            return result
+
+        html = result.html
+
+        # Detect layout type from scene if not provided
+        if not layout_type:
+            layout_type = self._detect_layout_type_from_scene(scene)
+
+        logger.info(f"Starting visual validation (layout_type={layout_type})")
+
+        # Step 2: Validate with VisualValidator
+        contract = ValidationContract(
+            html=html,
+            layout_type=layout_type,
+            visual_change_threshold=getattr(settings, 'VISUAL_CHANGE_THRESHOLD', 0.02),
+            blank_page_threshold=getattr(settings, 'BLANK_PAGE_THRESHOLD', 0.95),
+            max_inputs_to_test=getattr(settings, 'MAX_INPUTS_TO_TEST', 10),
+            stabilization_ms=getattr(settings, 'INTERACTION_STABILIZATION_MS', 300),
+        )
+
+        validation_result = await visual_validator.validate(contract)
+
+        if validation_result.valid:
+            logger.info(
+                f"Visual validation passed - "
+                f"inputs={validation_result.inputs_responsive}/{validation_result.inputs_tested}, "
+                f"confidence={validation_result.confidence:.2f}"
+            )
+            return CustomLayoutResult(
+                html=html,
+                success=True,
+                error=None,
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # Step 3: Validation failed - attempt repair
+        logger.warning(
+            f"Visual validation failed: {validation_result.failure_summary}"
+        )
+
+        max_repair_attempts = getattr(settings, 'VALIDATION_REPAIR_MAX_RETRIES', 2)
+
+        for attempt in range(max_repair_attempts):
+            logger.info(f"Visual repair attempt {attempt + 1}/{max_repair_attempts}")
+
+            # Repair with DirectFixer (skip Gemini, go direct to Codex-Max)
+            repaired_html = await direct_fixer.repair(
+                html=html,
+                sandbox_result=validation_result,
+                user_request=user_request,
+            )
+
+            if not repaired_html:
+                logger.warning(f"Repair attempt {attempt + 1} failed to produce HTML")
+                continue
+
+            # Save repaired HTML for debugging
+            save_html_for_debug(repaired_html, suffix=f"repaired_{attempt + 1}")
+
+            # Re-validate repaired HTML
+            repair_contract = ValidationContract(
+                html=repaired_html,
+                layout_type=layout_type,
+                visual_change_threshold=contract.visual_change_threshold,
+                blank_page_threshold=contract.blank_page_threshold,
+                max_inputs_to_test=contract.max_inputs_to_test,
+                stabilization_ms=contract.stabilization_ms,
+            )
+
+            repair_validation = await visual_validator.validate(repair_contract)
+
+            if repair_validation.valid:
+                logger.info(
+                    f"Repair successful on attempt {attempt + 1} - "
+                    f"inputs={repair_validation.inputs_responsive}/{repair_validation.inputs_tested}"
+                )
+                return CustomLayoutResult(
+                    html=repaired_html,
+                    success=True,
+                    error=None,
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            # Update for next attempt
+            html = repaired_html
+            validation_result = repair_validation
+            logger.warning(
+                f"Repaired HTML still failed validation: {repair_validation.failure_summary}"
+            )
+
+        # All repair attempts failed
+        logger.error(
+            f"Visual validation failed after {max_repair_attempts} repair attempts"
+        )
+
+        return CustomLayoutResult(
+            html=None,
+            success=False,
+            error=f"Visual validation failed: {validation_result.failure_summary}",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
+    def _detect_layout_type_from_scene(self, scene: Dict[str, Any]) -> str:
+        """
+        Detect layout type from SceneGraph.
+
+        Args:
+            scene: SceneGraph dictionary
+
+        Returns:
+            Layout type string
+        """
+        # Check layout intent
+        layout = scene.get("layout", {})
+        intent = layout.get("intent", "").lower()
+
+        if intent in ("trivia", "quiz"):
+            return "trivia"
+        elif intent in ("game", "mini_game"):
+            return "mini_game"
+        elif intent in ("dashboard",):
+            return "dashboard"
+
+        # Check components for hints
+        components = scene.get("components", [])
+        for comp in components:
+            comp_type = comp.get("type", "").lower()
+            if "trivia" in comp_type or "quiz" in comp_type:
+                return "trivia"
+            elif "game" in comp_type:
+                return "mini_game"
+            elif "chart" in comp_type or "metric" in comp_type:
+                return "dashboard"
+
+        return "unknown"
 
 
 # ---------------------------------------------------------------------------

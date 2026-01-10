@@ -148,6 +148,20 @@ class Settings(BaseSettings):
     # - False: Skip validation (use generated HTML directly)
     CUSTOM_LAYOUT_VALIDATION_ENABLED: bool = True
 
+    # CUSTOM_LAYOUT_BEHAVIOR_VALIDATION_ENABLED: Phase 2 behavior validation
+    # - True: Test interactivity (clicks, state changes) for trivia/games/dashboards
+    # - False: Only run Phase 1 render validation
+    CUSTOM_LAYOUT_BEHAVIOR_VALIDATION_ENABLED: bool = True
+
+    # VALIDATION_REPAIR_MAX_RETRIES: Max attempts to repair HTML that fails validation
+    # Uses Gemini for diagnosis + Codex-Max for repair
+    VALIDATION_REPAIR_MAX_RETRIES: int = 2
+
+    # CUSTOM_LAYOUT_THINKING_BUDGET: Token budget for Claude's extended thinking
+    # - 0: Disable extended thinking (faster, cheaper)
+    # - 10000: Enable extended thinking (better HTML + manifest quality)
+    CUSTOM_LAYOUT_THINKING_BUDGET: int = 10000
+
     # ---------------------------------------------------------------------------
     # JSON REPAIR SETTINGS (Sprint 5.3)
     # ---------------------------------------------------------------------------
@@ -178,6 +192,37 @@ class Settings(BaseSettings):
     # HTML_REPAIR_MAX_RETRIES: Maximum repair attempts before giving up
     # - 1 is usually sufficient (diagnosis + single repair)
     HTML_REPAIR_MAX_RETRIES: int = 1
+
+    # ---------------------------------------------------------------------------
+    # VISUAL VALIDATION SETTINGS (Sprint 6)
+    # ---------------------------------------------------------------------------
+    # Screenshot-based validation for custom HTML layouts
+    # Replaces manifest-based validation to eliminate false positives
+
+    # VISUAL_VALIDATION_ENABLED: Master switch for visual validation
+    # - True: Use screenshot comparison to verify interactive elements
+    # - False: Use legacy manifest-based validation
+    VISUAL_VALIDATION_ENABLED: bool = True
+
+    # VISUAL_CHANGE_THRESHOLD: Minimum pixel difference to consider a visual change
+    # - 0.02 = 2% of pixels must change for click to be considered "responsive"
+    # - Lower values are more sensitive but may catch animations/noise
+    VISUAL_CHANGE_THRESHOLD: float = 0.02
+
+    # BLANK_PAGE_THRESHOLD: Uniformity threshold for blank page detection
+    # - 0.95 = 95% of pixels are uniform color = blank page
+    # - Used to detect if HTML renders but shows nothing
+    BLANK_PAGE_THRESHOLD: float = 0.95
+
+    # MAX_INPUTS_TO_TEST: Maximum number of interactive elements to test
+    # - Higher values increase validation time but are more thorough
+    # - 10 is usually sufficient for trivia/games/dashboards
+    MAX_INPUTS_TO_TEST: int = 10
+
+    # INTERACTION_STABILIZATION_MS: Wait time after click before screenshot
+    # - Allows CSS transitions/animations to complete
+    # - 300ms handles most transitions without being too slow
+    INTERACTION_STABILIZATION_MS: int = 300
 
 
 # ---------------------------------------------------------------------------

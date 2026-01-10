@@ -30,6 +30,10 @@ anthropic>=0.75.0  # Updated for httpx 0.28.x compatibility
 # Install with: pip install playwright && playwright install chromium
 playwright>=1.40.0
 
+# Visual Validation (Sprint 6)
+# Screenshot analysis for interactive element validation
+Pillow>=10.0.0
+
 # Testing
 pytest==8.3.3
 pytest-asyncio==0.24.0

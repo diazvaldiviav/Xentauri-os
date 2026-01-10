@@ -89,4 +89,44 @@ Technical constraints:
 - Standalone HTML with inline CSS/JS
 - Target: 1920x1080 touchscreen
 
+REQUIRED DATA ATTRIBUTES for interactive content (MUST use these for validation):
+
+For TRIVIA/QUIZ:
+- data-trivia="container" on main container
+- data-question="N" on each question container (N = question number)
+- data-option on each answer option/button
+- data-submit on the submit/next button
+- data-score on the score display element
+- data-feedback on correct/incorrect feedback elements
+
+For GAMES:
+- data-game="container" on game container
+- data-start on start/play button
+- data-score on score display
+- data-lives on lives/health display (if applicable)
+- data-restart on restart/play-again button
+
+For DASHBOARDS:
+- data-dashboard="container" on main container
+- data-filter on filter controls
+- data-metric on KPI/metric displays
+- data-chart on chart containers
+
+INTERACTION REQUIREMENTS (for visual validation):
+
+All interactive elements MUST produce VISIBLE changes when clicked:
+- Button clicks should change background color, opacity, or add visual feedback
+- Selections should highlight the selected item (border, background, scale)
+- Transitions should be visible (not just class changes without CSS effects)
+- Feedback elements should appear/disappear with visible styling
+
+The validator takes screenshots before and after clicks to verify visual changes.
+If clicking an element produces no visible difference, validation will FAIL.
+
+Good example (visible change):
+  .option.selected { background: #4CAF50; transform: scale(1.05); }
+
+Bad example (no visible change):
+  .option.selected { /* empty or same as unselected */ }
+
 Output only the HTML code."""
