@@ -1,10 +1,10 @@
 # Xentauri Project Context
 
-> **Last Updated:** December 30, 2025
-> **Current Sprint:** Sprint 5.0 - Raspberry Pi Agent (IN PROGRESS)
-> **Previous Sprint:** Sprint 5.1.0 - Pi Alexa Authentication ✅ COMPLETE
+> **Last Updated:** January 10, 2026
+> **Current Sprint:** Sprint 6.1 - Visual Validation + EOR ✅ COMPLETE
+> **Previous Sprint:** Sprint 6.0 - Visual-based Validation System ✅ COMPLETE
 > **Backend Status:** ✅ MVP COMPLETE - Deployed to Production
-> **Status:** 🚀 Backend deployed to fly.io, Pi Alexa auth ready
+> **Status:** 🚀 Backend deployed to fly.io, Visual validation pipeline active
 
 Xentauri is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
 
@@ -204,6 +204,37 @@ Xentauri is an intelligent screen control system that lets users operate multipl
 | Same IntentService.process() logic as /intent | ✅ Done |
 | Documentation (PI_ALEXA_AUTHENTICATION.md) | ✅ Done |
 
+### Sprint 6.0: Visual-based Validation System ✅ COMPLETE (January 2026)
+| Task | Status |
+|------|--------|
+| 7-phase validation pipeline architecture | ✅ Done |
+| ValidationContract and SandboxResult dataclasses | ✅ Done |
+| Phase 1: Render validation (Playwright) | ✅ Done |
+| Phase 2: Visual snapshot with blank page detection | ✅ Done |
+| Phase 3: Scene graph extraction from DOM | ✅ Done |
+| Phase 4: Input candidate detection | ✅ Done |
+| Phase 5: Interaction testing (click + screenshot comparison) | ✅ Done |
+| Phase 6: Result aggregation | ✅ Done |
+| DirectFixer for HTML repair (Codex-Max) | ✅ Done |
+| Visual change threshold (2% = 41,000 pixels) | ✅ Done |
+| Playwright sandbox integration | ✅ Done |
+
+### Sprint 6.1: EOR + Enriched Fixer ✅ COMPLETE (January 10, 2026)
+| Task | Status |
+|------|--------|
+| Event Owner Resolution (EOR) for child elements | ✅ Done |
+| SVG structural rule (graphic nodes → container) | ✅ Done |
+| `findEventOwnerCandidate()` JavaScript function | ✅ Done |
+| `EventOwnerCandidate` dataclass in contracts.py | ✅ Done |
+| `_resolve_event_owners()` in input_detector.py | ✅ Done |
+| Failure classification: `no_change`, `under_threshold`, `error` | ✅ Done |
+| `get_failure_type()` method in InteractionResult | ✅ Done |
+| `get_repair_context()` with pixel_diff_ratio | ✅ Done |
+| Enriched `build_repair_prompt()` with diagnosis | ✅ Done |
+| Updated `REPAIR_SYSTEM_PROMPT` for failure types | ✅ Done |
+| Thinking mode removed from Opus 4.5 | ✅ Done |
+| Deployed to Fly.io production | ✅ Done |
+
 ### 🎉 BACKEND MVP COMPLETE
 All backend features for MVP are complete:
 - ✅ User authentication (JWT)
@@ -299,7 +330,22 @@ Jarvis_Cloud/
 │   │   │   ├── schemas.py   # SceneGraph, LayoutSpec, SceneComponent models
 │   │   │   ├── registry.py  # ComponentRegistry (17 components)
 │   │   │   ├── defaults.py  # Default scene templates (5 presets)
-│   │   │   └── service.py   # SceneService (generation + data population)
+│   │   │   ├── service.py   # SceneService (generation + data population)
+│   │   │   └── custom_layout/  # Custom HTML Layout Module (Sprint 5.2+)
+│   │   │       ├── __init__.py
+│   │   │       ├── service.py       # CustomLayoutService (Opus 4.5 HTML generation)
+│   │   │       ├── prompts.py       # HTML generation prompts
+│   │   │       ├── html_repair_prompts.py  # Repair prompt templates
+│   │   │       ├── validator.py     # Legacy validator (pre-Sprint 6)
+│   │   │       └── validation/      # Visual Validation Pipeline (Sprint 6)
+│   │   │           ├── __init__.py  # Module exports
+│   │   │           ├── contracts.py # ValidationContract, SandboxResult, InteractionResult
+│   │   │           ├── aggregator.py    # Phase 6: Result aggregation
+│   │   │           ├── fixer.py         # DirectFixer (Codex-Max repair)
+│   │   │           ├── input_detector.py # Phase 4: Input candidate detection + EOR
+│   │   │           ├── interaction_validator.py # Phase 5: Click + screenshot comparison
+│   │   │           ├── scene_graph.py   # Phase 3: DOM inspection + findEventOwnerCandidate()
+│   │   │           └── visual_analyzer.py # Phase 2: Visual snapshot + blank detection
 │   │   ├── prompts/         # Prompt Templates (Sprint 3.6)
 │   │   │   ├── base_prompt.py      # Shared templates for all models
 │   │   │   ├── execution_prompts.py # GPT-4o execution prompts
@@ -458,9 +504,10 @@ Jarvis_Cloud/
 | HTTP Client | httpx | 0.27.2 |
 | Testing | Pytest | 8.3.3 |
 | Deployment | Fly.io | - |
-| AI - Gemini | google-generativeai | 0.8.3 (gemini-2.5-flash-preview-04-17) |
-| AI - OpenAI | openai | 1.55.3 (GPT-5.2, Responses API) |
-| AI - Claude | anthropic | 0.39.0 (Claude Opus 4.5) |
+| AI - Gemini | google-generativeai | 0.8.3 (gemini-2.5-flash, gemini-3-flash-preview) |
+| AI - OpenAI | openai | 1.55.3 (GPT-5.2, gpt-5.1-codex-max, Responses API) |
+| AI - Claude | anthropic | 0.39.0 (Claude Opus 4.5 for HTML generation) |
+| Browser Automation | playwright | 1.40+ (Visual validation sandbox) |
 
 ---
 
@@ -757,6 +804,125 @@ environments/
 
 ---
 
+## 🎨 Visual Validation Pipeline (Sprint 6)
+
+The visual validation system uses Playwright to verify that generated HTML layouts are interactive and functional before serving them to display devices.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     Visual Validation Pipeline                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+     ValidationContract (HTML + thresholds)
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 1: RENDER                                                          │
+│   - Load HTML in Playwright headless browser                             │
+│   - Check for JavaScript errors                                          │
+│   - Verify page loads without crashes                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 2: VISUAL SNAPSHOT                                                 │
+│   - Capture initial screenshot                                           │
+│   - Compute histogram (256-bin grayscale)                                │
+│   - Calculate variance and non_background_ratio                          │
+│   - Detect blank pages (>95% uniform color)                              │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 3: SCENE GRAPH                                                     │
+│   - Extract DOM elements with positions (BoundingBox)                    │
+│   - Identify node types (button, input, container, text)                 │
+│   - Run findEventOwnerCandidate() for EOR                                │
+│   - Build ObservedSceneGraph with SceneNode list                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 4: INPUT DETECTION                                                 │
+│   - Find clickable elements (buttons, links, [onclick])                  │
+│   - Resolve Event Owners (EOR) for child elements                        │
+│   - SVG rule: graphic nodes → interactive container                      │
+│   - Score and prioritize InputCandidates                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 5: INTERACTION TESTING                                             │
+│   - For each InputCandidate (up to MAX_INPUTS_TO_TEST):                  │
+│     1. Take "before" screenshot                                          │
+│     2. Click the element                                                 │
+│     3. Wait stabilization_ms for animations                              │
+│     4. Take "after" screenshot                                           │
+│     5. Compare: pixel_diff_ratio = changed_pixels / total_pixels         │
+│     6. responsive = (pixel_diff_ratio > 2%)                              │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 6: AGGREGATION                                                     │
+│   - Count responsive vs unresponsive inputs                              │
+│   - Calculate confidence score                                           │
+│   - Generate failure_summary if validation fails                         │
+│   - Return SandboxResult                                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │
+          ┌────────┴────────┐
+          ▼                 ▼
+     ┌─────────┐      ┌─────────────┐
+     │  VALID  │      │  INVALID    │
+     │ Return  │      │             │
+     │  HTML   │      │ DirectFixer │
+     └─────────┘      └──────┬──────┘
+                             │
+                             ▼
+               ┌─────────────────────────────────────────┐
+               │ Phase 7: REPAIR (DirectFixer)           │
+               │   - Build repair prompt with:           │
+               │     • pixel_diff_ratio per element      │
+               │     • failure_type classification       │
+               │     • interpretation for each failure   │
+               │   - Send to Codex-Max                   │
+               │   - Re-validate repaired HTML           │
+               │   - Retry up to VALIDATION_REPAIR_MAX   │
+               └─────────────────────────────────────────┘
+```
+
+### Failure Classification (Sprint 6.1)
+
+The fixer receives enriched context to understand the REAL problem:
+
+| Failure Type | pixel_diff_ratio | Interpretation | Fix Strategy |
+|--------------|------------------|----------------|--------------|
+| `no_change` | < 0.1% | Handler broken/missing | Add or fix onclick handler |
+| `under_threshold` | 0.1% - 2% | Works but subtle feedback | Amplify visual effect (overlays, larger areas) |
+| `error` | N/A | JavaScript error | Fix the error in code |
+| `passed` | > 2% | Working correctly | No action needed |
+
+### Event Owner Resolution (EOR)
+
+When child elements inherit cursor:pointer from a parent with onclick:
+
+```
+┌────────────────────────────────────────┐
+│  <div class="option" onclick="...">    │  ← Event Owner (has onclick)
+│    <span class="letter">A</span>       │  ← Child (inherits pointer)
+│    <span class="text">Paris</span>     │  ← Child (inherits pointer)
+│  </div>                                │
+└────────────────────────────────────────┘
+
+Before EOR: 3 candidates (div, span.letter, span.text)
+After EOR:  1 candidate (div) with source_elements: [span.letter, span.text]
+```
+
+SVG Structural Rule: SVG graphic nodes (`<path>`, `<rect>`, `<circle>`) can NEVER be self-owned. They always resolve to their `<svg>` container.
+
+---
+
 ## Vision & Objectives
 - Demonstrate end-to-end technical feasibility of voice/text command control.
 - Enable basic screen control from iOS (power, input/source, volume, mute, brightness where applicable; HDMI-CEC and vendor APIs).
@@ -847,6 +1013,64 @@ environments/
 ---
 
 ## 📝 Session Notes
+
+### January 10, 2026 - Sprint 6.1 Complete (EOR + Enriched Fixer)
+- **Event Owner Resolution (EOR) System:**
+  - Child elements (spans, SVG paths) now correctly resolve to interactive ancestors
+  - `findEventOwnerCandidate()` JavaScript function in scene_graph.py
+  - SVG structural rule: "En SVG no se clickea la geometría; se interactúa con el contenedor"
+  - `EventOwnerCandidate` dataclass with selector and reason fields
+  - `_resolve_event_owners()` deduplicates candidates pointing to same owner
+- **Enriched Fixer Context:**
+  - `get_failure_type()` classifies failures: `no_change`, `under_threshold`, `error`
+  - `get_repair_context()` includes pixel_diff_ratio, threshold, interpretation
+  - Fixer now knows "button works but visual feedback too subtle" vs "handler broken"
+  - `REPAIR_SYSTEM_PROMPT` updated with specific instructions per failure type
+  - Tested with GPT-5 Nano: fixer successfully repaired 0/3 → 2/2 responsive
+- **Configuration Changes:**
+  - `CUSTOM_LAYOUT_THINKING_BUDGET: 0` - Extended thinking disabled for latency
+  - Using Opus 4.5 (`claude-opus-4-5-20251101`) for HTML generation
+  - DirectFixer uses Codex-Max for repairs
+- **Files Modified:**
+  - `app/ai/scene/custom_layout/validation/contracts.py` - Added failure classification
+  - `app/ai/scene/custom_layout/validation/fixer.py` - Enriched repair prompts
+  - `app/ai/scene/custom_layout/validation/scene_graph.py` - EOR JavaScript
+  - `app/ai/scene/custom_layout/validation/input_detector.py` - Owner resolution
+  - `app/ai/scene/custom_layout/service.py` - Opus 4.5 integration
+  - `app/ai/providers/openai_provider.py` - NO_TEMPERATURE_MODELS fix
+  - `app/core/config.py` - Thinking budget disabled
+- **Deployed to Fly.io:** https://xentauri-cloud-core.fly.dev/
+
+### January 2026 - Sprint 6.0 Complete (Visual-based Validation System)
+- **7-Phase Visual Validation Pipeline:**
+  - Phase 1: Render validation (Playwright headless browser)
+  - Phase 2: Visual snapshot with histogram analysis + blank page detection
+  - Phase 3: Scene graph extraction from DOM (element positions, attributes)
+  - Phase 4: Input candidate detection (buttons, links, interactive elements)
+  - Phase 5: Interaction testing (click + before/after screenshot comparison)
+  - Phase 6: Result aggregation (confidence score, failure summary)
+  - Phase 7: DirectFixer repair (Codex-Max)
+- **Key Concepts:**
+  - 2% viewport threshold = 41,000 pixels must change for "responsive" classification
+  - `VisualSnapshot` with histogram, mean_pixel, variance, non_background_ratio
+  - `VisualDelta` compares before/after screenshots
+  - `InputCandidate` with confidence score and priority for testing order
+  - `InteractionResult` tracks visual_delta, scene changes, responsiveness
+- **Contracts Module (`contracts.py`):**
+  - `ValidationContract` - Input with thresholds and settings
+  - `SandboxResult` - Final result with phases, interaction_results, confidence
+  - `SceneNode`, `ObservedSceneGraph` for DOM representation
+  - `BoundingBox` with area(), center(), in_viewport() methods
+- **DirectFixer:**
+  - Skips Gemini diagnosis, sends full context to Codex-Max
+  - `build_repair_prompt()` includes all phase failures
+  - Supports both regular and reasoning-enhanced repair
+- **Configuration Settings:**
+  - `VISUAL_VALIDATION_ENABLED: True`
+  - `VISUAL_CHANGE_THRESHOLD: 0.05` (5% default, 2% in code)
+  - `BLANK_PAGE_THRESHOLD: 0.95`
+  - `MAX_INPUTS_TO_TEST: 10`
+  - `INTERACTION_STABILIZATION_MS: 300`
 
 ### December 30, 2025 - Sprint 5.1.0 Complete (Pi Alexa Authentication)
 - **New Endpoint: POST /intent/agent**
