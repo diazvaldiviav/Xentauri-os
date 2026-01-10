@@ -152,6 +152,21 @@ class SandboxRenderer:
                     page.set_content(contract.html, wait_until="networkidle"),
                     timeout=timeout_seconds
                 )
+
+                # ─────────────────────────────────────────────────────────────
+                # Sprint 6.1 Fix: Wait for JavaScript initialization
+                # ─────────────────────────────────────────────────────────────
+                # "networkidle" only waits for network, not JavaScript execution.
+                # Dynamic content (e.g., trivia options created by loadQuestion())
+                # needs time to be created by JS after DOM is ready.
+                #
+                # We wait for:
+                # 1. DOM content loaded state
+                # 2. A small buffer for JS initialization (requestAnimationFrame, etc.)
+                # ─────────────────────────────────────────────────────────────
+                await page.wait_for_load_state("domcontentloaded")
+                await page.wait_for_timeout(150)  # Buffer for JS init functions
+
             except asyncio.TimeoutError:
                 errors.append(f"Page render timed out after {timeout_seconds:.1f}s")
                 await render_ctx.close()

@@ -8,7 +8,9 @@
       "Bash(curl:*)",
       "Bash(python3:*)",
       "Bash(fly deploy:*)",
-      "Bash(python -m py_compile:*)"
+      "Bash(python -m py_compile:*)",
+      "Bash(fly logs:*)",
+      "Bash(fly ssh console:*)"
     ],
     "deny": [],
     "ask": []

@@ -234,6 +234,9 @@ Xentauri is an intelligent screen control system that lets users operate multipl
 | Updated `REPAIR_SYSTEM_PROMPT` for failure types | ✅ Done |
 | Thinking mode removed from Opus 4.5 | ✅ Done |
 | Deployed to Fly.io production | ✅ Done |
+| **Bug Fix:** Validation ignores layout type for 70% check | ✅ Done |
+| **Bug Fix:** Dynamic JS content timing (wait for init) | ✅ Done |
+| Gunicorn timeout increased to 300s (TD-001) | ✅ Done |
 
 ### 🎉 BACKEND MVP COMPLETE
 All backend features for MVP are complete:
@@ -1040,6 +1043,24 @@ SVG Structural Rule: SVG graphic nodes (`<path>`, `<rect>`, `<circle>`) can NEVE
   - `app/ai/providers/openai_provider.py` - NO_TEMPERATURE_MODELS fix
   - `app/core/config.py` - Thinking budget disabled
 - **Deployed to Fly.io:** https://xentauri-cloud-core.fly.dev/
+
+### January 10, 2026 - Critical Bug Fixes (Validation Bypass + Dynamic Content)
+- **Bug #1: Validation Passing with 33% Responsive Inputs**
+  - **Root cause:** `is_interactive_layout` check skipped 70% threshold for layouts not in hardcoded list
+  - **Example:** "visualization" layout type not in INTERACTIVE_LAYOUT_TYPES → bypassed check
+  - **Fix:** Removed layout type dependency - if inputs are detected, they must respond
+  - **Philosophy:** "Si el sistema vio un botón, ese botón debe responder. Ningún nombre lo exime de funcionar."
+  - **File:** `app/ai/scene/custom_layout/validation/aggregator.py`
+- **Bug #2: Dynamic JavaScript Content Not Detected**
+  - **Root cause:** Scene graph extraction ran before JS `init()` functions created elements
+  - **Example:** Trivia `loadQuestion()` creates 4 option divs dynamically → only static button detected
+  - **Symptom:** Phase 4 found only 1 input when there should be 5 (4 options + 1 submit)
+  - **Analysis:** `wait_until="networkidle"` only waits for network, not JS execution
+  - **Fix:** Added `wait_for_load_state("domcontentloaded")` + 150ms buffer in sandbox.py
+  - **File:** `app/ai/scene/custom_layout/validation/sandbox.py`
+- **Technical Debt TD-001:** Worker timeout during repair flow
+  - Increased Gunicorn timeout from 120s to 300s as workaround
+  - Proper fix: async/background job processing (future sprint)
 
 ### January 2026 - Sprint 6.0 Complete (Visual-based Validation System)
 - **7-Phase Visual Validation Pipeline:**
