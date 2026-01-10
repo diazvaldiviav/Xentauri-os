@@ -236,6 +236,7 @@ Xentauri is an intelligent screen control system that lets users operate multipl
 | Deployed to Fly.io production | ✅ Done |
 | **Bug Fix:** Validation ignores layout type for 70% check | ✅ Done |
 | **Bug Fix:** Dynamic JS content timing (wait for init) | ✅ Done |
+| **Bug Fix:** Skip disabled elements in interaction validation | ✅ Done |
 | Gunicorn timeout increased to 300s (TD-001) | ✅ Done |
 
 ### 🎉 BACKEND MVP COMPLETE
@@ -1058,6 +1059,12 @@ SVG Structural Rule: SVG graphic nodes (`<path>`, `<rect>`, `<circle>`) can NEVE
   - **Analysis:** `wait_until="networkidle"` only waits for network, not JS execution
   - **Fix:** Added `wait_for_load_state("domcontentloaded")` + 150ms buffer in sandbox.py
   - **File:** `app/ai/scene/custom_layout/validation/sandbox.py`
+- **Bug #3: Disabled Buttons Passing Validation**
+  - **Root cause:** Playwright can physically click disabled buttons, but JS handlers don't execute
+  - **Example:** Trivia submit button has `disabled` until user selects an option
+  - **Symptom:** Button showed cursor:not-allowed but passed as "responsive" due to visual change
+  - **Fix:** Added `locator.is_disabled()` check before clicking in interaction_validator
+  - **File:** `app/ai/scene/custom_layout/validation/interaction_validator.py`
 - **Technical Debt TD-001:** Worker timeout during repair flow
   - Increased Gunicorn timeout from 120s to 300s as workaround
   - Proper fix: async/background job processing (future sprint)
