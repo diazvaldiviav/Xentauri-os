@@ -93,8 +93,13 @@ class InteractionValidator:
                 duration_ms=(time.time() - start_time) * 1000,
             ), []
 
-        # Test each input
-        for input_candidate in inputs:
+        # Test each input with early stopping
+        # Optimization: Test max 3 high-priority inputs, stop after 2 responsive
+        MAX_INPUTS_TO_TEST = 3
+        EARLY_STOP_RESPONSIVE = 2
+        responsive_count = 0
+
+        for input_candidate in inputs[:MAX_INPUTS_TO_TEST]:
             result = await self._test_single_input(page, input_candidate, contract)
             results.append(result)
 
@@ -105,6 +110,13 @@ class InteractionValidator:
                 f"  {input_candidate.selector}: {status} "
                 f"(delta={delta:.3f}, threshold={contract.visual_change_threshold})"
             )
+
+            # Early stopping: if we found enough responsive inputs, stop testing
+            if result.responsive:
+                responsive_count += 1
+                if responsive_count >= EARLY_STOP_RESPONSIVE:
+                    logger.info(f"Early stopping: found {responsive_count} responsive inputs")
+                    break
 
         # Count responsive inputs
         responsive_count = sum(1 for r in results if r.responsive)

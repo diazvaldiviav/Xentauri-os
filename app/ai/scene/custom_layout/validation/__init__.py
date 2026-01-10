@@ -53,7 +53,7 @@ from .visual_analyzer import visual_analyzer
 from .scene_graph import scene_graph_extractor
 from .input_detector import input_detector
 from .interaction_validator import interaction_validator
-from .aggregator import validation_aggregator
+from .aggregator import validation_aggregator, STATIC_LAYOUT_TYPES
 from .fixer import direct_fixer
 
 logger = logging.getLogger("jarvis.ai.scene.custom_layout.validation")
@@ -139,18 +139,33 @@ class VisualValidator:
 
             # Phase 4 always passes (no inputs = static content)
 
+            # Detect layout type early for optimization
+            layout_type = contract.layout_type or self._detect_layout_type(scene_graph)
+
             # =========================================================
             # PHASE 5: Interaction Validation
             # =========================================================
-            phase5_result, interaction_results = await interaction_validator.validate(
-                page, inputs, contract
-            )
+            # Skip interaction validation for static layouts (optimization)
+            if layout_type.lower() in STATIC_LAYOUT_TYPES:
+                logger.info(f"Skipping Phase 5 (interaction) for static layout: {layout_type}")
+                phase5_result = PhaseResult(
+                    phase=5,
+                    phase_name="interaction",
+                    passed=True,
+                    details={"skipped": "static_layout", "layout_type": layout_type},
+                    duration_ms=0.0,
+                )
+                interaction_results = []
+            else:
+                phase5_result, interaction_results = await interaction_validator.validate(
+                    page, inputs, contract
+                )
             phases.append(phase5_result)
 
             # =========================================================
             # PHASE 6: Aggregation
             # =========================================================
-            layout_type = contract.layout_type or self._detect_layout_type(scene_graph)
+            # layout_type already detected above (before Phase 5)
 
             result = validation_aggregator.aggregate(
                 phases=phases,

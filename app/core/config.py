@@ -97,6 +97,7 @@ class Settings(BaseSettings):
     OPENAI_CODE_MODEL: str = "gpt-5.1-codex-max"  # Specialized for code generation
     #Fallback model if the specified one is unavailable
     GPT_FALLBACK_MODEL: str = "gpt-5-mini-2025-08-07"
+    GPT_NANO_FALLBACK_MODEL: str = "gpt-5-nano"
     
 
     
@@ -158,9 +159,10 @@ class Settings(BaseSettings):
     VALIDATION_REPAIR_MAX_RETRIES: int = 2
 
     # CUSTOM_LAYOUT_THINKING_BUDGET: Token budget for Claude's extended thinking
-    # - 0: Disable extended thinking (faster, cheaper)
-    # - 10000: Enable extended thinking (better HTML + manifest quality)
-    CUSTOM_LAYOUT_THINKING_BUDGET: int = 10000
+    # - 0: Disabled (default) - extended thinking removed for latency optimization
+    # - Note: Parameter not currently implemented in AnthropicProvider
+    CUSTOM_LAYOUT_THINKING_BUDGET: int = 0
+    CUSTOM_LAYOUT_THINKING_BUDGET_SIMPLE: int = 0
 
     # ---------------------------------------------------------------------------
     # JSON REPAIR SETTINGS (Sprint 5.3)
@@ -205,9 +207,9 @@ class Settings(BaseSettings):
     VISUAL_VALIDATION_ENABLED: bool = True
 
     # VISUAL_CHANGE_THRESHOLD: Minimum pixel difference to consider a visual change
-    # - 0.02 = 2% of pixels must change for click to be considered "responsive"
-    # - Lower values are more sensitive but may catch animations/noise
-    VISUAL_CHANGE_THRESHOLD: float = 0.02
+    # - 0.05 = 5% of pixels must change for click to be considered "responsive"
+    # - Requires real visual feedback, not just hover effects
+    VISUAL_CHANGE_THRESHOLD: float = 0.05
 
     # BLANK_PAGE_THRESHOLD: Uniformity threshold for blank page detection
     # - 0.95 = 95% of pixels are uniform color = blank page

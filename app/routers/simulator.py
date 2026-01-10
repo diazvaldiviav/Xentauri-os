@@ -894,12 +894,13 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
             // ================================================================
             // SECURITY: Render HTML in sandboxed iframe
             // ================================================================
-            // Using iframe with srcdoc + sandbox attribute for XSS protection:
+            // Using iframe with srcdoc + sandbox attribute for protection:
             // - sandbox="allow-same-origin": Enables CSS to work properly
-            // - Scripts are BLOCKED (no allow-scripts)
+            // - sandbox="allow-scripts": Enables JavaScript for interactivity
             // - Forms are BLOCKED (no allow-forms)
             // - Popups are BLOCKED (no allow-popups)
             // - Navigation is BLOCKED (no allow-top-navigation)
+            // NOTE: Scripts enabled because HTML is AI-generated, not user input
             // ================================================================
 
             const iframe = document.createElement('iframe');
@@ -915,8 +916,8 @@ def get_simulator_html(device_id: str, device_name: str, ws_url: str) -> str:
                 display: block;
             `;
 
-            // SECURITY: Sandbox blocks script execution and other dangerous capabilities
-            iframe.sandbox = 'allow-same-origin';
+            // SECURITY: Sandbox with scripts enabled for interactive layouts
+            iframe.sandbox = 'allow-same-origin allow-scripts';
 
             // srcdoc injects HTML directly without network request
             iframe.srcdoc = html;

@@ -123,9 +123,16 @@ class OpenAIProvider(AIProvider):
                 "max_output_tokens": max_tokens,
             }
 
-            # Add reasoning if provided (disables temperature)
+            # Models that don't support temperature (require reasoning instead)
+            NO_TEMPERATURE_MODELS = {"gpt-5-mini", "gpt-5-nano", "codex", "o1", "o3"}
+            model_requires_reasoning = any(m in self.model.lower() for m in NO_TEMPERATURE_MODELS)
+
+            # Add reasoning if provided OR if model requires it (disables temperature)
             if reasoning:
                 request_params["reasoning"] = reasoning
+            elif model_requires_reasoning:
+                # Use low effort for speed (testing fixer with weaker output)
+                request_params["reasoning"] = {"effort": "low"}
             else:
                 request_params["temperature"] = temperature
 

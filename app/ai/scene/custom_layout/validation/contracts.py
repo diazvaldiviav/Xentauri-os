@@ -35,7 +35,7 @@ class ValidationContract:
     visual_change_threshold: float = 0.02  # 2% pixel difference = change detected
     blank_page_threshold: float = 0.95     # 95% uniform color = blank page
     max_inputs_to_test: int = 10
-    stabilization_ms: int = 300  # Wait after click for animations
+    stabilization_ms: int = 150  # Wait after click for animations (reduced from 300)
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +82,20 @@ class BoundingBox:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class EventOwnerCandidate:
+    """
+    EOR: Proposed event owner for an element.
+
+    When a child element (like span.option-letter) inherits cursor:pointer
+    from a parent with onclick, this captures the parent as the "owner".
+
+    Phase 3 proposes, Phase 4 decides.
+    """
+    selector: str  # CSS selector of the owner element
+    reason: str    # Why this is the owner (ancestor_with_onclick, ancestor_with_role_button, etc.)
+
+
+@dataclass
 class SceneNode:
     """
     Single node in the observed scene graph.
@@ -96,6 +110,7 @@ class SceneNode:
     z_index: int    # Stacking order
     text_content: Optional[str] = None  # Inner text (truncated)
     attributes: Dict[str, str] = field(default_factory=dict)
+    event_owner_candidate: Optional[EventOwnerCandidate] = None  # EOR: proposed owner
 
     def is_interactive(self) -> bool:
         """Check if node is likely interactive."""
@@ -154,7 +169,22 @@ class VisualSnapshot:
     non_background_ratio: float  # % of pixels different from background
 
     def is_blank(self, threshold: float = 0.95) -> bool:
-        """Check if image is mostly uniform (blank)."""
+        """
+        Check if image is mostly uniform (blank).
+
+        A page is NOT blank if:
+        - non_background_ratio >= (1 - threshold), OR
+        - variance is high (>100) indicating visual differentiation
+
+        This handles dark-themed content like space visualizations where
+        background dominates but content has meaningful visual variance.
+        """
+        # If variance is high, there's visual content even if background dominates
+        # A truly blank page has variance near 0
+        MIN_VARIANCE_FOR_CONTENT = 100
+        if self.variance > MIN_VARIANCE_FOR_CONTENT:
+            return False  # High variance = not blank
+
         return self.non_background_ratio < (1 - threshold)
 
 
@@ -186,12 +216,17 @@ class InputCandidate:
     Detected clickable element.
 
     Ranked by confidence and priority for testing.
+
+    EOR: When source_elements is populated, this candidate represents
+    an event owner that was resolved from child elements. The selector
+    is the owner, and source_elements lists the children that pointed to it.
     """
     selector: str           # CSS selector to click
     node: SceneNode         # Reference to scene graph node
     confidence: float       # 0.0 to 1.0 (how sure we are it's clickable)
     input_type: str         # button|link|checkbox|radio|custom
     priority: int           # Lower = test first
+    source_elements: List[str] = field(default_factory=list)  # EOR: child selectors that resolved to this owner
 
     def __lt__(self, other: "InputCandidate") -> bool:
         """Sort by priority (ascending), then confidence (descending)."""
@@ -219,6 +254,68 @@ class InteractionResult:
     responsive: bool  # Did the interaction produce observable change?
     error: Optional[str] = None
     duration_ms: float = 0.0
+
+    def get_failure_type(self, threshold: float = 0.02) -> str:
+        """
+        Classify the type of failure for repair context.
+
+        Returns:
+            - "passed": Element responded adequately
+            - "no_change": Zero or near-zero visual change (broken handler)
+            - "under_threshold": Some change but below threshold (needs amplification)
+            - "error": JavaScript or interaction error occurred
+        """
+        if self.responsive:
+            return "passed"
+
+        if self.error:
+            return "error"
+
+        if not self.visual_delta:
+            return "no_change"
+
+        ratio = self.visual_delta.pixel_diff_ratio
+
+        # Near-zero change = handler likely broken
+        if ratio < 0.001:  # Less than 0.1%
+            return "no_change"
+
+        # Some change but not enough = needs visual amplification
+        if ratio < threshold:
+            return "under_threshold"
+
+        return "passed"
+
+    def get_repair_context(self, threshold: float = 0.02) -> Dict[str, Any]:
+        """
+        Get rich context for the fixer, including failure classification.
+
+        This is CRITICAL for the fixer to understand the REAL problem.
+        """
+        ratio = self.visual_delta.pixel_diff_ratio if self.visual_delta else 0.0
+        failure_type = self.get_failure_type(threshold)
+
+        # Build interpretation based on failure type
+        if failure_type == "passed":
+            interpretation = "Working correctly"
+        elif failure_type == "no_change":
+            interpretation = "Handler broken or not triggering visual change"
+        elif failure_type == "under_threshold":
+            multiplier = threshold / ratio if ratio > 0 else 10
+            interpretation = f"Visual feedback too subtle. Needs ~{multiplier:.1f}x amplification"
+        else:  # error
+            interpretation = f"Error: {self.error}"
+
+        return {
+            "selector": self.input.selector,
+            "action": self.action,
+            "pixel_diff_ratio": ratio,
+            "pixel_diff_pct": f"{ratio * 100:.2f}%",
+            "threshold": f"{threshold * 100:.1f}%",
+            "failure_type": failure_type,
+            "interpretation": interpretation,
+            "responsive": self.responsive,
+        }
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""

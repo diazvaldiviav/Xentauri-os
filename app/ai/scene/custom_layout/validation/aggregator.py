@@ -32,10 +32,14 @@ logger = logging.getLogger("jarvis.ai.scene.custom_layout.validation.aggregator"
 # ---------------------------------------------------------------------------
 
 # Layout types that require interactive elements
-INTERACTIVE_LAYOUT_TYPES = {"trivia", "mini_game", "dashboard", "game", "quiz"}
+INTERACTIVE_LAYOUT_TYPES = {"trivia", "mini_game", "dashboard", "game", "quiz", "educational", "interactive"}
 
 # Layout types that don't require interactive elements
 STATIC_LAYOUT_TYPES = {"static", "info", "display", "content"}
+
+# Minimum ratio of responsive inputs to pass validation
+# 70% of tested inputs must respond to clicks
+MIN_RESPONSIVE_RATIO = 0.70
 
 
 # ---------------------------------------------------------------------------
@@ -100,26 +104,52 @@ class ValidationAggregator:
             )
 
         # Check interaction phase for interactive layouts
-        is_interactive_layout = layout_type.lower() in INTERACTIVE_LAYOUT_TYPES
+        # If layout is unknown but has inputs, treat it as interactive
+        is_interactive_layout = (
+            layout_type.lower() in INTERACTIVE_LAYOUT_TYPES
+            or (layout_type.lower() == "unknown" and inputs_tested > 0)
+        )
 
-        if is_interactive_layout and inputs_tested > 0 and inputs_responsive == 0:
-            # Interactive layout but no inputs respond
-            logger.warning(
-                f"Validation FAILED: Interactive layout '{layout_type}' "
-                f"has no responsive inputs ({inputs_tested} tested)"
-            )
+        if is_interactive_layout and inputs_tested > 0:
+            responsive_ratio = inputs_responsive / inputs_tested
 
-            return SandboxResult(
-                valid=False,
-                phases=phases,
-                inputs_tested=inputs_tested,
-                inputs_responsive=inputs_responsive,
-                confidence=0.0,
-                layout_type=layout_type,
-                total_duration_ms=total_duration,
-                failure_summary=f"No inputs responded to interaction ({inputs_tested} tested)",
-                interaction_results=interaction_results,
-            )
+            if inputs_responsive == 0:
+                # No inputs respond at all
+                logger.warning(
+                    f"Validation FAILED: Interactive layout '{layout_type}' "
+                    f"has no responsive inputs ({inputs_tested} tested)"
+                )
+
+                return SandboxResult(
+                    valid=False,
+                    phases=phases,
+                    inputs_tested=inputs_tested,
+                    inputs_responsive=inputs_responsive,
+                    confidence=0.0,
+                    layout_type=layout_type,
+                    total_duration_ms=total_duration,
+                    failure_summary=f"No inputs responded to interaction ({inputs_tested} tested)",
+                    interaction_results=interaction_results,
+                )
+
+            if responsive_ratio < MIN_RESPONSIVE_RATIO:
+                # Not enough inputs respond (need at least 70%)
+                logger.warning(
+                    f"Validation FAILED: Only {responsive_ratio:.0%} inputs responsive "
+                    f"({inputs_responsive}/{inputs_tested}), need {MIN_RESPONSIVE_RATIO:.0%}"
+                )
+
+                return SandboxResult(
+                    valid=False,
+                    phases=phases,
+                    inputs_tested=inputs_tested,
+                    inputs_responsive=inputs_responsive,
+                    confidence=responsive_ratio,
+                    layout_type=layout_type,
+                    total_duration_ms=total_duration,
+                    failure_summary=f"Only {inputs_responsive}/{inputs_tested} inputs responsive ({responsive_ratio:.0%}), need {MIN_RESPONSIVE_RATIO:.0%}",
+                    interaction_results=interaction_results,
+                )
 
         # Calculate confidence
         confidence = self._calculate_confidence(

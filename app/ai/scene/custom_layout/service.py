@@ -29,10 +29,14 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
-from app.ai.providers.openai_provider import openai_provider
+from app.ai.providers.openai_provider import openai_provider, OpenAIProvider
 from app.ai.providers.gemini import gemini_provider
 from app.ai.providers.anthropic_provider import AnthropicProvider
-from app.ai.scene.custom_layout.prompts import build_custom_layout_prompt, get_system_prompt
+from app.ai.scene.custom_layout.prompts import (
+    build_custom_layout_prompt,
+    build_data_to_html_prompt,
+    get_system_prompt,
+)
 from app.ai.scene.custom_layout.html_repair_prompts import (
     build_html_diagnosis_prompt,
     build_html_repair_prompt,
@@ -57,7 +61,7 @@ from app.ai.scene.custom_layout.validation import (
 )
 from app.core.config import settings
 
-# Opus 4.5 provider for HTML generation
+# Opus 4.5 for HTML generation + Fixer for repairs (Sprint 6.1)
 opus_provider = AnthropicProvider(model=settings.ANTHROPIC_REASONING_MODEL)
 
 
@@ -200,18 +204,13 @@ class CustomLayoutService:
             # Single pass - GPT-5.2 generates working CSS interactivity
             # =========================================================
 
-            thinking_budget = getattr(settings, 'CUSTOM_LAYOUT_THINKING_BUDGET', 10000)
-            if thinking_budget > 0:
-                logger.info(f"Generating HTML layout with Opus 4.5 (thinking budget: {thinking_budget})")
-            else:
-                logger.info("Generating HTML layout with Opus 4.5")
+            logger.info("Generating HTML layout with Opus 4.5")
 
             response = await opus_provider.generate(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=0.7,
                 max_tokens=16384,
-                thinking_budget=thinking_budget,
             )
 
             if not response.success:
@@ -276,7 +275,7 @@ class CustomLayoutService:
                 error=None,
                 latency_ms=latency_ms,
             )
-            
+
         except Exception as e:
             latency_ms = (time.time() - start_time) * 1000
             logger.error(f"Custom layout generation error: {e}", exc_info=True)
@@ -286,7 +285,254 @@ class CustomLayoutService:
                 error=str(e),
                 latency_ms=latency_ms,
             )
-    
+
+    async def generate_html_from_data(
+        self,
+        content_data: Dict[str, Any],
+        user_request: str,
+        layout_hints: Optional[str] = None,
+        layout_type: Optional[str] = None,
+    ) -> CustomLayoutResult:
+        """
+        Generate HTML directly from content data (no SceneGraph).
+
+        Sprint 6.1 Optimization: Skip SceneGraph intermediate format.
+        Gemini generates content data → Opus creates HTML directly.
+
+        This is ~10-15s faster than the SceneGraph flow.
+
+        Args:
+            content_data: Content data from Gemini (type, title, data)
+            user_request: Original user request
+            layout_hints: Optional layout hints string
+            layout_type: Optional layout type (trivia, dashboard, etc.)
+
+        Returns:
+            CustomLayoutResult with generated HTML
+        """
+        start_time = time.time()
+
+        # Check if feature is enabled
+        if not getattr(settings, 'CUSTOM_LAYOUT_ENABLED', False):
+            return CustomLayoutResult(
+                html=None,
+                success=False,
+                error="Custom layout feature is disabled",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        if not content_data:
+            return CustomLayoutResult(
+                html=None,
+                success=False,
+                error="Empty content data provided",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        try:
+            # Build prompt from content data (no SceneGraph)
+            prompt = build_data_to_html_prompt(content_data, user_request, layout_hints)
+            system_prompt = get_system_prompt()
+
+            detected_type = layout_type or content_data.get("content_type", "unknown")
+
+            logger.info(f"Generating HTML from data (type={detected_type})")
+
+            # Generate with Opus 4.5
+            response = await opus_provider.generate(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=0.7,
+                max_tokens=16384,
+            )
+
+            if not response.success:
+                logger.error(f"Opus generation failed: {response.error}")
+                return CustomLayoutResult(
+                    html=None,
+                    success=False,
+                    error=response.error or "HTML generation failed",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            html = self._clean_html_response(response.content)
+            logger.info(f"Opus completed in {response.latency_ms:.0f}ms")
+
+            if not html or not self._is_valid_html_structure(html):
+                logger.warning("Invalid HTML structure from direct generation")
+                return CustomLayoutResult(
+                    html=None,
+                    success=False,
+                    error="Invalid HTML structure",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            # Save for debugging
+            save_html_for_debug(html, suffix="from_data")
+
+            return CustomLayoutResult(
+                html=html,
+                success=True,
+                error=None,
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        except Exception as e:
+            logger.error(f"Direct HTML generation error: {e}", exc_info=True)
+            return CustomLayoutResult(
+                html=None,
+                success=False,
+                error=str(e),
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+    async def generate_and_validate_html_from_data(
+        self,
+        content_data: Dict[str, Any],
+        user_request: str,
+        layout_hints: Optional[str] = None,
+        layout_type: Optional[str] = None,
+    ) -> CustomLayoutResult:
+        """
+        Generate HTML from content data AND validate with visual validation.
+
+        Sprint 6.1: Direct flow with visual validation.
+        This combines the speed of direct data→HTML with the quality
+        assurance of visual validation.
+
+        Flow:
+        1. Generate HTML from content_data with Opus
+        2. Validate with VisualValidator (screenshot comparison)
+        3. If fails, repair with DirectFixer (Sonnet 4.5)
+        4. Re-validate repaired HTML
+        5. Return result
+
+        Args:
+            content_data: Content data from Gemini
+            user_request: Original user request
+            layout_hints: Optional layout hints
+            layout_type: Optional layout type hint
+
+        Returns:
+            CustomLayoutResult with validated HTML
+        """
+        start_time = time.time()
+
+        # Step 1: Generate HTML from data
+        result = await self.generate_html_from_data(
+            content_data=content_data,
+            user_request=user_request,
+            layout_hints=layout_hints,
+            layout_type=layout_type,
+        )
+
+        if not result.success or not result.html:
+            return result
+
+        # Check if visual validation is enabled
+        use_visual_validation = getattr(settings, 'VISUAL_VALIDATION_ENABLED', True)
+
+        if not use_visual_validation:
+            logger.info("Visual validation disabled, returning generated HTML")
+            return result
+
+        html = result.html
+
+        # Detect layout type
+        detected_type = layout_type or content_data.get("content_type", "unknown")
+
+        logger.info(f"Starting visual validation for direct flow (layout_type={detected_type})")
+
+        # Step 2: Validate with VisualValidator
+        contract = ValidationContract(
+            html=html,
+            layout_type=detected_type,
+            visual_change_threshold=getattr(settings, 'VISUAL_CHANGE_THRESHOLD', 0.05),
+            blank_page_threshold=getattr(settings, 'BLANK_PAGE_THRESHOLD', 0.95),
+            max_inputs_to_test=getattr(settings, 'MAX_INPUTS_TO_TEST', 10),
+            stabilization_ms=getattr(settings, 'INTERACTION_STABILIZATION_MS', 150),
+        )
+
+        validation_result = await visual_validator.validate(contract)
+
+        if validation_result.valid:
+            logger.info(
+                f"Visual validation passed (direct flow) - "
+                f"inputs={validation_result.inputs_responsive}/{validation_result.inputs_tested}, "
+                f"confidence={validation_result.confidence:.2f}"
+            )
+            return CustomLayoutResult(
+                html=html,
+                success=True,
+                error=None,
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # Step 3: Validation failed - attempt repair
+        logger.warning(
+            f"Visual validation failed (direct flow): {validation_result.failure_summary}"
+        )
+
+        max_repair_attempts = getattr(settings, 'VALIDATION_REPAIR_MAX_RETRIES', 2)
+
+        for attempt in range(max_repair_attempts):
+            logger.info(f"Visual repair attempt {attempt + 1}/{max_repair_attempts} (direct flow)")
+
+            # Repair with DirectFixer (Sonnet 4.5)
+            repaired_html = await direct_fixer.repair(
+                html=html,
+                sandbox_result=validation_result,
+                user_request=user_request,
+            )
+
+            if not repaired_html:
+                logger.warning(f"Repair attempt {attempt + 1} failed to produce HTML")
+                continue
+
+            # Save repaired HTML for debugging
+            save_html_for_debug(repaired_html, suffix=f"direct_repaired_{attempt + 1}")
+
+            # Step 4: Re-validate repaired HTML
+            repair_contract = ValidationContract(
+                html=repaired_html,
+                layout_type=detected_type,
+                visual_change_threshold=getattr(settings, 'VISUAL_CHANGE_THRESHOLD', 0.05),
+                blank_page_threshold=getattr(settings, 'BLANK_PAGE_THRESHOLD', 0.95),
+                max_inputs_to_test=getattr(settings, 'MAX_INPUTS_TO_TEST', 10),
+                stabilization_ms=getattr(settings, 'INTERACTION_STABILIZATION_MS', 150),
+            )
+
+            repair_validation = await visual_validator.validate(repair_contract)
+
+            if repair_validation.valid:
+                logger.info(
+                    f"Repair successful after {attempt + 1} attempts (direct flow) - "
+                    f"inputs={repair_validation.inputs_responsive}/{repair_validation.inputs_tested}"
+                )
+                return CustomLayoutResult(
+                    html=repaired_html,
+                    success=True,
+                    error=None,
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            # Update for next repair attempt
+            html = repaired_html
+            validation_result = repair_validation
+
+        # All repair attempts failed - return best effort
+        logger.warning(
+            f"All repair attempts failed (direct flow). Returning last HTML. "
+            f"Final: {validation_result.inputs_responsive}/{validation_result.inputs_tested} responsive"
+        )
+
+        return CustomLayoutResult(
+            html=html,
+            success=True,  # Return HTML anyway, let user see it
+            error=f"Validation incomplete: {validation_result.failure_summary}",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
     def _clean_html_response(self, content: str) -> Optional[str]:
         """
         Clean and extract HTML from GPT response.

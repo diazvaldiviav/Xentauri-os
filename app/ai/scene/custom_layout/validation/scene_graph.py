@@ -18,6 +18,7 @@ from typing import Optional, Tuple, TYPE_CHECKING
 
 from .contracts import (
     BoundingBox,
+    EventOwnerCandidate,
     ObservedSceneGraph,
     PhaseResult,
     SceneNode,
@@ -42,8 +43,8 @@ JS_EXTRACT_SCENE_GRAPH = """
         // Try ID first
         if (el.id) return '#' + el.id;
 
-        // Try data attributes
-        for (const attr of ['data-testid', 'data-option', 'data-submit', 'data-question']) {
+        // Try data attributes (best for unique selection)
+        for (const attr of ['data-testid', 'data-option', 'data-submit', 'data-question', 'data-answer', 'data-choice', 'data-index']) {
             if (el.hasAttribute(attr)) {
                 const val = el.getAttribute(attr);
                 return `[${attr}="${val}"]`;
@@ -63,16 +64,62 @@ JS_EXTRACT_SCENE_GRAPH = """
             }
         }
 
-        // Fallback: tag with nth-child
-        const parent = el.parentElement;
-        if (parent) {
-            const siblings = Array.from(parent.children).filter(c => c.tagName === el.tagName);
-            if (siblings.length > 1) {
-                const idx = siblings.indexOf(el) + 1;
-                return `${tag}:nth-of-type(${idx})`;
+        // Build full CSS path for uniqueness (body > div > div > span:nth-of-type(2))
+        function buildPath(element) {
+            const parts = [];
+            let current = element;
+
+            while (current && current !== document.body && parts.length < 5) {
+                const ctag = current.tagName.toLowerCase();
+
+                // Try to use class if unique at this level
+                if (current.className && typeof current.className === 'string') {
+                    const cls = current.className.split(' ')[0];
+                    if (cls) {
+                        const clsSelector = `${ctag}.${cls}`;
+                        // Check if this class is unique among siblings
+                        const parent = current.parentElement;
+                        if (parent) {
+                            const withSameClass = Array.from(parent.children).filter(
+                                c => c.tagName === current.tagName && c.className && c.className.split(' ')[0] === cls
+                            );
+                            if (withSameClass.length === 1) {
+                                parts.unshift(clsSelector);
+                                current = parent;
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // Use nth-of-type for positioning
+                const parent = current.parentElement;
+                if (parent) {
+                    const siblings = Array.from(parent.children).filter(c => c.tagName === current.tagName);
+                    if (siblings.length > 1) {
+                        const idx = siblings.indexOf(current) + 1;
+                        parts.unshift(`${ctag}:nth-of-type(${idx})`);
+                    } else {
+                        parts.unshift(ctag);
+                    }
+                } else {
+                    parts.unshift(ctag);
+                }
+
+                current = parent;
             }
+
+            return parts.join(' > ');
         }
 
+        const pathSelector = buildPath(el);
+
+        // Verify uniqueness
+        if (pathSelector && document.querySelectorAll(pathSelector).length === 1) {
+            return pathSelector;
+        }
+
+        // Ultimate fallback: use data-idx
         return `${tag}[data-idx="${index}"]`;
     }
 
@@ -113,6 +160,100 @@ JS_EXTRACT_SCENE_GRAPH = """
         }
 
         return 'container';
+    }
+
+    // EOR: Find the event owner candidate (ancestor with handler)
+    function findEventOwnerCandidate(el, selfSelector, index) {
+        const SVG_NS = 'http://www.w3.org/2000/svg';
+
+        // =====================================================================
+        // STRUCTURAL RULE: SVG graphic nodes can NEVER be self-owned
+        // "En SVG no se clickea la geometría; se interactúa con el contenedor"
+        // =====================================================================
+        const isSVGGraphicNode = el.namespaceURI === SVG_NS &&
+                                  el.tagName.toLowerCase() !== 'svg';
+
+        // Priority order for ownership detection
+        const checkOwnership = (element) => {
+            // 1. Explicit onclick handler
+            if (element.onclick || element.hasAttribute('onclick')) {
+                return 'ancestor_with_onclick';
+            }
+
+            // 2. Role button
+            if (element.getAttribute('role') === 'button') {
+                return 'ancestor_with_role_button';
+            }
+
+            // 3. Semantic data attributes (our trivia/game markers)
+            const semanticAttrs = ['data-option', 'data-answer', 'data-choice',
+                                   'data-submit', 'data-start', 'data-restart'];
+            for (const attr of semanticAttrs) {
+                if (element.hasAttribute(attr)) {
+                    return 'ancestor_with_' + attr;
+                }
+            }
+
+            // 4. Tabindex with focusable (likely has keyboard handler)
+            const tabindex = element.getAttribute('tabindex');
+            if (tabindex !== null && parseInt(tabindex) >= 0) {
+                // Only if also has some interactive indicator
+                if (element.onclick || window.getComputedStyle(element).cursor === 'pointer') {
+                    return 'ancestor_with_tabindex';
+                }
+            }
+
+            return null;
+        };
+
+        let current = el.parentElement;
+        let svgRoot = null;  // Track SVG root for fallback
+
+        // Walk up the DOM tree (max 10 levels to avoid infinite loops)
+        let depth = 0;
+        while (current && current !== document.body && depth < 10) {
+            // Track the SVG root element for fallback
+            if (current.tagName.toLowerCase() === 'svg') {
+                svgRoot = current;
+            }
+
+            const reason = checkOwnership(current);
+            if (reason) {
+                // Found an owner - get its selector
+                const ownerSelector = getUniqueSelector(current, index);
+                return {
+                    selector: ownerSelector,
+                    reason: reason
+                };
+            }
+            current = current.parentElement;
+            depth++;
+        }
+
+        // =====================================================================
+        // FALLBACK FOR SVG GRAPHIC NODES: They MUST have an owner
+        // Resolution order: SVG root > First HTML container
+        // =====================================================================
+        if (isSVGGraphicNode) {
+            // Use SVG root as the owner (user clicks the SVG, not the shape)
+            if (svgRoot) {
+                return {
+                    selector: getUniqueSelector(svgRoot, index),
+                    reason: 'svg_interactive_boundary'
+                };
+            }
+            // Last resort: find closest SVG ancestor
+            const closestSvg = el.closest('svg');
+            if (closestSvg) {
+                return {
+                    selector: getUniqueSelector(closestSvg, index),
+                    reason: 'svg_interactive_boundary'
+                };
+            }
+        }
+
+        // No owner found - element owns itself (only valid for HTML elements)
+        return null;
     }
 
     function isVisible(el) {
@@ -157,6 +298,7 @@ JS_EXTRACT_SCENE_GRAPH = """
             'type', 'role', 'disabled', 'href', 'onclick',
             'data-option', 'data-submit', 'data-question', 'data-feedback',
             'data-trivia', 'data-game', 'data-dashboard',
+            'data-answer', 'data-choice', 'data-correct', 'data-index',
             'aria-selected', 'aria-checked', 'aria-pressed'
         ];
         for (const attr of interestingAttrs) {
@@ -169,6 +311,9 @@ JS_EXTRACT_SCENE_GRAPH = """
         if (style.cursor === 'pointer') {
             attrs['cursor'] = 'pointer';
         }
+
+        // EOR: Find event owner candidate (ancestor with handler)
+        const eventOwnerCandidate = findEventOwnerCandidate(el, selector, index);
 
         nodes.push({
             selector: selector,
@@ -183,7 +328,8 @@ JS_EXTRACT_SCENE_GRAPH = """
             visible: true,
             zIndex: parseInt(style.zIndex) || 0,
             textContent: (el.innerText || '').slice(0, 100).trim(),
-            attributes: attrs
+            attributes: attrs,
+            eventOwnerCandidate: eventOwnerCandidate  // null if self-owned
         });
     }
 
@@ -238,6 +384,15 @@ class SceneGraphExtractor:
                         height=bbox_data.get("height", 0),
                     )
 
+                    # Parse event owner candidate if present
+                    eoc_data = n.get("eventOwnerCandidate")
+                    event_owner = None
+                    if eoc_data and isinstance(eoc_data, dict):
+                        event_owner = EventOwnerCandidate(
+                            selector=eoc_data.get("selector", ""),
+                            reason=eoc_data.get("reason", ""),
+                        )
+
                     node = SceneNode(
                         selector=n.get("selector", ""),
                         tag=n.get("tag", ""),
@@ -247,6 +402,7 @@ class SceneGraphExtractor:
                         z_index=n.get("zIndex", 0),
                         text_content=n.get("textContent"),
                         attributes=n.get("attributes", {}),
+                        event_owner_candidate=event_owner,
                     )
                     nodes.append(node)
                 except Exception as e:
@@ -332,6 +488,15 @@ class SceneGraphExtractor:
                 height=bbox_data.get("height", 0),
             )
 
+            # Parse event owner candidate if present
+            eoc_data = n.get("eventOwnerCandidate")
+            event_owner = None
+            if eoc_data and isinstance(eoc_data, dict):
+                event_owner = EventOwnerCandidate(
+                    selector=eoc_data.get("selector", ""),
+                    reason=eoc_data.get("reason", ""),
+                )
+
             node = SceneNode(
                 selector=n.get("selector", ""),
                 tag=n.get("tag", ""),
@@ -341,6 +506,7 @@ class SceneGraphExtractor:
                 z_index=n.get("zIndex", 0),
                 text_content=n.get("textContent"),
                 attributes=n.get("attributes", {}),
+                event_owner_candidate=event_owner,
             )
             nodes.append(node)
 

@@ -24,26 +24,35 @@ logger = logging.getLogger("jarvis.ai.scene.custom_layout.validation.fixer")
 
 REPAIR_SYSTEM_PROMPT = """You are an HTML repair specialist for interactive web layouts.
 
-Your task is to fix HTML that failed visual validation. The validation system uses
-actual screenshot comparison to detect changes - not just DOM class changes.
+The validation system uses SCREENSHOT COMPARISON to detect visual changes.
+It requires at least 2% of viewport pixels (41,000 pixels on 1920x1080) to change.
 
-CRITICAL REQUIREMENTS:
-1. Clicks MUST produce VISIBLE changes (background color, opacity, transform, etc.)
-2. All interactive elements MUST respond to user input
-3. CSS transitions/animations MUST actually execute (not just add classes)
-4. No JavaScript errors allowed
-5. All content MUST be visible on 1920x1080 dark theme display
+FAILURE TYPES YOU WILL SEE:
 
-COMMON ISSUES TO FIX:
-- CSS transitions defined but never triggered
-- Classes added but no corresponding CSS rules
-- Hidden elements that never become visible
-- Event handlers that don't update visual state
-- Z-index issues hiding interactive elements
+1. **under_threshold** - Button WORKS but visual feedback is TOO SUBTLE
+   - The handler fires, but the color change is too small
+   - DO NOT add new handlers or rewrite JavaScript
+   - DO: Add overlays, expand affected area, use ::after pseudo-elements
+   - Example fix: Add a full-screen flash overlay on click
+
+2. **no_change** - Button produces ZERO visual change
+   - Handler is broken or not connected
+   - DO: Check onclick, add missing handlers, fix CSS selectors
+
+3. **error** - JavaScript error occurred
+   - Fix the error shown in the message
+
+FOR under_threshold FAILURES (most common):
+- A 100x40 button = 4000 pixels = 0.2% of viewport (NOT ENOUGH)
+- You need to affect a LARGER AREA when clicked
+- Best fix: Add ::after overlay that covers 20%+ of screen
+- Alternative: Change entire panel background, not just button
+
+CRITICAL: Read the "interpretation" field - it tells you exactly what to do.
 
 OUTPUT:
 Return ONLY the fixed HTML from <!DOCTYPE html> to </html>.
-Do NOT include markdown code blocks or explanations."""
+No markdown, no explanations."""
 
 
 def build_repair_prompt(
@@ -54,13 +63,8 @@ def build_repair_prompt(
     """
     Build repair prompt with full phase-by-phase context.
 
-    Args:
-        html: The HTML that failed validation
-        sandbox_result: Full validation result with phase details
-        user_request: Original user request
-
-    Returns:
-        Prompt string for Codex-Max
+    CRITICAL: Includes pixel_diff_ratio and failure classification so
+    Sonnet knows the REAL problem (under_threshold vs no_change).
     """
     # Truncate HTML if too long (keep beginning and end)
     max_html_len = 12000
@@ -68,15 +72,67 @@ def build_repair_prompt(
         half = max_html_len // 2
         html = html[:half] + "\n\n<!-- ... TRUNCATED ... -->\n\n" + html[-half:]
 
+    # Build rich context for each interaction result
+    interaction_details = []
+    under_threshold_count = 0
+    no_change_count = 0
+
+    for ir in sandbox_result.interaction_results:
+        ctx = ir.get_repair_context(threshold=0.02)
+
+        if ctx["failure_type"] == "under_threshold":
+            under_threshold_count += 1
+            interaction_details.append(
+                f"  ⚠️ {ctx['selector']}\n"
+                f"     Type: {ctx['failure_type']}\n"
+                f"     Change: {ctx['pixel_diff_pct']} (need {ctx['threshold']})\n"
+                f"     Action: {ctx['interpretation']}"
+            )
+        elif ctx["failure_type"] == "no_change":
+            no_change_count += 1
+            interaction_details.append(
+                f"  ❌ {ctx['selector']}\n"
+                f"     Type: {ctx['failure_type']}\n"
+                f"     Action: {ctx['interpretation']}"
+            )
+        elif ctx["failure_type"] == "error":
+            interaction_details.append(
+                f"  💥 {ctx['selector']}\n"
+                f"     Type: error\n"
+                f"     Action: {ctx['interpretation']}"
+            )
+        # Skip "passed" elements
+
+    interaction_section = "\n\n".join(interaction_details) if interaction_details else "  (none)"
+
+    # Build summary based on failure types
+    if under_threshold_count > 0 and no_change_count == 0:
+        summary = f"""DIAGNOSIS: All {under_threshold_count} failing elements are "under_threshold".
+This means the buttons WORK but produce INSUFFICIENT visual change.
+DO NOT rewrite handlers. AMPLIFY the visual feedback instead."""
+    elif no_change_count > 0 and under_threshold_count == 0:
+        summary = f"""DIAGNOSIS: All {no_change_count} failing elements produce NO visual change.
+The handlers are likely broken or not connected.
+Check onclick handlers, CSS selectors, and event binding."""
+    else:
+        summary = f"""DIAGNOSIS: Mixed failures.
+- {under_threshold_count} elements need visual amplification (under_threshold)
+- {no_change_count} elements have broken handlers (no_change)
+Fix each according to its failure type."""
+
     return f"""Fix this HTML that failed visual validation.
 
-## VALIDATION FAILURES
+## DIAGNOSIS
 
-{sandbox_result.to_repair_context()}
+{summary}
 
-## ORIGINAL USER REQUEST
+## ELEMENTS TO FIX
 
-"{user_request[:500]}"
+{interaction_section}
+
+## ORIGINAL REQUEST
+
+"{user_request[:300]}"
 
 ## HTML TO FIX
 
@@ -84,13 +140,12 @@ def build_repair_prompt(
 {html}
 ```
 
-## REPAIR REQUIREMENTS
+## REPAIR INSTRUCTIONS
 
-1. Fix ALL issues identified in the phase failures above
-2. Ensure clicks produce VISIBLE changes (not just DOM class changes)
-3. All interactive elements must respond to user input
+1. Read each element's "failure_type" and "Action" carefully
+2. For "under_threshold": Add large visual effects (overlays, panel changes)
+3. For "no_change": Fix or add event handlers
 4. Keep the visual design intact (dark theme, 1920x1080)
-5. No JavaScript errors
 
 ## OUTPUT
 

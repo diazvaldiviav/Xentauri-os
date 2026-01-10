@@ -85,6 +85,14 @@ class GeminiProvider(AIProvider):
             latency_ms = self._measure_latency(start_time)
             usage = self._extract_usage(response)
 
+            # Check for truncation (finish_reason other than STOP)
+            finish_reason = None
+            if response.candidates and len(response.candidates) > 0:
+                candidate = response.candidates[0]
+                finish_reason = getattr(candidate, 'finish_reason', None)
+                if finish_reason and str(finish_reason) not in ['STOP', 'FinishReason.STOP', '1']:
+                    logger.warning(f"Gemini response may be truncated: finish_reason={finish_reason}")
+
             return AIResponse(
                 content=response.text,
                 provider=self.provider_type,

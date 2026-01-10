@@ -5914,8 +5914,16 @@ IMPORTANT INSTRUCTIONS:
                 user_request=intent.original_text,
                 layout_hints=intent.layout_hints,
             )
+
+            # Sprint 6.1: Determine if we need real data or can use direct flow
+            # Real data types: calendar, weather, etc. - require SceneGraph for data fetching
+            # Creative types: trivia, games, visualizations - can skip SceneGraph
+            needs_real_data = bool(realtime_data and any(
+                k in realtime_data for k in ['calendar', 'weather', 'events', 'documents']
+            ))
+
             if realtime_data:
-                logger.info(f"[{request_id}] Fetched real-time data for: {list(realtime_data.keys())}")
+                logger.info(f"[{request_id}] Fetched real-time data for: {list(realtime_data.keys())} (needs_real_data={needs_real_data})")
             
             # Sprint 4.2: Build conversation context for scene generation
             # This ensures Claude knows what was discussed/generated before
@@ -5984,7 +5992,7 @@ IMPORTANT INSTRUCTIONS:
                 conversation_context_dict["content_memory"] = content_memory
                 logger.info(f"[{request_id}] Including content memory in scene context: {len(content_memory)} items")
 
-            # Sprint 5.2.3: Loading Phase 2 - Generating scene
+            # Sprint 5.2.3: Loading Phase 2 - Generating content
             await connection_manager.send_command(
                 device_id=target_device.id,
                 command_type="loading_start",
@@ -5992,72 +6000,129 @@ IMPORTANT INSTRUCTIONS:
             )
             logger.info(f"[{request_id}] Loading Phase 2: Analyzing")
 
-            # Generate scene via SceneService (now with real-time data AND conversation context)
-            logger.info(f"[{request_id}] Generating scene with {len(normalized_hints)} layout hints")
-            scene = await scene_service.generate_scene(
-                layout_hints=normalized_hints,
-                info_type=intent.info_type,
-                target_devices=[str(target_device.id)],
-                user_id=str(user_id),
-                user_request=intent.original_text,
-                db=db,
-                realtime_data=realtime_data,  # Sprint 4.1: Pass real-time data
-                conversation_context=conversation_context_dict,  # Sprint 4.2: Pass conversation context
-            )
-            
-            # Send scene to device via WebSocket
-            scene_dict = scene.model_dump(mode="json")
-            
-            # Sprint 5.2: Generate custom HTML layout via GPT-5.2 (if enabled)
+            # Sprint 6.1: Hybrid flow - direct data for creative content, SceneGraph for real data
+            scene_dict = None
             custom_layout = None
-            if settings.CUSTOM_LAYOUT_ENABLED:
-                try:
-                    from app.ai.scene.custom_layout import custom_layout_service, layout_validator
+            content_data = None  # Initialize for use in response building
 
-                    # Sprint 5.2.3: Loading Phase 3 - Designing layout
-                    await connection_manager.send_command(
-                        device_id=target_device.id,
-                        command_type="loading_start",
-                        parameters={"message": "Diseñando experiencia...", "phase": 3},
+            if not needs_real_data and settings.CUSTOM_LAYOUT_ENABLED:
+                # =====================================================================
+                # DIRECT FLOW: Creative content (trivia, games, visualizations)
+                # Skip SceneGraph, generate content data directly → Opus HTML
+                # This saves ~10-15 seconds of latency
+                # =====================================================================
+                logger.info(f"[{request_id}] Using DIRECT flow (no SceneGraph) for creative content")
+
+                try:
+                    from app.ai.scene.custom_layout import custom_layout_service
+
+                    # Step 1: Generate content data with Gemini (faster than full SceneGraph)
+                    hints_str = ", ".join(intent.layout_hints) if intent.layout_hints else None
+                    content_data = await scene_service.generate_content_data(
+                        user_request=intent.original_text,
+                        layout_hints=normalized_hints,
+                        realtime_data=realtime_data,
+                        conversation_context=conversation_context_dict,
                     )
-                    logger.info(f"[{request_id}] Loading Phase 3: Designing")
-                    layout_result = await custom_layout_service.generate_html(
-                        scene=scene_dict,
-                        user_request=intent.original_text or "",
-                    )
-                    
-                    if layout_result.success and layout_result.html:
-                        # Validate HTML with Playwright (if enabled)
-                        if settings.CUSTOM_LAYOUT_VALIDATION_ENABLED:
-                            logger.info(f"[{request_id}] Validating custom HTML with Playwright...")
-                            validation_result = await layout_validator.validate(layout_result.html)
-                            
-                            if validation_result.is_valid:
-                                custom_layout = layout_result.html
-                                logger.info(
-                                    f"[{request_id}] Custom HTML layout validated successfully "
-                                    f"(render: {validation_result.render_time_ms:.0f}ms)"
-                                )
-                            else:
-                                logger.warning(
-                                    f"[{request_id}] Custom HTML validation failed: {validation_result.errors}. "
-                                    f"Falling back to SceneGraph."
-                                )
-                        else:
-                            # Skip validation, use generated HTML directly
-                            custom_layout = layout_result.html
-                            logger.info(f"[{request_id}] Using custom HTML layout (validation skipped)")
-                    else:
-                        logger.warning(
-                            f"[{request_id}] Custom layout generation failed: {layout_result.error}. "
-                            f"Falling back to SceneGraph."
+
+                    if content_data:
+                        logger.info(f"[{request_id}] Content data generated: {content_data.get('content_type', 'unknown')}")
+
+                        # Loading Phase 3 - Designing layout
+                        await connection_manager.send_command(
+                            device_id=target_device.id,
+                            command_type="loading_start",
+                            parameters={"message": "Diseñando experiencia...", "phase": 3},
                         )
+                        logger.info(f"[{request_id}] Loading Phase 3: Designing (direct flow)")
+
+                        # Step 2: Generate HTML + validate with visual validation
+                        layout_result = await custom_layout_service.generate_and_validate_html_from_data(
+                            content_data=content_data,
+                            user_request=intent.original_text or "",
+                            layout_hints=hints_str,
+                            layout_type=content_data.get("content_type"),
+                        )
+
+                        if layout_result.success and layout_result.html:
+                            custom_layout = layout_result.html
+                            logger.info(
+                                f"[{request_id}] Direct HTML generated + validated "
+                                f"(latency: {layout_result.latency_ms:.0f}ms)"
+                            )
+                            # Create minimal scene_dict for display_scene command
+                            scene_dict = {"scene_id": request_id, "direct_flow": True}
+                        else:
+                            logger.warning(
+                                f"[{request_id}] Direct flow failed: {layout_result.error}. "
+                                f"Falling back to SceneGraph flow."
+                            )
+                    else:
+                        logger.warning(f"[{request_id}] Content data generation failed, falling back to SceneGraph")
+
                 except Exception as e:
                     logger.error(
-                        f"[{request_id}] Custom layout error (falling back to SceneGraph): {e}",
+                        f"[{request_id}] Direct flow error, falling back to SceneGraph: {e}",
                         exc_info=True
                     )
-                    # Continue with custom_layout = None (fallback to scene)
+
+            # =====================================================================
+            # SCENOGRAPH FLOW: Real data (calendar, weather) or direct flow failed
+            # Full SceneGraph generation with Gemini + Opus HTML
+            # =====================================================================
+            if scene_dict is None:
+                logger.info(f"[{request_id}] Using SCENOGRAPH flow (needs_real_data={needs_real_data})")
+
+                # Generate scene via SceneService (now with real-time data AND conversation context)
+                logger.info(f"[{request_id}] Generating scene with {len(normalized_hints)} layout hints")
+                scene = await scene_service.generate_scene(
+                    layout_hints=normalized_hints,
+                    info_type=intent.info_type,
+                    target_devices=[str(target_device.id)],
+                    user_id=str(user_id),
+                    user_request=intent.original_text,
+                    db=db,
+                    realtime_data=realtime_data,
+                    conversation_context=conversation_context_dict,
+                )
+
+                scene_dict = scene.model_dump(mode="json")
+
+                # Generate custom HTML layout if enabled
+                if settings.CUSTOM_LAYOUT_ENABLED:
+                    try:
+                        from app.ai.scene.custom_layout import custom_layout_service
+
+                        # Loading Phase 3 - Designing layout
+                        await connection_manager.send_command(
+                            device_id=target_device.id,
+                            command_type="loading_start",
+                            parameters={"message": "Diseñando experiencia...", "phase": 3},
+                        )
+                        logger.info(f"[{request_id}] Loading Phase 3: Designing")
+
+                        # Use generate_and_validate_html with visual validation
+                        layout_result = await custom_layout_service.generate_and_validate_html(
+                            scene=scene_dict,
+                            user_request=intent.original_text or "",
+                        )
+
+                        if layout_result.success and layout_result.html:
+                            custom_layout = layout_result.html
+                            logger.info(
+                                f"[{request_id}] Custom HTML layout generated and validated "
+                                f"(latency: {layout_result.latency_ms:.0f}ms)"
+                            )
+                        else:
+                            logger.warning(
+                                f"[{request_id}] Custom layout generation/validation failed: {layout_result.error}. "
+                                f"Falling back to SceneGraph."
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"[{request_id}] Custom layout error (falling back to SceneGraph): {e}",
+                            exc_info=True
+                        )
             
             # Send scene to device using the display_scene command
             # Sprint 5.2: Include custom_layout if generated successfully
@@ -6083,14 +6148,29 @@ IMPORTANT INSTRUCTIONS:
                 error=result.error,
             )
             
-            # Build user-friendly response with component summary
-            component_summary = ", ".join(
-                [c.type for c in scene.components[:3]]
-            )
-            if len(scene.components) > 3:
-                component_summary += f" and {len(scene.components) - 3} more"
+            # Build user-friendly response
+            # Sprint 6.1: Handle both direct flow (no scene) and SceneGraph flow
+            is_direct_flow = scene_dict.get("direct_flow", False)
 
-            response_message = f"I've updated {target_device.name} with {component_summary}."
+            if is_direct_flow and content_data:
+                # Direct flow: use content_data for response
+                content_type = content_data.get("content_type", "content")
+                content_title = content_data.get("title", "interactive content")
+                response_message = f"I've updated {target_device.name} with {content_type}: {content_title}."
+                scene_id = request_id
+                layout_intent = content_type
+                components_list = [content_type]
+            else:
+                # SceneGraph flow: use scene object
+                component_summary = ", ".join(
+                    [c.type for c in scene.components[:3]]
+                )
+                if len(scene.components) > 3:
+                    component_summary += f" and {len(scene.components) - 3} more"
+                response_message = f"I've updated {target_device.name} with {component_summary}."
+                scene_id = scene.scene_id
+                layout_intent = scene.layout.intent.value
+                components_list = [c.type for c in scene.components]
 
             # Sprint 4.3.0: Save display content response to conversation context
             conversation_context_service.add_conversation_turn(
@@ -6103,9 +6183,9 @@ IMPORTANT INSTRUCTIONS:
             # Sprint 4.4.0 - GAP #8: Save scene metadata for assistant awareness
             conversation_context_service.set_last_scene(
                 user_id=str(user_id),
-                scene_id=scene.scene_id,
-                components=[c.type for c in scene.components],
-                layout_intent=scene.layout.intent.value,
+                scene_id=scene_id,
+                components=components_list,
+                layout_intent=layout_intent,
             )
 
             return IntentResult(
@@ -6115,10 +6195,10 @@ IMPORTANT INSTRUCTIONS:
                 device=target_device,
                 message=response_message,
                 data={
-                    "scene_id": scene.scene_id,
+                    "scene_id": scene_id,
                     "scene": scene_dict,
                     "target_device": str(target_device.id),
-                    "layout_intent": scene.layout.intent.value,
+                    "layout_intent": layout_intent,
                 },
                 command_sent=result.success,
                 command_id=result.command_id,

@@ -215,7 +215,135 @@ class SceneService:
         )
         
         return scene
-    
+
+    # -------------------------------------------------------------------------
+    # CONTENT DATA GENERATION (Sprint 7 - Skip SceneGraph)
+    # -------------------------------------------------------------------------
+
+    async def generate_content_data(
+        self,
+        user_request: str,
+        layout_hints: List[LayoutHint] = None,
+        realtime_data: Dict[str, Any] = None,
+        conversation_context: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate content data for Opus WITHOUT SceneGraph structure.
+
+        This is a faster alternative to generate_scene() that skips the
+        SceneGraph format and returns raw content data that Opus can use
+        directly for HTML generation.
+
+        Args:
+            user_request: Original user request
+            layout_hints: Optional layout hints
+            realtime_data: Pre-fetched real-time data
+            conversation_context: Conversation history
+
+        Returns:
+            Dict with content_type, title, and data fields
+
+        Raises:
+            Exception: If content generation fails
+        """
+        from app.core.config import settings
+
+        # Build a simpler prompt for content generation (no SceneGraph structure)
+        hints_str = ""
+        if layout_hints:
+            hints_str = f"\nLayout hints: {', '.join(h.raw_hint or h.component for h in layout_hints)}"
+
+        realtime_str = ""
+        if realtime_data:
+            realtime_str = f"\n\nReal-time data available:\n{json.dumps(realtime_data, ensure_ascii=False, indent=2, default=str)}"
+
+        context_str = ""
+        if conversation_context:
+            # Extract relevant context
+            if "generated_content" in conversation_context:
+                gen_content = conversation_context["generated_content"]
+                # generated_content is a Dict with 'content', 'type', 'title' keys
+                if isinstance(gen_content, dict):
+                    content_text = gen_content.get("content", "")
+                    content_type = gen_content.get("type", "")
+                    content_title = gen_content.get("title", "")
+                    context_str = f"\n\nPrevious content ({content_type}): {content_title}\n{str(content_text)[:500]}"
+                elif isinstance(gen_content, str):
+                    context_str = f"\n\nPrevious generated content:\n{gen_content[:500]}"
+                else:
+                    context_str = f"\n\nPrevious generated content:\n{str(gen_content)[:500]}"
+
+        prompt = f"""Generate content data for this display request:
+
+REQUEST: "{user_request}"{hints_str}{realtime_str}{context_str}
+
+Return JSON with this structure:
+{{
+    "content_type": "trivia|game|visualization|calendar|weather|dashboard|info|creative",
+    "title": "Display title",
+    "data": {{
+        // Content-specific data structure
+        // For trivia: {{"questions": [{{"question": "...", "options": [...], "correct": 0}}]}}
+        // For visualization: {{"elements": [...], "animations": [...]}}
+        // For calendar: {{"events": [...]}}
+        // etc.
+    }}
+}}
+
+IMPORTANT:
+- Generate COMPLETE data, not placeholders
+- For trivia/quiz: include 5-10 real questions with answers
+- For visualizations: include all elements needed
+- For games: include game state and rules
+- Be creative and engaging"""
+
+        logger.info(f"Generating content data (skip SceneGraph) for: {user_request[:50]}...")
+
+        response = await gemini_provider.generate(
+            prompt=prompt,
+            temperature=0.4,
+            max_tokens=4096,
+            response_mime_type="application/json",
+            model_override=settings.GEMINI_REASONING_MODEL,
+        )
+
+        if not response.success:
+            raise Exception(f"Content data generation failed: {response.error}")
+
+        try:
+            content_data = json.loads(response.content)
+
+            # Handle case where Gemini returns array instead of object
+            if isinstance(content_data, list):
+                logger.warning("Gemini returned array instead of object, wrapping in expected structure")
+                content_data = {
+                    "content_type": "creative",
+                    "title": user_request[:50],
+                    "data": content_data
+                }
+
+            # Validate basic structure
+            if not isinstance(content_data, dict):
+                raise Exception(f"Expected dict, got {type(content_data).__name__}")
+
+            if "content_type" not in content_data:
+                content_data["content_type"] = "creative"
+            if "title" not in content_data:
+                content_data["title"] = user_request[:50]
+            if "data" not in content_data:
+                content_data["data"] = {}
+
+            logger.info(
+                f"Content data generated: type={content_data['content_type']}, "
+                f"title={content_data['title'][:30]}"
+            )
+
+            return content_data
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse content data JSON: {e}")
+            raise Exception(f"Invalid content data JSON: {e}")
+
     # -------------------------------------------------------------------------
     # LAYOUT HINT NORMALIZATION
     # -------------------------------------------------------------------------
@@ -374,7 +502,7 @@ class SceneService:
             prompt=generation_prompt,
             system_prompt=system_prompt,
             temperature=0.3,
-            max_tokens=4096,
+            max_tokens=8192,  # Increased to avoid truncation
             response_mime_type="application/json",
             model_override=settings.GEMINI_REASONING_MODEL,  # Use Gemini 3 Flash
         )
@@ -504,7 +632,7 @@ Fix the issue and generate a valid Scene Graph."""
                 prompt=repair_prompt,
                 system_prompt=system_prompt,
                 temperature=0.2,
-                max_tokens=4096,
+                max_tokens=8192,  # Increased to avoid truncation
                 response_mime_type="application/json",
                 model_override=settings.GEMINI_REASONING_MODEL,
             )

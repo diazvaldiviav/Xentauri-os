@@ -224,3 +224,142 @@ def get_css_debug_repair_system_prompt() -> str:
 Fix ONLY the functional bugs identified. Do not change visual design or refactor code.
 Output ONLY corrected HTML from <!DOCTYPE html> to </html>.
 No explanations or markdown."""
+
+
+# ---------------------------------------------------------------------------
+# VALIDATION REPAIR PROMPTS (Sprint 5.2.3)
+# ---------------------------------------------------------------------------
+
+def build_validation_diagnosis_prompt(
+    html: str,
+    validation_errors: list,
+    behavior_report_str: str = None,
+) -> str:
+    """
+    Build prompt for Gemini to diagnose validation errors.
+
+    Args:
+        html: The HTML that failed validation
+        validation_errors: List of validation error messages
+        behavior_report_str: Optional behavior report from testing
+
+    Returns:
+        Prompt for Gemini diagnosis
+    """
+    # Truncate HTML to avoid token limits
+    html_preview = html
+    if len(html) > 2000:
+        html_preview = html[:1000] + "\n\n... [truncated] ...\n\n" + html[-800:]
+
+    errors_str = "\n".join(f"- {err}" for err in validation_errors) if validation_errors else "No specific errors"
+
+    behavior_section = ""
+    if behavior_report_str:
+        behavior_section = f"""
+
+BEHAVIOR TEST RESULTS:
+{behavior_report_str}
+"""
+
+    return f"""Analyze this HTML and identify why validation failed in 2-3 sentences.
+
+VALIDATION ERRORS:
+{errors_str}
+{behavior_section}
+HTML:
+```html
+{html_preview}
+```
+
+Common issues to check:
+- Interactive elements that don't produce visible changes when clicked
+- Missing or broken CSS transitions/animations
+- Elements hidden by CSS that never become visible
+- JavaScript errors preventing interactivity
+- Z-index issues hiding clickable elements
+
+Your diagnosis (2-3 sentences describing the root cause):"""
+
+
+def build_validation_repair_prompt(
+    html: str,
+    diagnosis: str,
+    validation_errors: list,
+    user_request: str,
+) -> str:
+    """
+    Build prompt for Codex-Max to repair validation failures.
+
+    Args:
+        html: The HTML that failed validation
+        diagnosis: Gemini's diagnosis of the issues
+        validation_errors: List of validation error messages
+        user_request: Original user request
+
+    Returns:
+        Prompt for Codex-Max repair
+    """
+    # Truncate if needed
+    request_preview = user_request[:400] if len(user_request) > 400 else user_request
+
+    errors_str = "\n".join(f"- {err}" for err in validation_errors) if validation_errors else "No specific errors"
+
+    return f"""Fix this HTML that failed visual validation.
+
+## DIAGNOSIS
+{diagnosis}
+
+## VALIDATION ERRORS
+{errors_str}
+
+## ORIGINAL USER REQUEST
+"{request_preview}"
+
+## HTML TO FIX
+```html
+{html}
+```
+
+## CRITICAL REQUIREMENTS
+1. All interactive elements MUST produce VISIBLE changes when clicked
+2. CSS transitions and animations MUST actually execute (not just add classes)
+3. Clicks should change: background color, opacity, transform, border, or other visible properties
+4. Keep dark theme optimized for 1920x1080 TV display
+5. Must start with <!DOCTYPE html> and end with </html>
+
+## COMMON FIXES NEEDED
+- Add actual CSS rules for state changes (e.g., .selected {{ background: #4CAF50; }})
+- Ensure transitions have visible duration and effect
+- Fix z-index so clickable elements are accessible
+- Add visual feedback for hover/active/selected states
+
+## OUTPUT
+Return ONLY the corrected HTML, starting with <!DOCTYPE html> and ending with </html>.
+No explanations, no markdown code blocks - just the raw HTML."""
+
+
+def get_validation_diagnosis_system_prompt() -> str:
+    """System prompt for Gemini validation diagnosis."""
+    return """You are an HTML validation expert specializing in interactive layouts.
+Analyze HTML that failed visual validation and identify the root cause.
+Focus on: missing visual feedback, broken interactivity, CSS issues, hidden elements.
+Be concise - respond in 2-3 sentences describing exactly what's wrong."""
+
+
+def get_validation_repair_system_prompt() -> str:
+    """System prompt for Codex-Max validation repair."""
+    return """You are an HTML repair specialist for interactive TV display layouts.
+
+Your task is to fix HTML that failed visual validation. The validation system uses
+actual screenshot comparison to detect changes - clicking elements MUST produce
+visible pixel differences.
+
+CRITICAL: Every interactive element must produce a VISIBLE change when clicked:
+- Background color changes
+- Opacity changes
+- Transform effects (scale, rotate)
+- Border changes
+- Element appearance/disappearance
+
+Output ONLY the corrected HTML from <!DOCTYPE html> to </html>.
+No explanations or markdown - just raw, valid HTML."""
