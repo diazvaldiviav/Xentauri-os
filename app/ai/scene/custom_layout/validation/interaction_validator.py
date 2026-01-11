@@ -97,14 +97,16 @@ class InteractionValidator:
                 duration_ms=(time.time() - start_time) * 1000,
             ), []
 
-        # Sprint 6.2: Filter out navigation elements - they don't produce visual feedback
+        # Sprint 6.2/6.4: Filter out non-testable elements (navigation + display_only)
         testable_inputs = [inp for inp in inputs if inp.testable]
-        navigation_count = len(inputs) - len(testable_inputs)
+        navigation_count = sum(1 for inp in inputs if inp.interaction_category.value == "navigation")
+        display_only_count = sum(1 for inp in inputs if inp.is_display_only())
+        excluded_count = len(inputs) - len(testable_inputs)
 
-        if navigation_count > 0:
+        if excluded_count > 0:
             logger.info(
-                f"Phase 5: Skipping {navigation_count} navigation element(s) "
-                f"(links are not testable for visual feedback)"
+                f"Phase 5: Skipping {excluded_count} non-testable element(s) "
+                f"(navigation={navigation_count}, display_only={display_only_count})"
             )
 
         # Calculate total testable units
@@ -201,6 +203,36 @@ class InteractionValidator:
             duration_ms=total_duration_ms,
         ), results
 
+    async def _pause_animations(self, page: "Page") -> None:
+        """
+        Sprint 6.5: Pause all CSS animations before taking screenshots.
+        
+        This prevents false negatives from orbiting planets, spinning loaders,
+        or any other continuous animations that would cause pixel differences
+        unrelated to the click interaction.
+        """
+        await page.evaluate("""
+            () => {
+                // Pause all CSS animations
+                document.querySelectorAll('*').forEach(el => {
+                    const style = window.getComputedStyle(el);
+                    if (style.animationName !== 'none') {
+                        el.style.animationPlayState = 'paused';
+                    }
+                });
+            }
+        """)
+
+    async def _resume_animations(self, page: "Page") -> None:
+        """Sprint 6.5: Resume CSS animations after screenshots."""
+        await page.evaluate("""
+            () => {
+                document.querySelectorAll('*').forEach(el => {
+                    el.style.animationPlayState = '';
+                });
+            }
+        """)
+
     async def _test_single_input(
         self,
         page: "Page",
@@ -211,6 +243,9 @@ class InteractionValidator:
         start_time = time.time()
 
         try:
+            # Sprint 6.5: Pause animations before capturing screenshots
+            await self._pause_animations(page)
+            
             # 1. Capture BEFORE state
             before_screenshot = await visual_analyzer.capture(page)
             before_scene = await scene_graph_extractor.extract_quick(page)
@@ -274,17 +309,31 @@ class InteractionValidator:
             after_screenshot = await visual_analyzer.capture(page)
             after_scene = await scene_graph_extractor.extract_quick(page)
 
-            # 5. Compare visual delta
-            # Sprint 6.3: Use element bounding box for element-relative comparison
+            # 5. Compare visual delta using MULTI-SCALE comparison
+            # Sprint 6.5: Compare at 3 scales and use MAXIMUM to catch changes at any level
+            # This fixes subtle button feedback that gets lost at large regions
             element_box = input_candidate.node.bounding_box
-            region = element_box.expand(self.REGION_PADDING)
-            visual_delta = visual_analyzer.compare(before_screenshot, after_screenshot, region)
-
-            # Also check full-page delta as fallback
-            if visual_delta.pixel_diff_ratio < contract.visual_change_threshold:
-                full_delta = visual_analyzer.compare(before_screenshot, after_screenshot)
-                if full_delta.pixel_diff_ratio > visual_delta.pixel_diff_ratio:
-                    visual_delta = full_delta
+            
+            # Scale 1: Tight region (20px padding) - catches small button changes
+            tight_region = element_box.expand(20)
+            tight_delta = visual_analyzer.compare(before_screenshot, after_screenshot, tight_region)
+            
+            # Scale 2: Normal region (100px padding) - catches nearby changes
+            normal_region = element_box.expand(self.REGION_PADDING)
+            normal_delta = visual_analyzer.compare(before_screenshot, after_screenshot, normal_region)
+            
+            # Scale 3: Full-page - catches global changes (modals, toasts)
+            full_delta = visual_analyzer.compare(before_screenshot, after_screenshot)
+            
+            # Use the MAXIMUM of all three scales
+            # "El cambio es real si aparece en cualquier escala"
+            best_delta = tight_delta
+            if normal_delta.pixel_diff_ratio > best_delta.pixel_diff_ratio:
+                best_delta = normal_delta
+            if full_delta.pixel_diff_ratio > best_delta.pixel_diff_ratio:
+                best_delta = full_delta
+            
+            visual_delta = best_delta
 
             # Sprint 6.3: Adaptive threshold - use BOTH global and element-relative detection
             # This fixes the impossible math for small buttons (100x40 = 0.19% of viewport)
@@ -359,6 +408,9 @@ class InteractionValidator:
         )
 
         try:
+            # Sprint 6.5: Pause animations before capturing screenshots
+            await self._pause_animations(page)
+            
             # 1. Capture BEFORE state
             before_screenshot = await visual_analyzer.capture(page)
             before_scene = await scene_graph_extractor.extract_quick(page)

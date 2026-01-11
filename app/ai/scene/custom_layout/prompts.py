@@ -150,57 +150,39 @@ For DASHBOARDS:
 
 INTERACTION REQUIREMENTS (for visual validation):
 
-CRITICAL: The validator compares screenshots before/after clicks.
-At least 5% of viewport pixels (1920x1080 = ~100,000 pixels) must change for a click to be considered "responsive".
+CRITICAL: The validator compares SCREENSHOTS before/after clicks.
+At least 30% of the CLICKED ELEMENT must visually change.
 
-A small button changing color is NOT ENOUGH (a 100x40 button = 4000 pixels = 0.2% of viewport).
+## MANDATORY FOR ALL INTERACTIVE ELEMENTS:
 
-To pass validation, clicks MUST trigger LARGE visual changes:
+Every clickable element MUST have a .selected or .active class with:
+1. background-color change (MANDATORY - not optional)
+2. Use CONCRETE colors: #ffffff, rgba(0,255,0,0.3), #00ff00
+3. NEVER use var(--color) - CSS variables may not be defined
 
-1. OVERLAY/MODAL approach (recommended):
-   - Click shows a full-screen or large overlay with feedback
-   - Example: clicking an option shows a large "Selected!" overlay that covers 20%+ of screen
+## PROHIBITED (will fail validation):
+- filter: brightness() or opacity() alone - too subtle
+- border-only without background change - not enough pixels
+- var(--anything) - may not exist
+- Subtle opacity changes (0.8 → 1.0)
 
-2. PANEL CHANGE approach:
-   - Click changes an entire panel or section background
-   - Example: clicking a filter highlights the entire sidebar or results area
-
-3. RIPPLE/WAVE EFFECT approach:
-   - Click triggers a CSS animation that expands across a large area
-   - Example: a radial gradient animation that grows from click point
-
-4. CONTENT SWAP approach:
-   - Click replaces or transforms a large content area
-   - Example: clicking "Next" animates the entire question panel
-
-CSS Example that PASSES validation:
+## GOOD EXAMPLES:
 ```css
-.option:active, .option.selected {
-    /* Small button change - NOT ENOUGH alone */
-    background: #4CAF50;
-}
-.option.selected::after {
-    /* Large overlay that PASSES validation */
-    content: '✓';
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(76, 175, 80, 0.3);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 200px;
-    animation: fadeOut 0.5s forwards;
+.option.selected {
+  background: rgba(0, 212, 255, 0.3);  /* MANDATORY */
+  border: 3px solid #00d4ff;           /* optional addition */
+  transform: scale(1.02);              /* optional addition */
 }
 ```
 
-JavaScript Example that PASSES validation:
-```javascript
-element.onclick = function() {
-    // Change a LARGE area, not just this button
-    document.querySelector('.main-panel').style.background = '#1a3a1a';
-    // Or show large feedback
-    showFullScreenFeedback('Selected!');
-}
-```
+## ALSO RECOMMENDED (for extra visibility):
+
+1. PANEL CHANGE approach:
+   - Click changes an entire panel or section background
+   - Example: clicking a filter highlights the entire sidebar
+
+2. OVERLAY approach:
+   - Click shows a large overlay with feedback
+   - Example: "Selected!" overlay covering 20%+ of screen
 
 Output only the HTML code."""

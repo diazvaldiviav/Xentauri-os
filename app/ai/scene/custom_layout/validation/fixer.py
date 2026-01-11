@@ -28,13 +28,14 @@ REPAIR_SYSTEM_PROMPT = """You are an HTML repair specialist for interactive web 
 
 The system uses SCREENSHOT COMPARISON to detect visual changes after clicks.
 An element is considered "responsive" if clicking it produces visible change.
+The system uses MULTI-SCALE comparison: tight (20px), normal (100px), and full-page.
 
 ## FAILURE TYPES
 
 1. **under_threshold** - Button WORKS but visual feedback is TOO SUBTLE
    - The onclick handler fires correctly
    - But the CSS change is too subtle to detect
-   - FIX: Make the visual change more obvious (see SAFE FIXES below)
+   - FIX: Make the visual change DRAMATIC (see REQUIRED FIXES below)
 
 2. **no_change** - Button produces ZERO visual change
    - Handler is broken or not connected
@@ -60,28 +61,321 @@ An element is considered "responsive" if clicking it produces visible change.
    - Any modification to protected elements = FAILURE
    - Copy their PATTERN to fix broken elements
 
-## SAFE FIXES FOR under_threshold
+## 🚫 PROHIBITED FIXES (THESE WILL FAIL VALIDATION)
 
-Apply these ONLY to the specific broken element:
+These WILL NOT pass validation - the validator compares SCREENSHOTS:
+- var(--anything) - CSS variables may not exist in the HTML
+- filter: brightness() / filter: opacity() - too subtle for screenshot detection
+- border-only without background change - covers too few pixels
+- opacity changes (0.8 → 1.0) - almost invisible difference
+- outline: 1-2px - too thin
+- box-shadow-only without background - not enough pixel change
+- text-decoration: underline - minimal pixel change
+- color change only (text color without background)
+
+⚠️ CRITICAL: Use CONCRETE colors (#ffffff, rgba(0,255,0,0.3)) - NEVER use var()
+
+## ✅ REQUIRED FIXES (THESE WILL PASS)
+
+The validator compares SCREENSHOTS before/after click. Background change is MANDATORY.
 
 ```css
-/* Option 1: High-contrast background */
-[data-option="X"].selected { background: #ffffff !important; }
+/* MANDATORY: Always include background change */
+[data-X="value"].selected { 
+  background: #ffffff !important;  /* or rgba(0,255,0,0.3) */
+  color: #000000 !important; 
+}
 
-/* Option 2: Visible border */
-[data-option="X"].selected { border: 3px solid #00ff00 !important; }
+/* GOOD: Background + border */
+[data-X="value"].selected { 
+  background: rgba(0, 255, 0, 0.3) !important; 
+  border: 4px solid #00ff00 !important; 
+}
 
-/* Option 3: Transform (scale up) */
-[data-option="X"].selected { transform: scale(1.1); }
+/* GOOD: Background + transform */
+[data-X="value"].selected { 
+  background: rgba(255,255,255,0.2) !important;
+  transform: scale(1.05); 
+}
 
-/* Option 4: Box shadow glow */
-[data-option="X"].selected { box-shadow: 0 0 15px #00ff00; }
+/* GOOD: Background + glow */
+[data-X="value"].selected { 
+  background: rgba(0, 255, 0, 0.2) !important;
+  box-shadow: 0 0 20px 8px #00ff00 !important; 
+}
 ```
+
+⚠️ ABSOLUTE REQUIREMENTS:
+1. background-color change is MANDATORY (not optional)
+2. Use CONCRETE colors: #ffffff, #00ff00, rgba(0,255,0,0.3)
+3. NEVER use var(--anything) - it may not exist
+4. Border/shadow/transform are ADDITIONS, not replacements for background
 
 ## OUTPUT
 
 Return ONLY the fixed HTML from <!DOCTYPE html> to </html>.
 No markdown, no explanations, no code blocks."""
+
+
+# ---------------------------------------------------------------------------
+# CSS DIAGNOSTIC FUNCTIONS - Sprint 6.5
+# ---------------------------------------------------------------------------
+
+def _extract_css_from_html(html: str) -> str:
+    """Extract all CSS from <style> tags in HTML."""
+    css_blocks = []
+    pattern = r'<style[^>]*>(.*?)</style>'
+    matches = re.findall(pattern, html, re.DOTALL | re.IGNORECASE)
+    for match in matches:
+        css_blocks.append(match)
+    return "\n".join(css_blocks)
+
+
+def _find_css_rules_for_classes(css: str, classes: list) -> list:
+    """
+    Find CSS rules that match any of the given classes combined with .selected or .active.
+    
+    Args:
+        css: CSS content
+        classes: List of class names (e.g., ['celestial-body', 'venus'])
+    
+    Returns:
+        List of dicts with rule info: [{"selector": "...", "properties": "...", "has_background": bool}]
+    """
+    rules = []
+    
+    # Pattern to find CSS rules: selector { properties }
+    rule_pattern = r'([^{}]+)\{([^{}]+)\}'
+    
+    for match in re.finditer(rule_pattern, css):
+        selector = match.group(1).strip()
+        properties = match.group(2).strip()
+        
+        # Check if this rule involves .selected or .active
+        if '.selected' not in selector and '.active' not in selector:
+            continue
+        
+        # Check if this rule involves any of our classes
+        for cls in classes:
+            if f'.{cls}' in selector:
+                has_background = bool(re.search(r'\bbackground(?:-color)?\s*:', properties, re.IGNORECASE))
+                rules.append({
+                    "selector": selector,
+                    "properties": properties,
+                    "has_background": has_background,
+                    "matched_class": cls,
+                })
+                break  # Don't add same rule multiple times
+    
+    return rules
+
+
+def analyze_css_for_element(html: str, element_classes: list) -> dict:
+    """
+    Sprint 6.5: Analyze CSS to diagnose why an element's visual feedback fails.
+    
+    This is the KEY function that bridges pixel-based validation with CSS-based repair.
+    
+    Args:
+        html: Full HTML with embedded CSS
+        element_classes: Classes from the failing element (e.g., ['celestial-body', 'venus'])
+    
+    Returns:
+        {
+            "rules_found": [{"selector": "...", "properties": "...", "has_background": bool}],
+            "has_background": False,  # Any rule has background?
+            "diagnosis": "NO tiene background-color",
+            "fix_action": "Añadir 'background-color: rgba(0,200,255,0.3);' a .celestial-body.selected",
+            "problematic_rule": ".celestial-body.selected { transform: scale(1.5); ... }"
+        }
+    """
+    css = _extract_css_from_html(html)
+    rules = _find_css_rules_for_classes(css, element_classes)
+    
+    result = {
+        "rules_found": rules,
+        "has_background": False,
+        "diagnosis": "",
+        "fix_action": "",
+        "problematic_rule": "",
+    }
+    
+    if not rules:
+        # No .selected/.active rules found for these classes
+        result["diagnosis"] = f"No se encontró regla .selected/.active para clases: {', '.join(element_classes)}"
+        result["fix_action"] = f"Crear regla CSS: .{element_classes[0]}.selected {{ background-color: rgba(0,200,255,0.3); }}"
+        return result
+    
+    # Check if any rule has background
+    rules_with_bg = [r for r in rules if r["has_background"]]
+    rules_without_bg = [r for r in rules if not r["has_background"]]
+    
+    if rules_with_bg:
+        result["has_background"] = True
+        result["diagnosis"] = "Ya tiene background-color (problema puede ser otro)"
+    else:
+        result["has_background"] = False
+        # Pick the most specific rule to fix
+        rule_to_fix = rules_without_bg[0]
+        result["diagnosis"] = f"La regla '{rule_to_fix['selector']}' NO tiene background-color"
+        result["problematic_rule"] = f"{rule_to_fix['selector']} {{ {rule_to_fix['properties']} }}"
+        result["fix_action"] = (
+            f"Modificar '{rule_to_fix['selector']}' añadiendo: background-color: rgba(0,200,255,0.3);"
+        )
+    
+    return result
+
+
+def _build_phase_summary(sandbox_result) -> str:
+    """
+    Sprint 6.5: Build a progressive summary of all validation phases.
+    
+    This gives Sonnet the full context of what happened in each phase.
+    """
+    lines = []
+    lines.append("## 📋 VALIDATION REPORT\n")
+    
+    for phase in sandbox_result.phases:
+        emoji = "✅" if phase.passed else "❌"
+        phase_num = phase.phase
+        phase_name = phase.phase_name.upper()
+        
+        if phase_num == 1:
+            lines.append(f"### Phase 1: Render {emoji}")
+            if phase.passed:
+                lines.append("HTML renderiza correctamente en viewport 1920x1080\n")
+            else:
+                lines.append(f"Error: {phase.error}\n")
+        
+        elif phase_num == 2:
+            lines.append(f"### Phase 2: Visual Check {emoji}")
+            if phase.passed:
+                lines.append("Página tiene contenido visual (no está en blanco)\n")
+            else:
+                lines.append("Página está en blanco o tiene error visual\n")
+        
+        elif phase_num == 3:
+            lines.append(f"### Phase 3: Scene Graph {emoji}")
+            layout_type = phase.details.get("layout_type", "unknown")
+            lines.append(f"Layout detectado: {layout_type}\n")
+        
+        elif phase_num == 4:
+            lines.append(f"### Phase 4: Input Detection {emoji}")
+            interactive = phase.details.get("interactive_count", 0)
+            nav_excluded = phase.details.get("navigation_excluded", 0)
+            display_excluded = phase.details.get("display_only", 0)
+            lines.append(f"Detectados {interactive} elementos INTERACTIVE_UI")
+            if nav_excluded > 0:
+                lines.append(f"  - {nav_excluded} elementos NAVIGATION excluidos")
+            if display_excluded > 0:
+                lines.append(f"  - {display_excluded} elementos DISPLAY_ONLY excluidos")
+            lines.append("")
+        
+        elif phase_num == 5:
+            lines.append(f"### Phase 5: Interaction Testing {emoji}")
+            tested = phase.details.get("tested", 0)
+            responsive = phase.details.get("responsive", 0)
+            lines.append(f"Resultado: {responsive}/{tested} elementos responden correctamente\n")
+        
+        elif phase_num == 6:
+            lines.append(f"### Phase 6: Aggregation {emoji}")
+            if not phase.passed:
+                lines.append(f"FALLO: {sandbox_result.failure_summary}\n")
+    
+    return "\n".join(lines)
+
+
+def _build_css_diagnosis(html: str, interaction_results: list, threshold: float = 0.02) -> str:
+    """
+    Sprint 6.5: Build detailed CSS diagnosis for each failing element.
+    
+    This is the critical section that tells Sonnet EXACTLY what CSS to fix.
+    """
+    lines = []
+    lines.append("## 🔧 CSS DIAGNOSIS FOR FAILING ELEMENTS\n")
+    
+    failing_count = 0
+    
+    for ir in interaction_results:
+        ctx = ir.get_repair_context(threshold=threshold)
+        
+        if ctx["failure_type"] == "passed":
+            continue
+        
+        failing_count += 1
+        selector = ctx["selector"]
+        elem = ctx.get("element", {})
+        
+        # Get element classes
+        key_attrs = elem.get("key_attributes", {})
+        class_attr = key_attrs.get("class", "")
+        
+        # Also try to extract from selector
+        classes = []
+        if class_attr:
+            classes.extend(class_attr.split())
+        
+        # Extract classes from selector (e.g., ".celestial-body" -> "celestial-body")
+        selector_classes = re.findall(r'\.([a-zA-Z][\w-]*)', selector)
+        for cls in selector_classes:
+            if cls not in classes and cls not in ('selected', 'active'):
+                classes.append(cls)
+        
+        if not classes:
+            classes = ["unknown"]
+        
+        lines.append(f"### ❌ Input {failing_count}: `{selector}`\n")
+        
+        # Element info
+        tag = elem.get("tag", "div")
+        text = elem.get("text_content", "")
+        lines.append(f"**Element:** `<{tag}>` with classes: `{', '.join(classes)}`")
+        if text:
+            lines.append(f"**Text:** \"{text[:50]}\"")
+        
+        # Failure info
+        lines.append(f"**Failure Type:** {ctx['failure_type']}")
+        lines.append(f"**Pixel Change:** {ctx['pixel_diff_pct']} (need {ctx['threshold']})")
+        
+        # CSS Diagnosis
+        css_analysis = analyze_css_for_element(html, classes)
+        
+        lines.append(f"\n**CSS Diagnosis:**")
+        lines.append(f"- {css_analysis['diagnosis']}")
+        
+        if css_analysis["problematic_rule"]:
+            lines.append(f"\n**Current CSS Rule:**")
+            lines.append(f"```css")
+            lines.append(css_analysis["problematic_rule"])
+            lines.append(f"```")
+        
+        lines.append(f"\n**🎯 REQUIRED ACTION:**")
+        lines.append(f"{css_analysis['fix_action']}")
+        
+        if not css_analysis["has_background"]:
+            # Show the exact fix needed
+            rule_selector = css_analysis["rules_found"][0]["selector"] if css_analysis["rules_found"] else f".{classes[0]}.selected"
+            old_props = css_analysis["rules_found"][0]["properties"] if css_analysis["rules_found"] else ""
+            
+            lines.append(f"\n**✅ CORRECTED CSS:**")
+            lines.append(f"```css")
+            lines.append(f"{rule_selector} {{")
+            lines.append(f"    background-color: rgba(0, 200, 255, 0.3);  /* ADD THIS */")
+            if old_props:
+                # Show existing properties
+                for prop in old_props.split(';'):
+                    prop = prop.strip()
+                    if prop:
+                        lines.append(f"    {prop};")
+            lines.append(f"}}")
+            lines.append(f"```")
+        
+        lines.append("")
+    
+    if failing_count == 0:
+        lines.append("No failing elements detected.\n")
+    
+    return "\n".join(lines)
 
 
 def _format_element_context(elem: dict, pixels: dict = None, strategy: str = None) -> str:
@@ -143,161 +437,73 @@ def build_repair_prompt(
     user_request: str,
 ) -> str:
     """
-    Build repair prompt with full phase-by-phase context.
-
-    Sprint 6.2 CRITICAL FIX: Now includes BOTH working AND broken elements.
-    "Un Fixer que no sabe qué funciona no es un reparador: es un destructor elegante."
-
-    The fixer MUST know:
-    - Which elements work (DO NOT MODIFY)
-    - Which elements are broken (FIX THESE)
+    Sprint 6.5: Build repair prompt with PROGRESSIVE CONTEXT and CSS DIAGNOSIS.
+    
+    Key improvements over Sprint 6.2:
+    1. Phase-by-phase summary showing what passed/failed
+    2. CSS diagnosis for each failing element
+    3. Exact CSS rules to modify with concrete examples
+    
+    "Sonnet es suficientemente fuerte para reparar si le damos el diagnóstico exacto."
     """
     # Truncate HTML if too long (keep beginning and end)
     max_html_len = 12000
     if len(html) > max_html_len:
         half = max_html_len // 2
-        html = html[:half] + "\n\n<!-- ... TRUNCATED ... -->\n\n" + html[-half:]
-
-    # Build rich context for BOTH working and broken elements
-    working_elements = []
-    broken_elements = []
-    under_threshold_count = 0
-    no_change_count = 0
-
-    for ir in sandbox_result.interaction_results:
-        ctx = ir.get_repair_context(threshold=0.02)
-
-        if ctx["failure_type"] == "passed":
-            # Sprint 6.2: Include working elements with FULL semantic context
-            # "El fixer debe saber QUÉ funciona para replicar el patrón en lo roto"
-            elem = ctx.get("element", {})
-            pixels = ctx.get("pixels", {})
-            elem_desc = _format_element_context(elem, pixels)
-            working_elements.append(
-                f"  ✅ {ctx['selector']}\n"
-                f"     Status: WORKING (visual change: {ctx['pixel_diff_pct']}, {pixels.get('changed', 0):,} pixels)\n"
-                f"     ⛔ DO NOT MODIFY - This element meets requirements\n"
-                f"{elem_desc}"
-            )
-        elif ctx["failure_type"] == "under_threshold":
-            under_threshold_count += 1
-            # Sprint 6.2: Include semantic context with CONCRETE pixel counts and strategy
-            elem = ctx.get("element", {})
-            pixels = ctx.get("pixels", {})
-            strategy = ctx.get("strategy")
-            elem_desc = _format_element_context(elem, pixels, strategy)
-            broken_elements.append(
-                f"  ⚠️ {ctx['selector']}\n"
-                f"     Type: {ctx['failure_type']}\n"
-                f"     Change: {ctx['pixel_diff_pct']} (need {ctx['threshold']})\n"
-                f"     Problem: {ctx['interpretation']}\n"
-                f"{elem_desc}"
-            )
-        elif ctx["failure_type"] == "no_change":
-            no_change_count += 1
-            # Sprint 6.2: Include semantic context with strategy
-            elem = ctx.get("element", {})
-            pixels = ctx.get("pixels", {})
-            strategy = ctx.get("strategy")
-            elem_desc = _format_element_context(elem, pixels, strategy)
-            broken_elements.append(
-                f"  ❌ {ctx['selector']}\n"
-                f"     Type: {ctx['failure_type']}\n"
-                f"     Problem: {ctx['interpretation']}\n"
-                f"{elem_desc}"
-            )
-        elif ctx["failure_type"] == "error":
-            elem = ctx.get("element", {})
-            strategy = ctx.get("strategy")
-            elem_desc = _format_element_context(elem, None, strategy)
-            broken_elements.append(
-                f"  💥 {ctx['selector']}\n"
-                f"     Type: error\n"
-                f"     Problem: {ctx['interpretation']}\n"
-                f"{elem_desc}"
-            )
-
-    working_section = "\n\n".join(working_elements) if working_elements else "  (none detected)"
-    broken_section = "\n\n".join(broken_elements) if broken_elements else "  (none)"
-
-    # Build summary based on failure types
-    if under_threshold_count > 0 and no_change_count == 0:
-        summary = f"""DIAGNOSIS: All {under_threshold_count} failing elements are "under_threshold".
-This means the buttons WORK but produce INSUFFICIENT visual change.
-DO NOT rewrite handlers. AMPLIFY the visual feedback instead."""
-    elif no_change_count > 0 and under_threshold_count == 0:
-        summary = f"""DIAGNOSIS: All {no_change_count} failing elements produce NO visual change.
-The handlers are likely broken or not connected.
-Check onclick handlers, CSS selectors, and event binding."""
+        truncated_html = html[:half] + "\n\n<!-- ... TRUNCATED ... -->\n\n" + html[-half:]
     else:
-        summary = f"""DIAGNOSIS: Mixed failures.
-- {under_threshold_count} elements need visual amplification (under_threshold)
-- {no_change_count} elements have broken handlers (no_change)
-Fix each according to its failure type."""
+        truncated_html = html
 
-    # Sprint 6.2: Add protection warning if there are working elements
-    protection_warning = ""
-    if working_elements:
-        protection_warning = f"""
-## ⛔ PROTECTED ELEMENTS - DO NOT MODIFY
-
-The following {len(working_elements)} element(s) ALREADY WORK correctly.
-You MUST NOT change their CSS, JavaScript handlers, or HTML structure.
-Any modification to these elements will BREAK the layout.
-
-{working_section}
-
----
-"""
-
-    # Sprint 6.2: Get navigation exclusion info from Phase 5
-    navigation_note = ""
-    phase5 = next((p for p in sandbox_result.phases if p.phase == 5), None)
-    if phase5:
-        nav_excluded = phase5.details.get("navigation_excluded", 0)
-        if nav_excluded > 0:
-            navigation_note = f"""
-## 🔗 NAVIGATION ELEMENTS (excluded from testing)
-
-{nav_excluded} navigation link(s) were detected but excluded from validation.
-Navigation elements (links with href) are designed to navigate, not produce local visual feedback.
-Do NOT try to add visual effects to navigation links.
-
----
-"""
-
-    # Sprint 6.3: Extract PROTECTED selectors for explicit prohibition
+    # Sprint 6.5: Build progressive phase summary
+    phase_summary = _build_phase_summary(sandbox_result)
+    
+    # Sprint 6.5: Build CSS diagnosis for failing elements
+    css_diagnosis = _build_css_diagnosis(html, sandbox_result.interaction_results, threshold=0.02)
+    
+    # Build protected elements list
     protected_selectors = []
     for ir in sandbox_result.interaction_results:
         if ir.responsive:
             protected_selectors.append(ir.input.selector)
     
-    prohibited_css_section = ""
+    protected_section = ""
     if protected_selectors:
-        prohibited_css_section = f"""
-## 🚫 PROHIBITED CSS SELECTORS
+        protected_section = f"""
+## ⛔ PROTECTED ELEMENTS - DO NOT MODIFY
 
-These selectors belong to WORKING elements. You MUST NOT write ANY CSS rule
-that matches or affects these selectors:
+These {len(protected_selectors)} element(s) ALREADY WORK correctly:
+{chr(10).join(f'  ✅ {sel}' for sel in protected_selectors)}
 
-{chr(10).join(f'  - {sel}' for sel in protected_selectors)}
+You MUST NOT change their CSS or JavaScript.
 
-If you write CSS like `.option {{ }}` and it matches a protected selector, you BREAK the layout.
-Use ultra-specific selectors like `[data-option="X"]` where X is the broken element's value.
+---
+"""
+
+    # Sprint 6.4: Get display-only exclusion info from Phase 4
+    display_only_note = ""
+    phase4 = next((p for p in sandbox_result.phases if p.phase == 4), None)
+    if phase4:
+        display_only_excluded = phase4.details.get("display_only", 0)
+        if display_only_excluded > 0:
+            display_only_note = f"""
+## 🖥️ DISPLAY-ONLY ELEMENTS (excluded)
+
+{display_only_excluded} display-only element(s) excluded from validation.
+Do NOT add click handlers to clocks, weather widgets, calendars, or charts.
 
 ---
 """
 
     return f"""Fix this HTML that failed visual validation.
 
-## DIAGNOSIS
+{phase_summary}
 
-{summary}
-{protection_warning}{navigation_note}{prohibited_css_section}
-## ELEMENTS TO FIX (broken)
+---
 
-{broken_section}
+{css_diagnosis}
 
+---
+{protected_section}{display_only_note}
 ## ORIGINAL REQUEST
 
 "{user_request[:300]}"
@@ -305,19 +511,18 @@ Use ultra-specific selectors like `[data-option="X"]` where X is the broken elem
 ## HTML TO FIX
 
 ```html
-{html}
+{truncated_html}
 ```
 
 ## REPAIR INSTRUCTIONS
 
-1. ⛔ FIRST: Check the PROHIBITED CSS SELECTORS list above
-2. Read each broken element's "failure_type" and "STRATEGY" carefully
-3. For "under_threshold": Add HIGH-CONTRAST visual changes to ONLY that element
-   - Use: background:#fff, border:3px solid #0f0, transform:scale(1.1), box-shadow
-   - Selector MUST be ultra-specific: [data-option="X"] or #unique-id
-4. For "no_change": Fix the onclick handler for ONLY that element
-5. NEVER use generic selectors like .option, .btn, div - they affect protected elements
-6. Keep the visual design intact (dark theme, 1920x1080)
+Based on the CSS DIAGNOSIS above, make these specific changes:
+
+1. **For each failing element**: Find the CSS rule mentioned in the diagnosis
+2. **Add background-color**: This is MANDATORY for passing validation
+3. **Use concrete colors**: `rgba(0,200,255,0.3)`, `#ffffff`, `#00ff00`
+4. **DO NOT use**: `var(--anything)`, `filter:`, `opacity:` alone
+5. **DO NOT modify** protected elements (marked with ✅)
 
 ## OUTPUT
 

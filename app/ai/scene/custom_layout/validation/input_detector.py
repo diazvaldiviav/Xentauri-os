@@ -2,6 +2,7 @@
 Input Detector - Phase 4: Detect interactive inputs.
 
 Sprint 6: Visual-based validation system.
+Sprint 6.4: DISPLAY_ONLY category for informational widgets.
 
 This module finds clickable elements using heuristics:
 - Native inputs (button, input, select)
@@ -10,11 +11,18 @@ This module finds clickable elements using heuristics:
 - Elements with cursor: pointer
 - Elements with onclick handlers
 - Data attributes (data-option, data-submit, etc.)
+
+Classification priority (Sprint 6.4):
+1. Primary signals (onclick, role, native tags) → INTERACTIVE_UI
+2. Navigation signals (href) → NAVIGATION
+3. No signals + display keywords → DISPLAY_ONLY
+4. No signals + cursor:pointer + min size → INTERACTIVE_UI (weak)
 """
 
 import logging
+import re
 import time
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 from .contracts import (
     InputCandidate,
@@ -82,6 +90,46 @@ INPUT_HEURISTICS = [
     (lambda n: "aria-selected" in n.attributes, "option", 3, 0.85),
     (lambda n: "aria-checked" in n.attributes, "checkbox", 4, 0.80),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Sprint 6.4: Display-Only Classification
+# ---------------------------------------------------------------------------
+# Keywords that suggest an element is purely for display (not interactive)
+# Used as SECONDARY signal (tiebreaker) when no primary interactive signals exist
+DISPLAY_ONLY_KEYWORDS: Set[str] = {
+    # Time & Clocks
+    "reloj", "clock", "time", "hora", "timer", "countdown", "stopwatch",
+    "cronometro", "cronómetro",
+    # Weather
+    "clima", "weather", "temperature", "temperatura", "forecast", "pronóstico",
+    "pronostico", "humidity", "humedad",
+    # Informational widgets
+    "calendar", "calendario", "date", "fecha", "widget", "display", "viewer",
+    "visor", "indicator", "indicador", "status", "estado", "badge", "label",
+    "etiqueta", "stat", "metric", "métrica", "metrica",
+    # Charts & Visualizations (read-only)
+    "chart", "gráfico", "grafico", "graph", "visualization", "visualización",
+    "visualizacion", "progress", "progreso", "bar", "barra", "gauge", "medidor",
+}
+
+# Primary signals that indicate true interactivity (override display-only keywords)
+# If ANY of these signals are present, element is classified as INTERACTIVE_UI
+PRIMARY_INTERACTIVE_SIGNALS: List[str] = [
+    "onclick", "onmousedown", "onmouseup", "ontouchstart", "ontouchend",
+    "ng-click", "@click", "v-on:click", "(click)",  # Framework bindings
+]
+
+# Tags that are ALWAYS interactive (even with display-only keywords)
+ALWAYS_INTERACTIVE_TAGS: Set[str] = {
+    "button", "input", "select", "textarea", "a",
+}
+
+# Roles that indicate true interactivity
+INTERACTIVE_ROLES: Set[str] = {
+    "button", "link", "checkbox", "radio", "menuitem", "option", "tab",
+    "switch", "slider", "spinbutton", "textbox", "combobox", "listbox",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -153,14 +201,8 @@ class InputDetector:
             for match_fn, input_type, priority, confidence in INPUT_HEURISTICS:
                 try:
                     if match_fn(node):
-                        # Sprint 6.2: Classify by interaction category
-                        # Links are NAVIGATION - they navigate, don't produce local visual feedback
-                        if input_type == "link":
-                            category = InteractionCategory.NAVIGATION
-                            testable = False
-                        else:
-                            category = InteractionCategory.INTERACTIVE_UI
-                            testable = True
+                        # Sprint 6.4: Classify using primary signals + keyword tiebreaker
+                        category, testable, reason = self._classify_element(node, input_type)
 
                         candidates.append(InputCandidate(
                             selector=node.selector,
@@ -170,6 +212,7 @@ class InputDetector:
                             priority=priority,
                             interaction_category=category,
                             testable=testable,
+                            category_reason=reason,
                         ))
                         break  # Only match first heuristic
                 except Exception:
@@ -197,9 +240,10 @@ class InputDetector:
         for c in top_candidates:
             type_counts[c.input_type] = type_counts.get(c.input_type, 0) + 1
 
-        # Sprint 6.2: Count by interaction category
-        interactive_count = sum(1 for c in top_candidates if c.testable)
-        navigation_count = sum(1 for c in top_candidates if not c.testable)
+        # Sprint 6.4: Count by interaction category (3 categories)
+        interactive_count = sum(1 for c in top_candidates if c.testable and c.interaction_category == InteractionCategory.INTERACTIVE_UI)
+        navigation_count = sum(1 for c in top_candidates if c.interaction_category == InteractionCategory.NAVIGATION)
+        display_only_count = sum(1 for c in top_candidates if c.interaction_category == InteractionCategory.DISPLAY_ONLY)
 
         # Phase passes if we found at least one input
         # (For static layouts, this may fail but that's OK)
@@ -219,15 +263,24 @@ class InputDetector:
                     "selected": 0,
                     "interactive_ui": 0,
                     "navigation": 0,
+                    "display_only": 0,
                     "note": "No interactive elements found - may be static content",
                 },
                 duration_ms=duration_ms,
             ), []
 
+        # Sprint 6.4: Log display-only exclusions with reasons
+        if display_only_count > 0:
+            display_only_elements = [c for c in top_candidates if c.is_display_only()]
+            logger.info(
+                f"Phase 4: Excluding {display_only_count} display-only elements: "
+                f"{[(c.selector[:40], c.category_reason) for c in display_only_elements[:3]]}"
+            )
+
         logger.info(
             f"Phase 4 (input_detection) - "
             f"found {len(candidates)}, selected {len(top_candidates)} "
-            f"({interactive_count} interactive, {navigation_count} navigation), "
+            f"({interactive_count} interactive, {navigation_count} navigation, {display_only_count} display_only), "
             f"types={type_counts}"
         )
 
@@ -240,11 +293,85 @@ class InputDetector:
                 "selected": len(top_candidates),
                 "interactive_ui": interactive_count,
                 "navigation": navigation_count,
+                "display_only": display_only_count,
                 "type_counts": type_counts,
                 "selectors": [c.selector for c in top_candidates[:5]],  # First 5 for logging
             },
             duration_ms=duration_ms,
         ), top_candidates
+
+    def _classify_element(
+        self,
+        node: "SceneNode",
+        input_type: str,
+    ) -> Tuple[InteractionCategory, bool, str]:
+        """
+        Sprint 6.4: Classify element using primary signals with keyword tiebreaker.
+
+        Classification hierarchy:
+        1. NAVIGATION: href present → always navigation (testable=False)
+        2. INTERACTIVE_UI: any primary signal → always interactive (testable=True)
+           - Native interactive tags (button, input, select, textarea, a)
+           - Interactive ARIA roles (button, checkbox, etc.)
+           - Event handlers (onclick, ng-click, @click, etc.)
+           - tabindex attribute
+        3. DISPLAY_ONLY: no primary signals + display keyword → informational (testable=False)
+        4. INTERACTIVE_UI (weak): cursor:pointer + no keywords → assume interactive
+
+        Returns:
+            (category, testable, reason) tuple
+        """
+        tag = node.tag.lower() if node.tag else ""
+        attrs = node.attributes
+        role = attrs.get("role", "").lower()
+        class_name = attrs.get("class", "").lower()
+        element_id = attrs.get("id", "").lower()
+        text_content = (node.text_content or "").lower()[:100]  # First 100 chars
+
+        # 1. NAVIGATION: links with href
+        if input_type == "link" or (tag == "a" and attrs.get("href")):
+            return (InteractionCategory.NAVIGATION, False, "href navigation")
+
+        # 2. Check for PRIMARY interactive signals (override keywords)
+
+        # 2a. Native interactive tags - ALWAYS interactive
+        if tag in ALWAYS_INTERACTIVE_TAGS:
+            return (InteractionCategory.INTERACTIVE_UI, True, f"native_tag:{tag}")
+
+        # 2b. Interactive ARIA roles - ALWAYS interactive
+        if role in INTERACTIVE_ROLES:
+            return (InteractionCategory.INTERACTIVE_UI, True, f"role:{role}")
+
+        # 2c. Event handlers - ALWAYS interactive
+        for handler in PRIMARY_INTERACTIVE_SIGNALS:
+            if handler in attrs:
+                return (InteractionCategory.INTERACTIVE_UI, True, f"handler:{handler}")
+
+        # 2d. tabindex present (makes element focusable/interactive)
+        if "tabindex" in attrs:
+            tabindex = attrs.get("tabindex", "")
+            # tabindex >= 0 means focusable, -1 means programmatically focusable only
+            if tabindex and tabindex != "-1":
+                return (InteractionCategory.INTERACTIVE_UI, True, "tabindex")
+
+        # 3. Check for DISPLAY_ONLY keywords (secondary signal)
+        # Only applies if NO primary signals were found
+        combined_text = f"{class_name} {element_id} {text_content}"
+        found_keywords = [kw for kw in DISPLAY_ONLY_KEYWORDS if kw in combined_text]
+
+        if found_keywords:
+            # Element matched a heuristic (cursor:pointer, etc.) but has display keywords
+            # and no primary interactive signals → classify as display-only
+            keyword_sample = found_keywords[:2]  # First 2 matches for reason
+            return (
+                InteractionCategory.DISPLAY_ONLY,
+                False,
+                f"display_keywords:{','.join(keyword_sample)}"
+            )
+
+        # 4. Fallback: matched heuristic (cursor:pointer, etc.) with no keywords
+        # → treat as interactive (weak confidence, but testable)
+        return (InteractionCategory.INTERACTIVE_UI, True, f"heuristic:{input_type}")
 
     def _resolve_event_owners(
         self,

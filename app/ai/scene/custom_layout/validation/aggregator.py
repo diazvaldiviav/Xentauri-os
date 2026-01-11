@@ -2,16 +2,18 @@
 Validation Aggregator - Phase 6: Decision logic.
 
 Sprint 6: Visual-based validation system.
+Sprint 6.4: DISPLAY_ONLY category excluded from ratio calculation.
 
 This module aggregates all phase results into a final decision.
 
 Decision Policy:
 - Phases 1-4 must pass (render, visual, scene_graph, input_detection)
-- Phase 5 (interaction): At least 1 responsive input for interactive types
+- Phase 5 (interaction): At least 70% of TESTABLE inputs must respond
 - Static content: Phase 5 not required
+- EXCLUDED from ratio: NAVIGATION and DISPLAY_ONLY elements
 
 Confidence calculation:
-- Based on % of responsive inputs
+- Based on % of responsive inputs (testable only)
 - Adjusted by phase warnings
 """
 
@@ -81,6 +83,19 @@ class ValidationAggregator:
         # Get navigation exclusion count from Phase 5 for logging
         phase5 = next((p for p in phases if p.phase == 5), None)
         navigation_excluded = phase5.details.get("navigation_excluded", 0) if phase5 else 0
+
+        # Sprint 6.4: Get display-only exclusion count from Phase 4
+        phase4 = next((p for p in phases if p.phase == 4), None)
+        display_only_excluded = phase4.details.get("display_only", 0) if phase4 else 0
+        total_excluded = navigation_excluded + display_only_excluded
+
+        # Log exclusions for transparency
+        if total_excluded > 0:
+            logger.info(
+                f"Phase 6 (aggregator): Excluding from ratio calculation: "
+                f"navigation={navigation_excluded}, display_only={display_only_excluded} "
+                f"(testable inputs={inputs_tested})"
+            )
 
         # Check critical phases (1-4)
         critical_phases = [p for p in phases if p.phase <= 4]
@@ -169,11 +184,20 @@ class ValidationAggregator:
                 warnings.extend(p.details["warnings"])
 
         # All checks passed
-        nav_note = f" (navigation={navigation_excluded} excluded)" if navigation_excluded > 0 else ""
+        # Sprint 6.4: Log both navigation and display_only exclusions
+        exclusion_note = ""
+        if total_excluded > 0:
+            parts = []
+            if navigation_excluded > 0:
+                parts.append(f"nav={navigation_excluded}")
+            if display_only_excluded > 0:
+                parts.append(f"display={display_only_excluded}")
+            exclusion_note = f" (excluded: {', '.join(parts)})"
+
         logger.info(
             f"Validation PASSED - "
             f"layout={layout_type}, "
-            f"inputs={inputs_responsive}/{inputs_tested}{nav_note}, "
+            f"inputs={inputs_responsive}/{inputs_tested}{exclusion_note}, "
             f"confidence={confidence:.2f}"
         )
 

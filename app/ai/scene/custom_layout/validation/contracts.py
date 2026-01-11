@@ -21,16 +21,21 @@ from typing import Any, Dict, List, Optional, Tuple
 
 class InteractionCategory(Enum):
     """
-    Sprint 6.2: Semantic classification of clickable elements.
+    Sprint 6.4: Semantic classification of detected elements.
 
     "No todo lo clickeable debe reaccionar;
      pero todo lo reactivo debe ser visible."
 
-    INTERACTIVE_UI: Elements that change local state and MUST produce visual feedback
-    NAVIGATION: Elements that navigate to other views - exempt from visual delta testing
+    Categories determine how elements are tested and counted:
+    - INTERACTIVE_UI: Click-tested, counted in responsive ratio
+    - NAVIGATION: Excluded from click-delta test (links navigate away)
+    - DISPLAY_ONLY: Excluded from testing (informational widgets)
+
+    Only INTERACTIVE_UI elements enter the responsive ratio denominator.
     """
-    INTERACTIVE_UI = "interactive_ui"  # Buttons, toggles, filters, options
-    NAVIGATION = "navigation"          # Links, sidebar items, menu navigation
+    INTERACTIVE_UI = "interactive_ui"  # Buttons, toggles, filters, options - TESTED
+    NAVIGATION = "navigation"          # Links, sidebar items - EXCLUDED (navigate away)
+    DISPLAY_ONLY = "display_only"      # Clocks, weather, charts - EXCLUDED (no click handler)
 
 
 # ---------------------------------------------------------------------------
@@ -300,23 +305,24 @@ class InputCandidate:
 
     Ranked by confidence and priority for testing.
 
-    Sprint 6.2: Now supports:
-    - interaction_units: for multiple-choice layouts
-    - interaction_category: INTERACTIVE_UI vs NAVIGATION
-    - testable: whether this input should be tested for visual feedback
+    Sprint 6.4: Classification by interaction category:
+    - INTERACTIVE_UI: Tested for visual feedback, counted in ratio
+    - NAVIGATION: Excluded (links navigate away)
+    - DISPLAY_ONLY: Excluded (informational widgets without handlers)
 
     The owner handles the event, but each unit is a distinct user decision.
     """
     selector: str           # CSS selector of the event owner
     node: SceneNode         # Reference to scene graph node
     confidence: float       # 0.0 to 1.0 (how sure we are it's clickable)
-    input_type: str         # button|link|checkbox|radio|option|custom
+    input_type: str         # button|link|checkbox|radio|option|custom|display
     priority: int           # Lower = test first
     source_elements: List[str] = field(default_factory=list)  # Legacy: child selectors
     interaction_units: List[InteractionUnit] = field(default_factory=list)  # Sprint 6.2: distinct clickable units
-    # Sprint 6.2: Semantic classification
+    # Sprint 6.4: Semantic classification with reason tracking
     interaction_category: InteractionCategory = InteractionCategory.INTERACTIVE_UI
-    testable: bool = True  # False for navigation elements (links)
+    testable: bool = True  # False for NAVIGATION and DISPLAY_ONLY
+    category_reason: str = ""  # Why this category was assigned (for debugging/fixer)
 
     def __lt__(self, other: "InputCandidate") -> bool:
         """Sort by priority (ascending), then confidence (descending)."""
@@ -327,7 +333,7 @@ class InputCandidate:
     def get_test_count(self) -> int:
         """Return number of interactions to test for this candidate."""
         if not self.testable:
-            return 0  # Navigation elements don't get tested
+            return 0  # NAVIGATION and DISPLAY_ONLY elements don't get tested
         if self.interaction_units:
             return len(self.interaction_units)
         return 1  # Just the owner itself
@@ -335,6 +341,17 @@ class InputCandidate:
     def is_navigation(self) -> bool:
         """Check if this is a navigation element (excluded from ratio)."""
         return self.interaction_category == InteractionCategory.NAVIGATION
+
+    def is_display_only(self) -> bool:
+        """Check if this is a display-only element (excluded from ratio)."""
+        return self.interaction_category == InteractionCategory.DISPLAY_ONLY
+
+    def is_excluded(self) -> bool:
+        """Check if this element is excluded from testing and ratio."""
+        return self.interaction_category in (
+            InteractionCategory.NAVIGATION,
+            InteractionCategory.DISPLAY_ONLY,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -425,16 +442,13 @@ class InteractionResult:
                 "Use element-specific selector like [data-option='X'] or #unique-id."
             )
         elif failure_type == "under_threshold":
-            interpretation = f"Visual feedback too subtle. Changed {pixels_changed:,} pixels."
-            # Sprint 6.3: SAFE strategies that only affect the clicked element
-            # NO MORE "change parent background" - that breaks siblings!
+            interpretation = f"Visual feedback too subtle. Changed {pixels_changed:,} pixels but validator uses SCREENSHOT comparison."
+            # Sprint 6.5: Aligned strategy with validator - background change is MANDATORY
             strategy = (
-                f"ONLY modify THIS element's styles on click. Safe options: "
-                f"1) Add visible border: 'border: 4px solid #00ff00' "
-                f"2) Change background: 'background: #ffffff' (high contrast) "
-                f"3) Add transform: 'transform: scale(1.1)' "
-                f"4) Add box-shadow: 'box-shadow: 0 0 20px #00ff00' "
-                f"NEVER modify parent containers or siblings."
+                f"MANDATORY: Change background-color on click (e.g., background: #ffffff or rgba(0,255,0,0.3)). "
+                f"OPTIONAL additions: border: 4px solid #00ff00, transform: scale(1.05), box-shadow: 0 0 20px #00ff00. "
+                f"PROHIBITED (will fail validation): var(--anything), filter: brightness/opacity, border-only, opacity-only. "
+                f"Use CONCRETE colors only: #ffffff, #00ff00, rgba(0,255,0,0.3) - NOT CSS variables."
             )
         else:  # error
             interpretation = f"Error: {self.error}"

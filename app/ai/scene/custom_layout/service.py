@@ -68,7 +68,9 @@ opus_provider = AnthropicProvider(model=settings.ANTHROPIC_REASONING_MODEL)
 logger = logging.getLogger("jarvis.ai.scene.custom_layout")
 
 # Directory to save generated HTML for debugging
-HTML_DEBUG_DIR = "/app/debug_html"
+# Use local path for development, /app/debug_html for production
+import os as _os
+HTML_DEBUG_DIR = _os.environ.get("HTML_DEBUG_DIR", "/tmp/jarvis_debug_html")
 
 
 def save_html_for_debug(html: str, request_id: str = None, suffix: str = "") -> Optional[str]:

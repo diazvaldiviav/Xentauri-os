@@ -265,8 +265,9 @@ class VisualAnalyzer:
         total_pixels = len(pixels1)
 
         # Threshold for considering a pixel "different"
-        # 30 = requires noticeable color change, not just hover opacity
-        pixel_threshold = 30  # RGB difference per channel
+        # Sprint 6.5: Lowered from 30 to 20 to detect subtler hover/click feedback
+        # 20 = catches 4px borders and subtle color shifts that 30 missed
+        pixel_threshold = 20  # RGB difference per channel
 
         for p1, p2 in zip(pixels1, pixels2):
             # Calculate per-channel difference
