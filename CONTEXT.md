@@ -327,6 +327,20 @@ Xentauri is an intelligent screen control system that lets users operate multipl
 | Vision repair latency: ~90 seconds | ✅ Done |
 | Total tokens per repair: ~14000 | ✅ Done |
 
+**Hotfix:** `4a7af8f` - JS Error Detection During Interaction (January 11, 2026)
+
+| Task | Status |
+|------|--------|
+| **Bug: False positive - validation passed but buttons broken** | |
+| Error: `autoAdvance` null reference breaks script before event listeners | ✅ Fixed |
+| Gap: JS errors during interaction (setTimeout, click handlers) not detected | ✅ Fixed |
+| `interaction_validator.py`: Accept render_ctx parameter | ✅ Done |
+| `interaction_validator.py`: Track JS errors before/after clicks | ✅ Done |
+| `interaction_validator.py`: Phase 5 fails if JS errors detected | ✅ Done |
+| `__init__.py`: Pass render_ctx to interaction_validator.validate() | ✅ Done |
+| `fixer.py`: Show JS errors in Phase 5 summary for Sonnet repair | ✅ Done |
+| Deployed to Fly.io production | ✅ Done |
+
 ### 🎉 BACKEND MVP COMPLETE
 All backend features for MVP are complete:
 - ✅ User authentication (JWT)
