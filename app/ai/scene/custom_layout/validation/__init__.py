@@ -190,8 +190,9 @@ class VisualValidator:
                 )
                 interaction_results = []
             else:
+                # Sprint 7: Pass render_ctx to capture JS errors during interaction
                 phase5_result, interaction_results = await interaction_validator.validate(
-                    page, inputs, contract
+                    page, inputs, contract, render_ctx
                 )
             phases.append(phase5_result)
 

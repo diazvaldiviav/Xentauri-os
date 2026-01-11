@@ -2,6 +2,7 @@
 Interaction Validator - Phase 5: Core visual delta testing.
 
 Sprint 6: Visual-based validation system.
+Sprint 7: Added JS error detection after clicks.
 
 This is the CORE module that eliminates false positives:
 - Takes screenshot BEFORE click
@@ -9,8 +10,9 @@ This is the CORE module that eliminates false positives:
 - Waits for stabilization (animations)
 - Takes screenshot AFTER click
 - Compares visual delta
+- Checks for JS errors that occurred during interaction
 
-If no visual change detected, the input is considered broken.
+If no visual change detected OR JS errors occurred, the input is considered broken.
 """
 
 import asyncio
@@ -33,6 +35,7 @@ from .scene_graph import scene_graph_extractor
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+    from .sandbox import RenderContext
 
 logger = logging.getLogger("jarvis.ai.scene.custom_layout.validation.interaction")
 
@@ -65,23 +68,29 @@ class InteractionValidator:
         page: "Page",
         inputs: List[InputCandidate],
         contract: ValidationContract,
+        render_ctx: Optional["RenderContext"] = None,
     ) -> Tuple[PhaseResult, List[InteractionResult]]:
         """
         Test each input element with visual comparison.
 
         Sprint 6.2: Now tests InteractionUnits individually when present.
+        Sprint 7: Now checks for JS errors after each click.
         "El evento puede ser uno solo, pero las decisiones del usuario nunca lo son."
 
         Args:
             page: Playwright page with HTML loaded
             inputs: List of input candidates from Phase 4
             contract: Validation contract with thresholds
+            render_ctx: Optional render context with JS error tracking
 
         Returns:
             (PhaseResult, List[InteractionResult])
         """
         start_time = time.time()
         results: List[InteractionResult] = []
+
+        # Sprint 7: Track JS errors count before interactions
+        js_errors_before = len(render_ctx.js_errors) if render_ctx else 0
 
         if not inputs:
             # No inputs to test - this is OK for static content
@@ -173,10 +182,25 @@ class InteractionValidator:
 
         total_duration_ms = (time.time() - start_time) * 1000
 
-        # Phase passes if at least one input is responsive
-        passed = responsive_count > 0
+        # Sprint 7: Check for JS errors that occurred during interactions
+        js_errors_during_interaction = []
+        if render_ctx:
+            js_errors_during_interaction = render_ctx.js_errors[js_errors_before:]
+            if js_errors_during_interaction:
+                logger.warning(
+                    f"Sprint 7: {len(js_errors_during_interaction)} JS error(s) detected during interaction: "
+                    f"{js_errors_during_interaction[:3]}"  # Log first 3
+                )
 
-        if not passed:
+        # Phase passes if at least one input is responsive AND no JS errors
+        passed = responsive_count > 0 and not js_errors_during_interaction
+
+        if js_errors_during_interaction:
+            logger.warning(
+                f"Phase 5 (interaction): FAILED due to JS errors - "
+                f"{len(js_errors_during_interaction)} error(s) detected"
+            )
+        elif not passed:
             logger.warning(
                 f"Phase 5 (interaction): No units responded - "
                 f"tested {len(results)}, all failed visual delta check"
@@ -187,11 +211,18 @@ class InteractionValidator:
                 f"{responsive_count}/{len(results)} units responsive"
             )
 
+        # Build error message
+        error_msg = None
+        if js_errors_during_interaction:
+            error_msg = f"JS errors during interaction: {js_errors_during_interaction[0]}"
+        elif responsive_count == 0:
+            error_msg = f"No inputs responded to interaction ({len(results)} tested)"
+
         return PhaseResult(
             phase=5,
             phase_name="interaction",
             passed=passed,
-            error=f"No inputs responded to interaction ({len(results)} tested)" if not passed else None,
+            error=error_msg,
             details={
                 "tested": len(results),
                 "responsive": responsive_count,
@@ -199,6 +230,9 @@ class InteractionValidator:
                 "navigation_excluded": navigation_count,  # Sprint 6.2: Links excluded from testing
                 "responsive_selectors": [r.input.selector for r in results if r.responsive],
                 "failed_selectors": [r.input.selector for r in results if not r.responsive],
+                # Sprint 7: JS errors detected during clicks
+                "js_errors_during_interaction": js_errors_during_interaction,
+                "js_error_count": len(js_errors_during_interaction),
             },
             duration_ms=total_duration_ms,
         ), results

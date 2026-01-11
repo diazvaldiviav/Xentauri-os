@@ -463,7 +463,19 @@ def _build_phase_summary(sandbox_result) -> str:
             lines.append(f"### Phase 5: Interaction Testing {emoji}")
             tested = phase.details.get("tested", 0)
             responsive = phase.details.get("responsive", 0)
-            lines.append(f"Resultado: {responsive}/{tested} elementos responden correctamente\n")
+            lines.append(f"Resultado: {responsive}/{tested} elementos responden correctamente")
+
+            # Sprint 7: Show JS errors detected during interaction
+            js_errors = phase.details.get("js_errors_during_interaction", [])
+            if js_errors:
+                lines.append(f"\n⚠️ **{len(js_errors)} ERROR(ES) JAVASCRIPT DETECTADO(S) DURANTE INTERACCIÓN:**")
+                for i, err in enumerate(js_errors[:5]):  # Show first 5
+                    # Truncate long error messages
+                    err_short = err[:200] + "..." if len(err) > 200 else err
+                    lines.append(f"  {i+1}. `{err_short}`")
+                lines.append("\n**ESTO ES CRÍTICO: Los botones pueden parecer funcionar pero el JavaScript falla.**")
+                lines.append("Revisa funciones llamadas después de clicks (setTimeout, event handlers, etc.)")
+            lines.append("")
         
         elif phase_num == 6:
             lines.append(f"### Phase 6: Aggregation {emoji}")
