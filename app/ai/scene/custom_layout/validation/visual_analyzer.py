@@ -279,12 +279,29 @@ class VisualAnalyzer:
         # Structural change if more than 5% of pixels changed
         structural_change = pixel_diff_ratio > 0.05
 
+        # Sprint 6.3: Calculate element-relative diff ratio
+        # If a region was specified (the clicked element), calculate what % of IT changed
+        element_pixels = 0
+        element_diff_ratio = 0.0
+        if region:
+            element_pixels = int(region.width * region.height)
+            if element_pixels > 0:
+                # For element-relative, we use the cropped image comparison
+                # which already happened above, so diff_count is for the region
+                element_diff_ratio = diff_count / element_pixels
+
+        # Sprint 6.2: Include absolute counts for fixer context
+        # Sprint 6.3: Include element-relative metrics for adaptive threshold
         return VisualDelta(
             before=before,
             after=after,
             pixel_diff_ratio=pixel_diff_ratio,
             structural_change=structural_change,
             region_analyzed=region,
+            diff_count=diff_count,
+            total_pixels=total_pixels,
+            element_pixels=element_pixels,
+            element_diff_ratio=element_diff_ratio,
         )
 
     def compare_regions(

@@ -10,7 +10,8 @@
       "Bash(fly deploy:*)",
       "Bash(python -m py_compile:*)",
       "Bash(fly logs:*)",
-      "Bash(fly ssh console:*)"
+      "Bash(fly ssh console:*)",
+      "Bash(lsof:*)"
     ],
     "deny": [],
     "ask": []

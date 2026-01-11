@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 from .contracts import (
     InputCandidate,
     InteractionResult,
+    InteractionUnit,
     ObservedSceneGraph,
     PhaseResult,
     ValidationContract,
@@ -68,6 +69,9 @@ class InteractionValidator:
         """
         Test each input element with visual comparison.
 
+        Sprint 6.2: Now tests InteractionUnits individually when present.
+        "El evento puede ser uno solo, pero las decisiones del usuario nunca lo son."
+
         Args:
             page: Playwright page with HTML loaded
             inputs: List of input candidates from Phase 4
@@ -93,33 +97,78 @@ class InteractionValidator:
                 duration_ms=(time.time() - start_time) * 1000,
             ), []
 
-        # Test each input with early stopping
-        # Optimization: Test max 3 high-priority inputs, stop after 2 responsive
-        MAX_INPUTS_TO_TEST = 3
-        EARLY_STOP_RESPONSIVE = 2
-        responsive_count = 0
+        # Sprint 6.2: Filter out navigation elements - they don't produce visual feedback
+        testable_inputs = [inp for inp in inputs if inp.testable]
+        navigation_count = len(inputs) - len(testable_inputs)
 
-        for input_candidate in inputs[:MAX_INPUTS_TO_TEST]:
-            result = await self._test_single_input(page, input_candidate, contract)
-            results.append(result)
-
-            # Log each result
-            status = "RESPONSIVE" if result.responsive else "NO RESPONSE"
-            delta = result.visual_delta.pixel_diff_ratio if result.visual_delta else 0
-            logger.debug(
-                f"  {input_candidate.selector}: {status} "
-                f"(delta={delta:.3f}, threshold={contract.visual_change_threshold})"
+        if navigation_count > 0:
+            logger.info(
+                f"Phase 5: Skipping {navigation_count} navigation element(s) "
+                f"(links are not testable for visual feedback)"
             )
 
-            # Early stopping: if we found enough responsive inputs, stop testing
-            if result.responsive:
-                responsive_count += 1
-                if responsive_count >= EARLY_STOP_RESPONSIVE:
-                    logger.info(f"Early stopping: found {responsive_count} responsive inputs")
-                    break
+        # Calculate total testable units
+        # Sprint 6.2: Each interaction_unit counts as a separate test
+        total_units = sum(
+            len(inp.interaction_units) if inp.interaction_units else 1
+            for inp in testable_inputs
+        )
 
-        # Count responsive inputs
-        responsive_count = sum(1 for r in results if r.responsive)
+        # Limits for testing
+        # Sprint 6.2: Increased limits for multi-option layouts (trivia, etc.)
+        MAX_UNITS_TO_TEST = 8  # Test up to 8 units total
+        EARLY_STOP_RESPONSIVE = 5  # Stop after 5 responsive (62.5%+ pass rate)
+        units_tested = 0
+        responsive_count = 0
+
+        for input_candidate in testable_inputs:
+            if units_tested >= MAX_UNITS_TO_TEST:
+                break
+            if responsive_count >= EARLY_STOP_RESPONSIVE:
+                logger.info(f"Early stopping: found {responsive_count} responsive units")
+                break
+
+            if input_candidate.interaction_units:
+                # Sprint 6.2: Test each interaction unit individually
+                for unit in input_candidate.interaction_units:
+                    if units_tested >= MAX_UNITS_TO_TEST:
+                        break
+                    if responsive_count >= EARLY_STOP_RESPONSIVE:
+                        break
+
+                    result = await self._test_interaction_unit(
+                        page, input_candidate, unit, contract
+                    )
+                    results.append(result)
+                    units_tested += 1
+
+                    # Log result
+                    status = "RESPONSIVE" if result.responsive else "NO RESPONSE"
+                    delta = result.visual_delta.pixel_diff_ratio if result.visual_delta else 0
+                    logger.debug(
+                        f"  Unit {unit.value}: {status} "
+                        f"(delta={delta:.3f}, threshold={contract.visual_change_threshold})"
+                    )
+
+                    if result.responsive:
+                        responsive_count += 1
+            else:
+                # Original behavior: test the owner directly
+                result = await self._test_single_input(page, input_candidate, contract)
+                results.append(result)
+                units_tested += 1
+
+                # Log result
+                status = "RESPONSIVE" if result.responsive else "NO RESPONSE"
+                delta = result.visual_delta.pixel_diff_ratio if result.visual_delta else 0
+                logger.debug(
+                    f"  {input_candidate.selector}: {status} "
+                    f"(delta={delta:.3f}, threshold={contract.visual_change_threshold})"
+                )
+
+                if result.responsive:
+                    responsive_count += 1
+
         total_duration_ms = (time.time() - start_time) * 1000
 
         # Phase passes if at least one input is responsive
@@ -127,13 +176,13 @@ class InteractionValidator:
 
         if not passed:
             logger.warning(
-                f"Phase 5 (interaction): No inputs responded - "
+                f"Phase 5 (interaction): No units responded - "
                 f"tested {len(results)}, all failed visual delta check"
             )
         else:
             logger.info(
                 f"Phase 5 (interaction) passed - "
-                f"{responsive_count}/{len(results)} inputs responsive"
+                f"{responsive_count}/{len(results)} units responsive"
             )
 
         return PhaseResult(
@@ -144,6 +193,8 @@ class InteractionValidator:
             details={
                 "tested": len(results),
                 "responsive": responsive_count,
+                "total_units_available": total_units,
+                "navigation_excluded": navigation_count,  # Sprint 6.2: Links excluded from testing
                 "responsive_selectors": [r.input.selector for r in results if r.responsive],
                 "failed_selectors": [r.input.selector for r in results if not r.responsive],
             },
@@ -224,8 +275,9 @@ class InteractionValidator:
             after_scene = await scene_graph_extractor.extract_quick(page)
 
             # 5. Compare visual delta
-            # Focus on region around the clicked element
-            region = input_candidate.node.bounding_box.expand(self.REGION_PADDING)
+            # Sprint 6.3: Use element bounding box for element-relative comparison
+            element_box = input_candidate.node.bounding_box
+            region = element_box.expand(self.REGION_PADDING)
             visual_delta = visual_analyzer.compare(before_screenshot, after_screenshot, region)
 
             # Also check full-page delta as fallback
@@ -234,8 +286,12 @@ class InteractionValidator:
                 if full_delta.pixel_diff_ratio > visual_delta.pixel_diff_ratio:
                     visual_delta = full_delta
 
-            # Determine if responsive
-            responsive = visual_delta.has_visible_change(contract.visual_change_threshold)
+            # Sprint 6.3: Adaptive threshold - use BOTH global and element-relative detection
+            # This fixes the impossible math for small buttons (100x40 = 0.19% of viewport)
+            responsive = visual_delta.has_visible_change(
+                threshold=contract.visual_change_threshold,  # 2% of viewport
+                element_threshold=0.30,  # 30% of element area
+            )
 
             # If visual delta is low, also check scene graph changes
             if not responsive:
@@ -265,6 +321,146 @@ class InteractionValidator:
         except Exception as e:
             return InteractionResult(
                 input=input_candidate,
+                action="click",
+                visual_delta=None,
+                scene_before=None,
+                scene_after=None,
+                responsive=False,
+                error=str(e),
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+
+    async def _test_interaction_unit(
+        self,
+        page: "Page",
+        owner: InputCandidate,
+        unit: InteractionUnit,
+        contract: ValidationContract,
+    ) -> InteractionResult:
+        """
+        Sprint 6.2: Test a single interaction unit.
+
+        Similar to _test_single_input but clicks the unit's selector
+        instead of the owner's. This handles cases where event delegation
+        is used but each unit needs individual testing.
+
+        The result is attributed to the unit, but uses owner for metadata.
+        """
+        start_time = time.time()
+
+        # Create a temporary InputCandidate for the unit
+        # This allows reusing the same InteractionResult structure
+        unit_as_candidate = InputCandidate(
+            selector=unit.selector,
+            node=unit.node,
+            confidence=owner.confidence,
+            input_type="option",
+            priority=owner.priority,
+        )
+
+        try:
+            # 1. Capture BEFORE state
+            before_screenshot = await visual_analyzer.capture(page)
+            before_scene = await scene_graph_extractor.extract_quick(page)
+
+            # 2. Click the unit element
+            locator = page.locator(unit.selector).first
+
+            # Check if element exists and is visible
+            if await locator.count() == 0:
+                return InteractionResult(
+                    input=unit_as_candidate,
+                    action="click",
+                    visual_delta=None,
+                    scene_before=before_scene,
+                    scene_after=None,
+                    responsive=False,
+                    error=f"Unit not found: {unit.selector} (value={unit.value})",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+
+            if not await locator.is_visible():
+                return InteractionResult(
+                    input=unit_as_candidate,
+                    action="click",
+                    visual_delta=None,
+                    scene_before=before_scene,
+                    scene_after=None,
+                    responsive=False,
+                    error=f"Unit not visible: {unit.selector}",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+
+            # Skip disabled elements
+            is_disabled = await locator.is_disabled()
+            if is_disabled:
+                return InteractionResult(
+                    input=unit_as_candidate,
+                    action="click",
+                    visual_delta=None,
+                    scene_before=before_scene,
+                    scene_after=None,
+                    responsive=False,
+                    error=f"Unit is disabled: {unit.selector}",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+
+            # Perform click
+            await locator.click(timeout=contract.interaction_timeout_ms)
+
+            # 3. Wait for stabilization
+            await asyncio.sleep(contract.stabilization_ms / 1000)
+
+            # 4. Capture AFTER state
+            after_screenshot = await visual_analyzer.capture(page)
+            after_scene = await scene_graph_extractor.extract_quick(page)
+
+            # 5. Compare visual delta (focus on region around unit)
+            # Sprint 6.3: Use element bounding box for element-relative comparison
+            element_box = unit.node.bounding_box
+            region = element_box.expand(self.REGION_PADDING)
+            visual_delta = visual_analyzer.compare(before_screenshot, after_screenshot, region)
+
+            # Full-page fallback
+            if visual_delta.pixel_diff_ratio < contract.visual_change_threshold:
+                full_delta = visual_analyzer.compare(before_screenshot, after_screenshot)
+                if full_delta.pixel_diff_ratio > visual_delta.pixel_diff_ratio:
+                    visual_delta = full_delta
+
+            # Sprint 6.3: Adaptive threshold - use BOTH global and element-relative detection
+            responsive = visual_delta.has_visible_change(
+                threshold=contract.visual_change_threshold,  # 2% of viewport
+                element_threshold=0.30,  # 30% of element area
+            )
+
+            # Scene graph fallback
+            if not responsive:
+                responsive = self._scene_changed_significantly(before_scene, after_scene)
+
+            return InteractionResult(
+                input=unit_as_candidate,
+                action="click",
+                visual_delta=visual_delta,
+                scene_before=before_scene,
+                scene_after=after_scene,
+                responsive=responsive,
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+
+        except asyncio.TimeoutError:
+            return InteractionResult(
+                input=unit_as_candidate,
+                action="click",
+                visual_delta=None,
+                scene_before=None,
+                scene_after=None,
+                responsive=False,
+                error=f"Timeout clicking unit: {unit.selector}",
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+        except Exception as e:
+            return InteractionResult(
+                input=unit_as_candidate,
                 action="click",
                 visual_delta=None,
                 scene_before=None,

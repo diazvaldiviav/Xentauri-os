@@ -11,7 +11,26 @@ This module defines all dataclasses used throughout the 7-phase validation:
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+
+
+# ---------------------------------------------------------------------------
+# INTERACTION CATEGORIES
+# ---------------------------------------------------------------------------
+
+class InteractionCategory(Enum):
+    """
+    Sprint 6.2: Semantic classification of clickable elements.
+
+    "No todo lo clickeable debe reaccionar;
+     pero todo lo reactivo debe ser visible."
+
+    INTERACTIVE_UI: Elements that change local state and MUST produce visual feedback
+    NAVIGATION: Elements that navigate to other views - exempt from visual delta testing
+    """
+    INTERACTIVE_UI = "interactive_ui"  # Buttons, toggles, filters, options
+    NAVIGATION = "navigation"          # Links, sidebar items, menu navigation
 
 
 # ---------------------------------------------------------------------------
@@ -194,16 +213,58 @@ class VisualDelta:
     Comparison result between two screenshots.
 
     Used to detect if a click produced visible changes.
+
+    Sprint 6.2: Now includes absolute pixel counts for fixer context.
+    Sprint 6.3: Adaptive threshold - element-relative detection.
+    "El fixer necesita números concretos, no solo porcentajes."
     """
     before: VisualSnapshot
     after: VisualSnapshot
     pixel_diff_ratio: float  # 0.0 to 1.0 (% of pixels that changed)
     structural_change: bool   # Major layout change detected
     region_analyzed: Optional[BoundingBox] = None  # If comparison was regional
+    # Sprint 6.2: Absolute pixel counts for concrete fixer guidance
+    diff_count: int = 0       # Number of pixels that changed (absolute)
+    total_pixels: int = 0     # Total pixels compared (viewport or region)
+    # Sprint 6.3: Element-relative metrics for adaptive threshold
+    element_pixels: int = 0   # Pixels in the clicked element's bounding box
+    element_diff_ratio: float = 0.0  # % of ELEMENT pixels that changed (not viewport)
 
-    def has_visible_change(self, threshold: float = 0.02) -> bool:
-        """Check if change exceeds threshold."""
-        return self.pixel_diff_ratio > threshold
+    def has_visible_change(self, threshold: float = 0.02, element_threshold: float = 0.30) -> bool:
+        """
+        Check if change exceeds threshold using adaptive detection.
+        
+        Sprint 6.3: Dual-threshold system:
+        1. Global threshold (2%): For large visual changes (overlays, panels)
+        2. Element threshold (30%): For small interactive elements (buttons, options)
+        
+        An element is responsive if EITHER:
+        - Global change >= threshold (2% of viewport), OR
+        - Element-local change >= element_threshold (30% of element area)
+        
+        This fixes the impossible math for small buttons:
+        - Button 100x40 = 4000px = 0.19% of viewport (never reaches 2%)
+        - But if 30% of button pixels change, that's clearly responsive
+        """
+        # Primary: global threshold (catches large changes)
+        if self.pixel_diff_ratio >= threshold:
+            return True
+        
+        # Secondary: element-relative threshold (catches small element changes)
+        # A button that changes 30%+ of its own pixels is clearly responsive
+        if self.element_diff_ratio >= element_threshold:
+            return True
+        
+        return False
+
+    def get_pixels_needed(self, threshold: float = 0.02) -> int:
+        """Calculate how many pixels need to change to meet threshold."""
+        return int(self.total_pixels * threshold)
+
+    def get_pixels_gap(self, threshold: float = 0.02) -> int:
+        """Calculate how many MORE pixels need to change."""
+        needed = self.get_pixels_needed(threshold)
+        return max(0, needed - self.diff_count)
 
 
 # ---------------------------------------------------------------------------
@@ -211,28 +272,69 @@ class VisualDelta:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class InteractionUnit:
+    """
+    Sprint 6.2: Individual interaction unit within an event owner.
+
+    "El evento puede ser uno solo, pero las decisiones del usuario nunca lo son."
+
+    An InteractionUnit represents a distinct user choice, even when the event
+    is delegated to a parent. Examples:
+    - Option A, B, C, D in a trivia
+    - Cards in a grid
+    - Menu items
+
+    The parent may handle the event via delegation, but each unit is
+    a separate interaction that must be tested independently.
+    """
+    selector: str           # CSS selector to click this specific unit
+    value: Optional[str]    # Semantic value (e.g., "A", "B", "correct", etc.)
+    node: SceneNode         # Reference to scene graph node
+    text_content: Optional[str] = None  # Display text for logging
+
+
+@dataclass
 class InputCandidate:
     """
-    Detected clickable element.
+    Detected clickable element or event owner.
 
     Ranked by confidence and priority for testing.
 
-    EOR: When source_elements is populated, this candidate represents
-    an event owner that was resolved from child elements. The selector
-    is the owner, and source_elements lists the children that pointed to it.
+    Sprint 6.2: Now supports:
+    - interaction_units: for multiple-choice layouts
+    - interaction_category: INTERACTIVE_UI vs NAVIGATION
+    - testable: whether this input should be tested for visual feedback
+
+    The owner handles the event, but each unit is a distinct user decision.
     """
-    selector: str           # CSS selector to click
+    selector: str           # CSS selector of the event owner
     node: SceneNode         # Reference to scene graph node
     confidence: float       # 0.0 to 1.0 (how sure we are it's clickable)
-    input_type: str         # button|link|checkbox|radio|custom
+    input_type: str         # button|link|checkbox|radio|option|custom
     priority: int           # Lower = test first
-    source_elements: List[str] = field(default_factory=list)  # EOR: child selectors that resolved to this owner
+    source_elements: List[str] = field(default_factory=list)  # Legacy: child selectors
+    interaction_units: List[InteractionUnit] = field(default_factory=list)  # Sprint 6.2: distinct clickable units
+    # Sprint 6.2: Semantic classification
+    interaction_category: InteractionCategory = InteractionCategory.INTERACTIVE_UI
+    testable: bool = True  # False for navigation elements (links)
 
     def __lt__(self, other: "InputCandidate") -> bool:
         """Sort by priority (ascending), then confidence (descending)."""
         if self.priority != other.priority:
             return self.priority < other.priority
         return self.confidence > other.confidence
+
+    def get_test_count(self) -> int:
+        """Return number of interactions to test for this candidate."""
+        if not self.testable:
+            return 0  # Navigation elements don't get tested
+        if self.interaction_units:
+            return len(self.interaction_units)
+        return 1  # Just the owner itself
+
+    def is_navigation(self) -> bool:
+        """Check if this is a navigation element (excluded from ratio)."""
+        return self.interaction_category == InteractionCategory.NAVIGATION
 
 
 # ---------------------------------------------------------------------------
@@ -290,21 +392,64 @@ class InteractionResult:
         """
         Get rich context for the fixer, including failure classification.
 
-        This is CRITICAL for the fixer to understand the REAL problem.
+        Sprint 6.2: Now includes SEMANTIC context and CONCRETE PIXEL COUNTS
+        so the fixer understands WHAT the element is, WHAT it should do,
+        and EXACTLY how much more visual change is needed.
+
+        "El fixer necesita números concretos, no solo porcentajes."
         """
         ratio = self.visual_delta.pixel_diff_ratio if self.visual_delta else 0.0
         failure_type = self.get_failure_type(threshold)
 
-        # Build interpretation based on failure type
+        # Sprint 6.2: Get concrete pixel counts
+        pixels_changed = self.visual_delta.diff_count if self.visual_delta else 0
+        total_pixels = self.visual_delta.total_pixels if self.visual_delta else 0
+        pixels_needed = int(total_pixels * threshold) if total_pixels > 0 else 0
+        pixels_gap = max(0, pixels_needed - pixels_changed)
+
+        # Element area from bounding box
+        node = self.input.node
+        element_area = int(node.bounding_box.area())
+        element_pct = (element_area / total_pixels * 100) if total_pixels > 0 else 0
+
+        # Build interpretation with concrete guidance
+        # Sprint 6.3: Safer strategies that don't break other elements
         if failure_type == "passed":
             interpretation = "Working correctly"
+            strategy = None
         elif failure_type == "no_change":
             interpretation = "Handler broken or not triggering visual change"
+            strategy = (
+                "Check onclick handler is properly connected. "
+                "Ensure it modifies THIS element's CSS (background-color, transform, opacity). "
+                "Use element-specific selector like [data-option='X'] or #unique-id."
+            )
         elif failure_type == "under_threshold":
-            multiplier = threshold / ratio if ratio > 0 else 10
-            interpretation = f"Visual feedback too subtle. Needs ~{multiplier:.1f}x amplification"
+            interpretation = f"Visual feedback too subtle. Changed {pixels_changed:,} pixels."
+            # Sprint 6.3: SAFE strategies that only affect the clicked element
+            # NO MORE "change parent background" - that breaks siblings!
+            strategy = (
+                f"ONLY modify THIS element's styles on click. Safe options: "
+                f"1) Add visible border: 'border: 4px solid #00ff00' "
+                f"2) Change background: 'background: #ffffff' (high contrast) "
+                f"3) Add transform: 'transform: scale(1.1)' "
+                f"4) Add box-shadow: 'box-shadow: 0 0 20px #00ff00' "
+                f"NEVER modify parent containers or siblings."
+            )
         else:  # error
             interpretation = f"Error: {self.error}"
+            strategy = "Fix the JavaScript error first"
+
+        # Extract semantic information from the node
+        text_content = node.text_content[:50] if node.text_content else None
+
+        # Extract key attributes (data-*, role, aria-*, onclick presence)
+        key_attrs = {}
+        for attr, val in node.attributes.items():
+            if attr.startswith("data-") or attr.startswith("aria-") or attr in ("role", "type", "value"):
+                key_attrs[attr] = val[:50] if isinstance(val, str) and len(val) > 50 else val
+            elif attr == "onclick":
+                key_attrs["onclick"] = "present"
 
         return {
             "selector": self.input.selector,
@@ -315,6 +460,24 @@ class InteractionResult:
             "failure_type": failure_type,
             "interpretation": interpretation,
             "responsive": self.responsive,
+            # Sprint 6.2: Concrete pixel counts for intelligent repair
+            "pixels": {
+                "changed": pixels_changed,
+                "needed": pixels_needed,
+                "gap": pixels_gap,
+                "total_viewport": total_pixels,
+            },
+            # Sprint 6.2: Semantic context
+            "element": {
+                "tag": node.tag,
+                "input_type": self.input.input_type,
+                "text_content": text_content,
+                "key_attributes": key_attrs,
+                "area_pixels": element_area,
+                "area_pct": f"{element_pct:.2f}%",
+            },
+            # Sprint 6.2: Concrete repair strategy
+            "strategy": strategy,
         }
 
     def to_dict(self) -> Dict[str, Any]:

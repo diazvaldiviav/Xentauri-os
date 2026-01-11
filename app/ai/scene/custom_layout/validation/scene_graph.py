@@ -44,10 +44,14 @@ JS_EXTRACT_SCENE_GRAPH = """
         if (el.id) return '#' + el.id;
 
         // Try data attributes (best for unique selection)
+        // Sprint 6.2 FIX: Only use if value is non-empty
         for (const attr of ['data-testid', 'data-option', 'data-submit', 'data-question', 'data-answer', 'data-choice', 'data-index']) {
             if (el.hasAttribute(attr)) {
                 const val = el.getAttribute(attr);
-                return `[${attr}="${val}"]`;
+                // CRITICAL: Skip empty values - [data-option=""] is not a valid selector
+                if (val && val.trim() !== '') {
+                    return `[${attr}="${val}"]`;
+                }
             }
         }
 
@@ -186,11 +190,16 @@ JS_EXTRACT_SCENE_GRAPH = """
             }
 
             // 3. Semantic data attributes (our trivia/game markers)
+            // Sprint 6.2 FIX: Only treat as owner if value is non-empty
             const semanticAttrs = ['data-option', 'data-answer', 'data-choice',
                                    'data-submit', 'data-start', 'data-restart'];
             for (const attr of semanticAttrs) {
                 if (element.hasAttribute(attr)) {
-                    return 'ancestor_with_' + attr;
+                    const attrVal = element.getAttribute(attr);
+                    // CRITICAL: Empty data-option="" is not a semantic owner
+                    if (attrVal && attrVal.trim() !== '') {
+                        return 'ancestor_with_' + attr;
+                    }
                 }
             }
 

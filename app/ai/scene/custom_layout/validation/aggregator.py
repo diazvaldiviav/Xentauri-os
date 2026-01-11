@@ -74,8 +74,13 @@ class ValidationAggregator:
         total_duration = sum(p.duration_ms for p in phases)
 
         # Count interaction metrics
+        # Sprint 6.2: Only testable inputs are in interaction_results (navigation excluded)
         inputs_tested = len(interaction_results)
         inputs_responsive = sum(1 for r in interaction_results if r.responsive)
+
+        # Get navigation exclusion count from Phase 5 for logging
+        phase5 = next((p for p in phases if p.phase == 5), None)
+        navigation_excluded = phase5.details.get("navigation_excluded", 0) if phase5 else 0
 
         # Check critical phases (1-4)
         critical_phases = [p for p in phases if p.phase <= 4]
@@ -164,10 +169,11 @@ class ValidationAggregator:
                 warnings.extend(p.details["warnings"])
 
         # All checks passed
+        nav_note = f" (navigation={navigation_excluded} excluded)" if navigation_excluded > 0 else ""
         logger.info(
             f"Validation PASSED - "
             f"layout={layout_type}, "
-            f"inputs={inputs_responsive}/{inputs_tested}, "
+            f"inputs={inputs_responsive}/{inputs_tested}{nav_note}, "
             f"confidence={confidence:.2f}"
         )
 

@@ -1,8 +1,8 @@
 # Xentauri Project Context
 
 > **Last Updated:** January 10, 2026
-> **Current Sprint:** Sprint 6.1 - Visual Validation + EOR ✅ COMPLETE
-> **Previous Sprint:** Sprint 6.0 - Visual-based Validation System ✅ COMPLETE
+> **Current Sprint:** Sprint 6.3 - Adaptive Threshold + Safe Fixer ✅ COMPLETE
+> **Previous Sprint:** Sprint 6.1 - Visual Validation + EOR ✅ COMPLETE
 > **Backend Status:** ✅ MVP COMPLETE - Deployed to Production
 > **Status:** 🚀 Backend deployed to fly.io, Visual validation pipeline active
 
@@ -238,6 +238,35 @@ Xentauri is an intelligent screen control system that lets users operate multipl
 | **Bug Fix:** Dynamic JS content timing (wait for init) | ✅ Done |
 | **Bug Fix:** Skip disabled elements in interaction validation | ✅ Done |
 | Gunicorn timeout increased to 300s (TD-001) | ✅ Done |
+
+### Sprint 6.3: Adaptive Threshold + Safe Fixer ✅ COMPLETE (January 10, 2026)
+| Task | Status |
+|------|--------|
+| **Root Cause Analysis** | |
+| Identified fixer regression (2/8 → 1/8 → 2/8 loop) | ✅ Done |
+| Problem: 2% viewport threshold impossible for small buttons | ✅ Done |
+| Problem: Destructive strategies affecting sibling elements | ✅ Done |
+| **Adaptive Threshold System** | |
+| `element_pixels` field in VisualDelta (contracts.py) | ✅ Done |
+| `element_diff_ratio` field in VisualDelta | ✅ Done |
+| Dual threshold: 2% viewport OR 30% element-relative | ✅ Done |
+| `has_visible_change(threshold, element_threshold)` method | ✅ Done |
+| Element-relative diff calculation in visual_analyzer.py | ✅ Done |
+| Updated interaction_validator.py to use adaptive threshold | ✅ Done |
+| **Safe Fixer Strategies** | |
+| Removed destructive strategies (parent container changes) | ✅ Done |
+| Safe element-specific CSS suggestions only | ✅ Done |
+| Complete rewrite of REPAIR_SYSTEM_PROMPT in fixer.py | ✅ Done |
+| PROHIBITED CSS SELECTORS section (*, html, body, etc.) | ✅ Done |
+| Ultra-specific selector requirements (3+ levels deep) | ✅ Done |
+| **Production Testing (6 prompts)** | |
+| Roma trivia: 4/4 (100%) - passed first try | ✅ Done |
+| Memory game: 4/8 → 5/5 (repair worked, +100%) | ✅ Done |
+| Solar system animated: 5/5 (100%) - passed first try | ✅ Done |
+| Flash cards solar: 4/4 (100%) - passed first try | ✅ Done |
+| Math quiz 10 questions: 5/7 (86%) - passed first try | ✅ Done |
+| Dashboard 4 panels: 5/8 → 5/6 (repair worked, +92%) | ✅ Done |
+| Deployed to Fly.io production | ✅ Done |
 
 ### 🎉 BACKEND MVP COMPLETE
 All backend features for MVP are complete:
