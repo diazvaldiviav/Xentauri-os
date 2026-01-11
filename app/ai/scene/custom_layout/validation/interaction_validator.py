@@ -211,15 +211,19 @@ class InteractionValidator:
         or any other continuous animations that would cause pixel differences
         unrelated to the click interaction.
         """
+        logger.debug("Pausing all CSS animations for screenshot comparison")
         await page.evaluate("""
             () => {
                 // Pause all CSS animations
+                let count = 0;
                 document.querySelectorAll('*').forEach(el => {
                     const style = window.getComputedStyle(el);
                     if (style.animationName !== 'none') {
                         el.style.animationPlayState = 'paused';
+                        count++;
                     }
                 });
+                return count;
             }
         """)
 

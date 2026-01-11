@@ -226,6 +226,12 @@ class Settings(BaseSettings):
     # - 300ms handles most transitions without being too slow
     INTERACTION_STABILIZATION_MS: int = 300
 
+    # Sprint 7: Vision-Enhanced Repair
+    # VISION_REPAIR_ENABLED: Use screenshots + Claude vision for repair
+    # - True: Send screenshots to Sonnet for visual analysis
+    # - False: Use text-only repair (faster but less accurate)
+    VISION_REPAIR_ENABLED: bool = True
+
 
 # ---------------------------------------------------------------------------
 # GLOBAL SETTINGS INSTANCE

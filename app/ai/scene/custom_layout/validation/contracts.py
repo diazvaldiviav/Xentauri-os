@@ -310,6 +310,10 @@ class InputCandidate:
     - NAVIGATION: Excluded (links navigate away)
     - DISPLAY_ONLY: Excluded (informational widgets without handlers)
 
+    Sprint 7: Visibility detection:
+    - Elements can exist in DOM but be invisible (transform, opacity, z-index)
+    - visibility_status tracks if element has visible pixels
+
     The owner handles the event, but each unit is a distinct user decision.
     """
     selector: str           # CSS selector of the event owner
@@ -323,6 +327,10 @@ class InputCandidate:
     interaction_category: InteractionCategory = InteractionCategory.INTERACTIVE_UI
     testable: bool = True  # False for NAVIGATION and DISPLAY_ONLY
     category_reason: str = ""  # Why this category was assigned (for debugging/fixer)
+    # Sprint 7: Visibility detection
+    visibility_status: str = "unknown"  # "visible" | "invisible" | "partial" | "unknown"
+    visibility_pixels: int = 0          # Non-transparent pixels in bounding box
+    visibility_ratio: float = 0.0       # % of bounding box with visible content
 
     def __lt__(self, other: "InputCandidate") -> bool:
         """Sort by priority (ascending), then confidence (descending)."""
@@ -353,6 +361,19 @@ class InputCandidate:
             InteractionCategory.DISPLAY_ONLY,
         )
 
+    def is_invisible(self) -> bool:
+        """
+        Sprint 7: Check if element exists in DOM but has no visible pixels.
+
+        An invisible element should not be tested for interaction -
+        clicking invisible elements always fails, but it's not a CSS feedback issue.
+        """
+        return self.visibility_status == "invisible"
+
+    def is_visible(self) -> bool:
+        """Sprint 7: Check if element has visible pixels."""
+        return self.visibility_status in ("visible", "partial", "unknown")
+
 
 # ---------------------------------------------------------------------------
 # INTERACTION RESULTS (Phase 5)
@@ -364,6 +385,8 @@ class InteractionResult:
     Result of testing a single input element.
 
     Contains before/after state and whether the input responded.
+
+    Sprint 7: Now includes screenshots for vision-based repair.
     """
     input: InputCandidate
     action: str  # click|hover|focus
@@ -373,6 +396,9 @@ class InteractionResult:
     responsive: bool  # Did the interaction produce observable change?
     error: Optional[str] = None
     duration_ms: float = 0.0
+    # Sprint 7: Screenshots for vision repair
+    screenshot_before: Optional[bytes] = None  # PNG before click
+    screenshot_after: Optional[bytes] = None   # PNG after click
 
     def get_failure_type(self, threshold: float = 0.02) -> str:
         """
@@ -380,12 +406,17 @@ class InteractionResult:
 
         Returns:
             - "passed": Element responded adequately
+            - "element_invisible": Element exists in DOM but has no visible pixels (Sprint 7)
             - "no_change": Zero or near-zero visual change (broken handler)
             - "under_threshold": Some change but below threshold (needs amplification)
             - "error": JavaScript or interaction error occurred
         """
         if self.responsive:
             return "passed"
+
+        # Sprint 7: Check if element is invisible
+        if self.input.is_invisible():
+            return "element_invisible"
 
         if self.error:
             return "error"
@@ -431,9 +462,25 @@ class InteractionResult:
 
         # Build interpretation with concrete guidance
         # Sprint 6.3: Safer strategies that don't break other elements
+        # Sprint 7: Added element_invisible case
         if failure_type == "passed":
             interpretation = "Working correctly"
             strategy = None
+        elif failure_type == "element_invisible":
+            # Sprint 7: Element exists in DOM but has no visible pixels
+            interpretation = (
+                f"CRITICAL: Element exists in DOM but is INVISIBLE (has no visible pixels). "
+                f"Visibility ratio: {self.input.visibility_ratio:.1%}"
+            )
+            strategy = (
+                "This is NOT a CSS feedback issue - the element doesn't render at all! "
+                "Possible causes: (1) JavaScript not executing/creating element properly, "
+                "(2) CSS transform hiding element (e.g., rotateX/Y placing it out of view), "
+                "(3) opacity: 0 or visibility: hidden, (4) z-index placing it behind other elements, "
+                "(5) display: none or width/height: 0. "
+                "FIX: Check if element is created by JavaScript that may be failing. "
+                "If using 3D transforms, ensure elements stay in viewport."
+            )
         elif failure_type == "no_change":
             interpretation = "Handler broken or not triggering visual change"
             strategy = (
@@ -482,6 +529,7 @@ class InteractionResult:
                 "total_viewport": total_pixels,
             },
             # Sprint 6.2: Semantic context
+            # Sprint 7: Added visibility info
             "element": {
                 "tag": node.tag,
                 "input_type": self.input.input_type,
@@ -489,6 +537,8 @@ class InteractionResult:
                 "key_attributes": key_attrs,
                 "area_pixels": element_area,
                 "area_pct": f"{element_pct:.2f}%",
+                "visibility_status": self.input.visibility_status,
+                "visibility_ratio": f"{self.input.visibility_ratio:.1%}",
             },
             # Sprint 6.2: Concrete repair strategy
             "strategy": strategy,
@@ -547,6 +597,8 @@ class SandboxResult:
 
     This is what gets returned from the validation pipeline and
     passed to the fixer if validation fails.
+
+    Sprint 7: Now includes page screenshot for vision-based repair.
     """
     valid: bool
     phases: List[PhaseResult]
@@ -558,6 +610,11 @@ class SandboxResult:
     failure_summary: Optional[str] = None
     interaction_results: List[InteractionResult] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
+    # Sprint 7: Screenshot for vision repair
+    page_screenshot: Optional[bytes] = None  # PNG of full page
+    screenshot_path: Optional[str] = None    # Path where screenshot was saved
+    # Sprint 7: Count of invisible elements
+    invisible_elements_count: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization/logging."""

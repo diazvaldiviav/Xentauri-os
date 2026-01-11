@@ -6,6 +6,7 @@ Claude (by Anthropic) is used for tasks requiring:
 - Complex planning and strategy
 - Critical decision making
 - Nuanced analysis and explanations
+- Vision-based analysis (Sprint 7)
 
 Role in Jarvis:
 ==============
@@ -17,13 +18,18 @@ Examples:
 - "Analyze why X is happening and suggest solutions..."
 - "What's the best approach for..."
 
+Sprint 7: Added vision support for HTML repair with screenshots.
+- generate_with_vision(): Analyze images with extended thinking
+- Uses Claude's vision API with budget_tokens for complex reasoning
+
 API Documentation: https://docs.anthropic.com/en/api
 """
 
+import base64
 import time
 import json
 import logging
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List, Union
 
 from anthropic import AsyncAnthropic
 
@@ -248,6 +254,239 @@ class AnthropicProvider(AIProvider):
         except Exception as e:
             latency_ms = self._measure_latency(start_time)
             logger.error(f"Anthropic JSON generation failed: {e}")
+            return self._create_error_response(
+                error=str(e),
+                model=self.model,
+                latency_ms=latency_ms
+            )
+
+
+    # -------------------------------------------------------------------------
+    # SPRINT 7: VISION SUPPORT
+    # -------------------------------------------------------------------------
+
+    async def generate_with_vision(
+        self,
+        prompt: str,
+        images: List[Union[bytes, str]],
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 8192,
+        use_extended_thinking: bool = True,
+        thinking_budget: int = 10000,
+        **kwargs
+    ) -> AIResponse:
+        """
+        Sprint 7: Generate response with vision (image) input.
+
+        This method enables Claude to analyze screenshots for HTML repair.
+        Supports extended thinking for complex visual reasoning tasks.
+
+        Args:
+            prompt: Text prompt describing what to analyze/fix
+            images: List of images (bytes or base64 strings)
+            system_prompt: Optional system instructions
+            temperature: Creativity (0-1), lower for repair tasks
+            max_tokens: Maximum response tokens
+            use_extended_thinking: Enable extended thinking budget
+            thinking_budget: Token budget for thinking (default 10000)
+
+        Returns:
+            AIResponse with analysis/repair content
+        """
+        start_time = time.time()
+
+        if not self._client:
+            return self._create_error_response(
+                error="Anthropic API key not configured",
+                model=self.model,
+                latency_ms=self._measure_latency(start_time)
+            )
+
+        try:
+            # Build message content with images
+            content = []
+
+            # Add images first
+            for img in images:
+                if isinstance(img, bytes):
+                    # Convert bytes to base64
+                    img_base64 = base64.b64encode(img).decode("utf-8")
+                else:
+                    # Already base64 string
+                    img_base64 = img
+
+                content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": img_base64,
+                    }
+                })
+
+            # Add text prompt
+            content.append({
+                "type": "text",
+                "text": prompt,
+            })
+
+            # Build request
+            request_params = {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": content}],
+            }
+
+            # Add system prompt if provided
+            if system_prompt:
+                request_params["system"] = system_prompt
+
+            # Sprint 7: Extended thinking for complex reasoning
+            # Note: Extended thinking requires temperature=1 on claude-3-7-sonnet
+            if use_extended_thinking and "sonnet" in self.model.lower():
+                # Extended thinking uses streaming internally and budget_tokens
+                request_params["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": thinking_budget,
+                }
+                # Extended thinking requires temperature=1
+                request_params["temperature"] = 1
+                logger.info(f"Extended thinking enabled with budget={thinking_budget}")
+            else:
+                request_params["temperature"] = temperature
+
+            # Make API request
+            response = await self._client.messages.create(**request_params)
+
+            latency_ms = self._measure_latency(start_time)
+
+            # Extract content (handle both regular and thinking responses)
+            content_text = ""
+            thinking_text = ""
+
+            if response.content:
+                for block in response.content:
+                    if hasattr(block, 'type'):
+                        if block.type == "thinking" and hasattr(block, 'thinking'):
+                            thinking_text = block.thinking
+                        elif block.type == "text" and hasattr(block, 'text'):
+                            content_text += block.text
+                    elif hasattr(block, 'text'):
+                        content_text += block.text
+
+            # Log thinking summary if present
+            if thinking_text:
+                logger.info(f"Extended thinking used: {len(thinking_text)} chars")
+
+            # Extract usage
+            usage = TokenUsage(
+                prompt_tokens=response.usage.input_tokens if response.usage else 0,
+                completion_tokens=response.usage.output_tokens if response.usage else 0,
+            )
+
+            logger.info(
+                f"Vision request completed in {latency_ms:.0f}ms, "
+                f"tokens: {usage.total_tokens}, images: {len(images)}"
+            )
+
+            return AIResponse(
+                content=content_text,
+                provider=self.provider_type,
+                model=self.model,
+                usage=usage,
+                latency_ms=latency_ms,
+                success=True,
+                raw_response=response,
+            )
+
+        except Exception as e:
+            latency_ms = self._measure_latency(start_time)
+            logger.error(f"Vision generation failed: {e}", exc_info=True)
+            return self._create_error_response(
+                error=str(e),
+                model=self.model,
+                latency_ms=latency_ms
+            )
+
+    async def generate_with_extended_thinking(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_tokens: int = 16384,
+        thinking_budget: int = 10000,
+        **kwargs
+    ) -> AIResponse:
+        """
+        Sprint 7: Generate with extended thinking (no images).
+
+        Useful for complex reasoning tasks like HTML repair diagnosis.
+
+        Args:
+            prompt: The reasoning task
+            system_prompt: Optional system instructions
+            max_tokens: Maximum response tokens
+            thinking_budget: Token budget for thinking
+
+        Returns:
+            AIResponse with reasoning output
+        """
+        start_time = time.time()
+
+        if not self._client:
+            return self._create_error_response(
+                error="Anthropic API key not configured",
+                model=self.model,
+                latency_ms=self._measure_latency(start_time)
+            )
+
+        try:
+            request_params = {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 1,  # Required for extended thinking
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": thinking_budget,
+                },
+            }
+
+            if system_prompt:
+                request_params["system"] = system_prompt
+
+            response = await self._client.messages.create(**request_params)
+
+            latency_ms = self._measure_latency(start_time)
+
+            # Extract content
+            content_text = ""
+            for block in response.content:
+                if hasattr(block, 'type') and block.type == "text":
+                    content_text += block.text
+                elif hasattr(block, 'text'):
+                    content_text += block.text
+
+            usage = TokenUsage(
+                prompt_tokens=response.usage.input_tokens if response.usage else 0,
+                completion_tokens=response.usage.output_tokens if response.usage else 0,
+            )
+
+            logger.info(f"Extended thinking request completed in {latency_ms:.0f}ms")
+
+            return AIResponse(
+                content=content_text,
+                provider=self.provider_type,
+                model=self.model,
+                usage=usage,
+                latency_ms=latency_ms,
+                success=True,
+                raw_response=response,
+            )
+
+        except Exception as e:
+            latency_ms = self._measure_latency(start_time)
+            logger.error(f"Extended thinking failed: {e}", exc_info=True)
             return self._create_error_response(
                 error=str(e),
                 model=self.model,

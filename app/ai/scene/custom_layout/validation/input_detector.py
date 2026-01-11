@@ -735,6 +735,128 @@ class InputDetector:
                 filtered.append(c)
         return filtered
 
+    async def check_elements_visibility(
+        self,
+        page: "Page",
+        candidates: List[InputCandidate],
+    ) -> Tuple[List[InputCandidate], int]:
+        """
+        Sprint 7: Check visibility of each element candidate.
+
+        An element can exist in the DOM but be invisible due to:
+        - opacity: 0
+        - visibility: hidden
+        - display: none
+        - transform that moves it out of viewport
+        - z-index placing it behind opaque elements
+        - width/height: 0
+
+        Args:
+            page: Playwright page
+            candidates: List of input candidates to check
+
+        Returns:
+            (updated_candidates, invisible_count)
+        """
+        invisible_count = 0
+
+        for candidate in candidates:
+            visibility = await self._check_single_element_visibility(page, candidate)
+            candidate.visibility_status = visibility["status"]
+            candidate.visibility_pixels = visibility["pixels"]
+            candidate.visibility_ratio = visibility["ratio"]
+
+            if visibility["status"] == "invisible":
+                invisible_count += 1
+
+        if invisible_count > 0:
+            logger.warning(
+                f"Sprint 7: {invisible_count} element(s) exist in DOM but are INVISIBLE"
+            )
+
+        return candidates, invisible_count
+
+    async def _check_single_element_visibility(
+        self,
+        page: "Page",
+        candidate: InputCandidate,
+    ) -> dict:
+        """
+        Sprint 7: Check if a single element has visible pixels.
+
+        Uses Playwright to capture a screenshot of just the element
+        and analyzes if it has non-transparent pixels.
+
+        Returns:
+            {
+                "status": "visible" | "invisible" | "partial" | "unknown",
+                "pixels": int (non-transparent pixel count),
+                "ratio": float (ratio of visible pixels)
+            }
+        """
+        try:
+            locator = page.locator(candidate.selector).first
+
+            # Check if element exists
+            if await locator.count() == 0:
+                return {"status": "unknown", "pixels": 0, "ratio": 0.0}
+
+            # Check basic visibility via Playwright
+            is_visible = await locator.is_visible()
+            if not is_visible:
+                return {"status": "invisible", "pixels": 0, "ratio": 0.0}
+
+            # Try to capture element screenshot
+            try:
+                element_screenshot = await locator.screenshot(type="png", timeout=2000)
+            except Exception as e:
+                # Element may be too small, off-screen, or have issues
+                logger.debug(f"Could not screenshot {candidate.selector}: {e}")
+                return {"status": "unknown", "pixels": 0, "ratio": 0.0}
+
+            # Analyze screenshot for visible pixels
+            from PIL import Image
+            import io
+
+            img = Image.open(io.BytesIO(element_screenshot)).convert("RGBA")
+            pixels = list(img.getdata())
+            total_pixels = len(pixels)
+
+            if total_pixels == 0:
+                return {"status": "invisible", "pixels": 0, "ratio": 0.0}
+
+            # Count non-transparent pixels (alpha > threshold)
+            # Also count pixels that aren't pure transparency
+            ALPHA_THRESHOLD = 10  # Pixels with alpha > 10 are "visible"
+            visible_pixels = 0
+
+            for r, g, b, a in pixels:
+                if a > ALPHA_THRESHOLD:
+                    visible_pixels += 1
+
+            ratio = visible_pixels / total_pixels
+
+            # Classify visibility
+            if ratio < 0.05:
+                # Less than 5% visible = effectively invisible
+                status = "invisible"
+            elif ratio < 0.50:
+                # 5-50% visible = partially visible (may be clipped)
+                status = "partial"
+            else:
+                # More than 50% visible = properly visible
+                status = "visible"
+
+            return {
+                "status": status,
+                "pixels": visible_pixels,
+                "ratio": ratio,
+            }
+
+        except Exception as e:
+            logger.debug(f"Visibility check failed for {candidate.selector}: {e}")
+            return {"status": "unknown", "pixels": 0, "ratio": 0.0}
+
 
 # ---------------------------------------------------------------------------
 # SINGLETON INSTANCE

@@ -2,15 +2,16 @@
 Visual Validation Module - Eliminate false positives with screenshot comparison.
 
 Sprint 6: Visual-based validation system.
+Sprint 7: Vision-enhanced repair with invisible element detection.
 
 This module provides a 7-phase validation pipeline:
 1. Sandbox (Render check)
 2. Visual Analysis (Screenshot + blank detection)
 3. Scene Graph (DOM geometry extraction)
-4. Input Detection (Find clickable elements)
+4. Input Detection (Find clickable elements + visibility check)
 5. Interaction Validation (Click + visual delta)
 6. Aggregation (Decision logic)
-7. Fixer (Direct Codex-Max repair)
+7. Fixer (Direct Sonnet repair with vision support)
 
 Usage:
     from app.ai.scene.custom_layout.validation import (
@@ -24,8 +25,10 @@ Usage:
     result = await validator.validate(contract)
 
     if not result.valid:
-        # Repair with Codex-Max
-        repaired = await validator.repair(my_html, result, user_request)
+        # Sprint 7: Repair with vision (screenshot) if available
+        repaired = await validator.repair_with_vision(
+            my_html, result, user_request, result.page_screenshot
+        )
 """
 
 import logging
@@ -49,7 +52,7 @@ from .contracts import (
     InteractionResult,
 )
 from .sandbox import sandbox_renderer, RenderContext
-from .visual_analyzer import visual_analyzer
+from .visual_analyzer import visual_analyzer, save_screenshot
 from .scene_graph import scene_graph_extractor
 from .input_detector import input_detector
 from .interaction_validator import interaction_validator
@@ -109,13 +112,28 @@ class VisualValidator:
             phase2_result, visual_snapshot = await visual_analyzer.analyze(page, contract)
             phases.append(phase2_result)
 
+            # Sprint 7: Capture page screenshot for vision repair
+            page_screenshot_bytes = None
+            screenshot_path = None
+            if visual_snapshot and visual_snapshot.image_bytes:
+                page_screenshot_bytes = visual_snapshot.image_bytes
+                # Save for debugging
+                screenshot_path = save_screenshot(
+                    page_screenshot_bytes, prefix="page", suffix="initial"
+                )
+                logger.info(f"Sprint 7: Page screenshot saved: {screenshot_path}")
+
             if not phase2_result.passed:
                 await render_ctx.close()
-                return self._build_failed_result(
+                result = self._build_failed_result(
                     phases=phases,
                     layout_type=contract.layout_type or "unknown",
                     start_time=start_time,
                 )
+                # Sprint 7: Still attach screenshot for vision repair
+                result.page_screenshot = page_screenshot_bytes
+                result.screenshot_path = screenshot_path
+                return result
 
             # =========================================================
             # PHASE 3: Scene Graph Extraction
@@ -136,6 +154,21 @@ class VisualValidator:
             # =========================================================
             phase4_result, inputs = await input_detector.detect(page, scene_graph, contract)
             phases.append(phase4_result)
+
+            # Sprint 7: Check visibility of detected inputs
+            invisible_count = 0
+            if inputs:
+                inputs, invisible_count = await input_detector.check_elements_visibility(
+                    page, inputs
+                )
+                if invisible_count > 0:
+                    logger.warning(
+                        f"Sprint 7: {invisible_count}/{len(inputs)} inputs are INVISIBLE "
+                        "(exist in DOM but have no visible pixels)"
+                    )
+                    # Update Phase 4 details with visibility info
+                    phase4_result.details["invisible_count"] = invisible_count
+                    phase4_result.details["visibility_checked"] = True
 
             # Phase 4 always passes (no inputs = static content)
 
@@ -175,6 +208,11 @@ class VisualValidator:
 
             # Update total duration
             result.total_duration_ms = (time.time() - start_time) * 1000
+
+            # Sprint 7: Attach screenshot and invisible count for vision repair
+            result.page_screenshot = page_screenshot_bytes
+            result.screenshot_path = screenshot_path
+            result.invisible_elements_count = invisible_count
 
             return result
 
@@ -224,6 +262,48 @@ class VisualValidator:
                 user_request=user_request,
             )
         else:
+            return await direct_fixer.repair(
+                html=html,
+                sandbox_result=sandbox_result,
+                user_request=user_request,
+            )
+
+    async def repair_with_vision(
+        self,
+        html: str,
+        sandbox_result: SandboxResult,
+        user_request: str,
+        screenshot: Optional[bytes] = None,
+    ) -> Optional[str]:
+        """
+        Sprint 7: Repair HTML using vision (screenshot analysis).
+
+        This is the most powerful repair method. It shows Claude the actual
+        rendered screenshot and asks it to compare what's visible vs what
+        was requested.
+
+        Args:
+            html: HTML that failed validation
+            sandbox_result: Validation result with failure details
+            user_request: Original user request
+            screenshot: Optional screenshot bytes (uses sandbox_result.page_screenshot if None)
+
+        Returns:
+            Repaired HTML or None if repair failed
+        """
+        # Use provided screenshot or fall back to result screenshot
+        actual_screenshot = screenshot or sandbox_result.page_screenshot
+
+        if actual_screenshot:
+            return await direct_fixer.repair_with_vision(
+                html=html,
+                sandbox_result=sandbox_result,
+                user_request=user_request,
+                screenshot=actual_screenshot,
+            )
+        else:
+            # No screenshot available, fall back to text-only repair
+            logger.warning("No screenshot available for vision repair, using text-only repair")
             return await direct_fixer.repair(
                 html=html,
                 sandbox_result=sandbox_result,

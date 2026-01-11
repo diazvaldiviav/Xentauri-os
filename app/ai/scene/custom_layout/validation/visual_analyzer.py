@@ -2,17 +2,22 @@
 Visual Analyzer - Phase 2: Screenshot capture and visual analysis.
 
 Sprint 6: Visual-based validation system.
+Sprint 7: Added screenshot saving for vision-based repair.
 
 This module handles visual analysis:
 - Capture screenshots from Playwright page
 - Analyze image statistics (histogram, variance, uniformity)
 - Detect blank/solid color pages
 - Compare before/after screenshots for visual deltas
+- Save screenshots for vision-based repair (Sprint 7)
 """
 
+import base64
 import io
 import logging
+import os
 import time
+from datetime import datetime
 from typing import Optional, Tuple, TYPE_CHECKING
 
 from .contracts import (
@@ -333,6 +338,109 @@ class VisualAnalyzer:
         # Sort by difference (highest first)
         results.sort(key=lambda x: x[1], reverse=True)
         return results
+
+
+# ---------------------------------------------------------------------------
+# SCREENSHOT SAVING - Sprint 7
+# ---------------------------------------------------------------------------
+
+# Directory for saving screenshots (same as debug HTML)
+SCREENSHOT_DEBUG_DIR = os.environ.get("HTML_DEBUG_DIR", "/tmp/jarvis_debug_html")
+
+
+def save_screenshot(
+    image_bytes: bytes,
+    prefix: str = "screenshot",
+    suffix: str = "",
+) -> Optional[str]:
+    """
+    Sprint 7: Save screenshot to disk for vision-based repair.
+
+    Args:
+        image_bytes: PNG screenshot bytes
+        prefix: Filename prefix (e.g., "page", "element")
+        suffix: Filename suffix (e.g., "before", "after")
+
+    Returns:
+        Path to saved file, or None if save failed
+    """
+    try:
+        os.makedirs(SCREENSHOT_DEBUG_DIR, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        suffix_part = f"_{suffix}" if suffix else ""
+        filename = f"{prefix}_{timestamp}{suffix_part}.png"
+        filepath = os.path.join(SCREENSHOT_DEBUG_DIR, filename)
+
+        with open(filepath, "wb") as f:
+            f.write(image_bytes)
+
+        logger.debug(f"Screenshot saved: {filepath}")
+        return filepath
+    except Exception as e:
+        logger.warning(f"Failed to save screenshot: {e}")
+        return None
+
+
+def image_to_base64(image_bytes: bytes) -> str:
+    """
+    Sprint 7: Convert image bytes to base64 string for Claude vision API.
+
+    Args:
+        image_bytes: PNG image bytes
+
+    Returns:
+        Base64-encoded string
+    """
+    return base64.b64encode(image_bytes).decode("utf-8")
+
+
+def resize_image_for_api(
+    image_bytes: bytes,
+    max_dimension: int = 1568,
+) -> bytes:
+    """
+    Sprint 7: Resize image if too large for Claude vision API.
+
+    Claude's vision has optimal performance at ~1568px max dimension.
+    Larger images are resized automatically but it's more efficient to do it here.
+
+    Args:
+        image_bytes: Original PNG bytes
+        max_dimension: Maximum width or height (default 1568)
+
+    Returns:
+        Resized PNG bytes (or original if already small enough)
+    """
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(image_bytes))
+        width, height = img.size
+
+        # Check if resize needed
+        if width <= max_dimension and height <= max_dimension:
+            return image_bytes
+
+        # Calculate new size maintaining aspect ratio
+        if width > height:
+            new_width = max_dimension
+            new_height = int(height * (max_dimension / width))
+        else:
+            new_height = max_dimension
+            new_width = int(width * (max_dimension / height))
+
+        # Resize with high-quality resampling
+        resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+        # Convert back to bytes
+        output = io.BytesIO()
+        resized.save(output, format="PNG")
+        return output.getvalue()
+
+    except Exception as e:
+        logger.warning(f"Failed to resize image: {e}")
+        return image_bytes
 
 
 # ---------------------------------------------------------------------------

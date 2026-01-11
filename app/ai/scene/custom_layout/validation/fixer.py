@@ -1,17 +1,19 @@
 """
-Direct Fixer - Phase 7: Send full context to Codex-Max for repair.
+Direct Fixer - Phase 7: Send full context to Sonnet for repair.
 
 Sprint 6: Visual-based validation system.
+Sprint 7: Vision-enhanced repair with screenshots + extended thinking.
 
 Key difference from old system:
 - NO Gemini diagnosis step
-- Send ALL phase failures directly to Codex-Max
+- Send ALL phase failures directly to Sonnet
 - Full context = better repairs
+- Sprint 7: Screenshot analysis for invisible element detection
 """
 
 import logging
 import re
-from typing import Optional
+from typing import Optional, List
 
 from .contracts import SandboxResult
 
@@ -115,6 +117,192 @@ The validator compares SCREENSHOTS before/after click. Background change is MAND
 
 Return ONLY the fixed HTML from <!DOCTYPE html> to </html>.
 No markdown, no explanations, no code blocks."""
+
+
+# ---------------------------------------------------------------------------
+# SPRINT 7: VISION-ENHANCED REPAIR PROMPTS
+# ---------------------------------------------------------------------------
+
+VISION_REPAIR_SYSTEM_PROMPT = """You are an expert HTML repair specialist with VISUAL ANALYSIS capabilities.
+
+You are receiving:
+1. A SCREENSHOT of the rendered HTML page
+2. The original user request describing what they wanted
+3. A validation report showing what failed
+4. The HTML code that needs fixing
+
+## YOUR PRIMARY TASK
+
+LOOK AT THE SCREENSHOT and compare it to what the user requested.
+Identify what is VISUALLY WRONG or MISSING and fix it.
+
+## CRITICAL ANALYSIS STEPS
+
+1. **Visual Coherence Check**
+   - Does the screenshot show what the user requested?
+   - Example: If user asked for "solar system simulation", do you see the sun AND planets?
+   - If elements are MISSING from the visual, they need to be made visible
+
+2. **Invisible Element Detection**
+   - Elements may exist in HTML/DOM but be INVISIBLE due to:
+     - CSS transforms placing them off-screen (rotateX/Y with perspective)
+     - opacity: 0 or visibility: hidden
+     - z-index issues (behind other elements)
+     - size: 0x0 pixels
+     - JavaScript not initializing properly
+
+3. **Interactive Feedback Check**
+   - Buttons/interactive elements should have VISIBLE feedback when clicked
+   - Background color change is MANDATORY (not just border/shadow)
+
+## COMMON INVISIBLE ELEMENT ISSUES
+
+### 3D Transforms (Most Common!)
+```css
+/* BROKEN - Planets invisible due to 3D rotation without proper positioning */
+.planet {
+    transform: rotateY(45deg);  /* Rotates element "into" the screen */
+}
+
+/* FIXED - Add transform-style and ensure elements stay in view */
+.orbit-container {
+    transform-style: preserve-3d;
+    perspective: 1000px;
+}
+.planet {
+    transform: translateX(100px);  /* Position along orbit */
+    /* Don't use rotateY for positioning! */
+}
+```
+
+### JavaScript Initialization
+```javascript
+/* BROKEN - Elements created but not positioned */
+planets.forEach(p => container.appendChild(p));
+
+/* FIXED - Ensure elements have visible positions */
+planets.forEach((p, i) => {
+    p.style.left = `${100 + i * 80}px`;
+    p.style.top = '50%';
+    container.appendChild(p);
+});
+```
+
+## OUTPUT FORMAT
+
+Return ONLY the corrected HTML from <!DOCTYPE html> to </html>.
+No markdown code blocks, no explanations - just the HTML."""
+
+
+def build_vision_repair_prompt(
+    html: str,
+    sandbox_result: SandboxResult,
+    user_request: str,
+) -> str:
+    """
+    Sprint 7: Build repair prompt WITH SCREENSHOT for vision-based repair.
+
+    This prompt is designed to work with Claude's vision API.
+    The screenshot is passed separately as an image.
+
+    Key differences from text-only repair:
+    1. Emphasizes VISUAL coherence check
+    2. Asks Claude to compare screenshot vs user request
+    3. Focuses on invisible element detection
+    """
+    # Build phase summary (same as before)
+    phase_summary = _build_phase_summary(sandbox_result)
+
+    # Build invisible elements report (Sprint 7)
+    invisible_report = _build_invisible_elements_report(sandbox_result)
+
+    # Truncate HTML if needed
+    max_html_len = 10000
+    if len(html) > max_html_len:
+        half = max_html_len // 2
+        truncated_html = html[:half] + "\n\n<!-- ... TRUNCATED ... -->\n\n" + html[-half:]
+    else:
+        truncated_html = html
+
+    return f"""## SCREENSHOT ATTACHED
+
+Look at the screenshot above. This is what the HTML currently renders.
+
+## ORIGINAL USER REQUEST
+
+"{user_request}"
+
+## QUESTION FOR YOU
+
+Does the screenshot show what the user requested?
+If NOT, what is MISSING or WRONG?
+
+---
+
+{phase_summary}
+
+---
+
+{invisible_report}
+
+---
+
+## HTML TO FIX
+
+```html
+{truncated_html}
+```
+
+## REPAIR INSTRUCTIONS
+
+1. **FIRST**: Look at the screenshot and identify what's visually wrong
+2. **SECOND**: Check the invisible elements report above
+3. **THIRD**: Fix the HTML so that ALL requested elements are VISIBLE
+
+Common fixes needed:
+- If elements exist but aren't visible → Fix their CSS positioning/transforms
+- If 3D transforms are used → Ensure preserve-3d and proper perspective
+- If JavaScript creates elements → Ensure they have visible positions
+- If click feedback is too subtle → Add background-color changes
+
+## OUTPUT
+
+Return ONLY the corrected HTML from <!DOCTYPE html> to </html>.
+"""
+
+
+def _build_invisible_elements_report(sandbox_result: SandboxResult) -> str:
+    """
+    Sprint 7: Build report of elements that exist in DOM but are invisible.
+    """
+    lines = []
+    lines.append("## 👻 INVISIBLE ELEMENTS DETECTED\n")
+
+    invisible_count = 0
+
+    for ir in sandbox_result.interaction_results:
+        if ir.input.is_invisible():
+            invisible_count += 1
+            lines.append(f"### Element {invisible_count}: `{ir.input.selector}`")
+            lines.append(f"- **Status**: EXISTS in DOM but has NO visible pixels")
+            lines.append(f"- **Visibility ratio**: {ir.input.visibility_ratio:.1%}")
+            lines.append(f"- **Tag**: {ir.input.tag}")
+
+            # Get classes for diagnosis
+            classes = ir.input.key_attributes.get("class", "")
+            if classes:
+                lines.append(f"- **Classes**: {classes}")
+
+            lines.append("")
+
+    if invisible_count == 0:
+        lines.append("No invisible elements detected in Phase 4.\n")
+        lines.append("However, elements may still be missing - check the screenshot!\n")
+    else:
+        lines.append(f"\n⚠️ **{invisible_count} element(s) exist in HTML but are NOT VISIBLE!**")
+        lines.append("These need CSS/JS fixes to become visible.\n")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -670,6 +858,90 @@ class DirectFixer:
         except Exception as e:
             logger.error(f"Reasoning repair error: {e}", exc_info=True)
             return None
+
+    async def repair_with_vision(
+        self,
+        html: str,
+        sandbox_result: SandboxResult,
+        user_request: str,
+        screenshot: bytes,
+        max_tokens: int = 16384,
+        thinking_budget: int = 10000,
+    ) -> Optional[str]:
+        """
+        Sprint 7: Repair using vision (screenshot analysis) + extended thinking.
+
+        This is the most powerful repair method. It:
+        1. Shows Claude the actual rendered screenshot
+        2. Uses extended thinking for complex reasoning
+        3. Compares what user requested vs what's visible
+        4. Identifies invisible elements and fixes them
+
+        Args:
+            html: HTML that failed validation
+            sandbox_result: Full validation result
+            user_request: Original user request
+            screenshot: PNG screenshot bytes of the rendered page
+            max_tokens: Max tokens for response
+            thinking_budget: Extended thinking budget
+
+        Returns:
+            Repaired HTML or None if repair failed
+        """
+        if sandbox_result.valid:
+            return html
+
+        logger.info(
+            f"Starting vision-enhanced repair - "
+            f"failures: {sandbox_result.failure_summary}, "
+            f"invisible_count: {sandbox_result.invisible_elements_count}"
+        )
+
+        try:
+            from app.ai.providers.anthropic_provider import anthropic_provider
+
+            # Build vision repair prompt
+            prompt = build_vision_repair_prompt(html, sandbox_result, user_request)
+
+            # Resize screenshot for optimal API performance
+            from .visual_analyzer import resize_image_for_api
+            optimized_screenshot = resize_image_for_api(screenshot)
+
+            # Call with vision + extended thinking
+            response = await anthropic_provider.generate_with_vision(
+                prompt=prompt,
+                images=[optimized_screenshot],
+                system_prompt=VISION_REPAIR_SYSTEM_PROMPT,
+                max_tokens=max_tokens,
+                use_extended_thinking=True,
+                thinking_budget=thinking_budget,
+            )
+
+            if not response.success:
+                logger.warning(f"Vision repair failed: {response.error}")
+                # Fallback to regular repair
+                return await self.repair(html, sandbox_result, user_request, max_tokens)
+
+            # Clean and extract HTML
+            repaired_html = self._clean_html_response(response.content)
+
+            if repaired_html:
+                logger.info(
+                    f"Vision repair completed - "
+                    f"original: {len(html)} chars, "
+                    f"repaired: {len(repaired_html)} chars, "
+                    f"latency: {response.latency_ms:.0f}ms"
+                )
+                return repaired_html
+            else:
+                logger.warning("Failed to extract valid HTML from vision repair")
+                # Fallback to regular repair
+                return await self.repair(html, sandbox_result, user_request, max_tokens)
+
+        except Exception as e:
+            logger.error(f"Vision repair error: {e}", exc_info=True)
+            # Fallback to regular repair
+            return await self.repair(html, sandbox_result, user_request, max_tokens)
 
     def _clean_html_response(self, content: str) -> Optional[str]:
         """
