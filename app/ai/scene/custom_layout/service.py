@@ -485,6 +485,9 @@ class CustomLayoutService:
         # Sprint 7: Check if vision repair is enabled
         use_vision_repair = getattr(settings, 'VISION_REPAIR_ENABLED', True)
 
+        # Track original interactive count to prevent destructive repairs
+        original_inputs_tested = validation_result.inputs_tested
+
         for attempt in range(max_repair_attempts):
             logger.info(f"Visual repair attempt {attempt + 1}/{max_repair_attempts} (direct flow)")
 
@@ -523,6 +526,16 @@ class CustomLayoutService:
             )
 
             repair_validation = await visual_validator.validate(repair_contract)
+
+            # Check for destructive repair: did we lose interactive elements?
+            if repair_validation.inputs_tested < original_inputs_tested:
+                logger.warning(
+                    f"Repair attempt {attempt + 1} REJECTED: destructive repair detected. "
+                    f"Original had {original_inputs_tested} inputs, repair has {repair_validation.inputs_tested}. "
+                    f"Fixer removed/hid interactive elements instead of fixing them."
+                )
+                # Don't update html or validation_result - keep original for next attempt
+                continue
 
             if repair_validation.valid:
                 logger.info(
@@ -987,6 +1000,9 @@ class CustomLayoutService:
         # Sprint 7: Check if vision repair is enabled
         use_vision_repair = getattr(settings, 'VISION_REPAIR_ENABLED', True)
 
+        # Track original interactive count to prevent destructive repairs
+        original_inputs_tested = validation_result.inputs_tested
+
         for attempt in range(max_repair_attempts):
             logger.info(f"Visual repair attempt {attempt + 1}/{max_repair_attempts}")
 
@@ -1025,6 +1041,16 @@ class CustomLayoutService:
             )
 
             repair_validation = await visual_validator.validate(repair_contract)
+
+            # Check for destructive repair: did we lose interactive elements?
+            if repair_validation.inputs_tested < original_inputs_tested:
+                logger.warning(
+                    f"Repair attempt {attempt + 1} REJECTED: destructive repair detected. "
+                    f"Original had {original_inputs_tested} inputs, repair has {repair_validation.inputs_tested}. "
+                    f"Fixer removed/hid interactive elements instead of fixing them."
+                )
+                # Don't update html or validation_result - keep original for next attempt
+                continue
 
             if repair_validation.valid:
                 logger.info(
