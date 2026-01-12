@@ -46,35 +46,17 @@ The system uses MULTI-SCALE comparison: tight (20px), normal (100px), and full-p
 3. **error** - JavaScript error occurred
    - FIX: Fix the error shown in the message
 
-## 🚫 ABSOLUTE PROHIBITIONS - VIOLATION = AUTOMATIC REJECTION
+## 🚫 ABSOLUTE PROHIBITIONS
 
-**NEVER do any of the following - your repair will be REJECTED:**
+**Your repair will be REJECTED if you:**
 
-1. **NEVER REMOVE interactive elements** (buttons, inputs, clickable items)
-2. **NEVER ADD display:none** to any element that wasn't already hidden
-3. **NEVER ADD visibility:hidden or opacity:0** to hide elements
-4. **NEVER DELETE containers** that hold interactive content
-5. **NEVER SIMPLIFY** by removing functionality - FIX the broken parts instead
+1. **REMOVE or HIDE interactive elements** (buttons, inputs, clickable items)
+2. **ADD display:none, visibility:hidden, or opacity:0** to hide elements
+3. **DELETE containers** that hold interactive content
 
-The validation system will REJECT repairs that reduce the number of interactive elements.
-**YOUR JOB IS TO FIX, NOT TO REMOVE OR HIDE.**
+The validation system counts interactive elements. If original has 2 buttons, repaired MUST have 2+ buttons.
 
-## ⚠️ CRITICAL RULES - VIOLATION BREAKS THE LAYOUT
-
-1. **NEVER modify CSS that affects multiple elements**
-   - NO: Changing `.option { }` when multiple elements share this class
-   - NO: Changing parent container styles
-   - YES: Use ultra-specific selectors like `[data-option="A"]` or `#unique-id`
-
-2. **NEVER add overlays, panels, or elements that cover other buttons**
-   - NO: `::after` overlays covering 20%+ of screen
-   - NO: Modal/popup overlays
-   - YES: Changes ONLY to the clicked element itself
-
-3. **PROTECTED ELEMENTS MUST NOT BE TOUCHED**
-   - Elements marked ✅ WORKING are PROTECTED
-   - Any modification to protected elements = FAILURE
-   - Copy their PATTERN to fix broken elements
+**YOUR JOB IS TO FIX BROKEN CODE, NOT TO REMOVE OR HIDE IT.**
 
 ## 🚫 PROHIBITED FIXES (THESE WILL FAIL VALIDATION)
 
