@@ -75,10 +75,10 @@ class IntentRequest(BaseModel):
     }
     """
     text: str = Field(
-        ..., 
-        min_length=1, 
-        max_length=500,
-        description="Natural language command or question"
+        ...,
+        min_length=1,
+        max_length=10000,
+        description="Natural language command or question (supports data payloads up to 10K chars)"
     )
     device_id: Optional[UUID] = Field(
         default=None,
