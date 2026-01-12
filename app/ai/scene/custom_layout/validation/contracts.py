@@ -59,7 +59,7 @@ class ValidationContract:
     visual_change_threshold: float = 0.02  # 2% pixel difference = change detected
     blank_page_threshold: float = 0.95     # 95% uniform color = blank page
     max_inputs_to_test: int = 10
-    stabilization_ms: int = 150  # Wait after click for animations (reduced from 300)
+    stabilization_ms: int = 1000  # Wait after click for animations (1s for flips, transitions)
 
 
 # ---------------------------------------------------------------------------
@@ -584,6 +584,47 @@ class PhaseResult:
             "duration_ms": self.duration_ms,
             "error": self.error,
         }
+
+
+# ---------------------------------------------------------------------------
+# REPAIR HISTORY (Sprint 8)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FailedRepairAttempt:
+    """
+    Sprint 8: Record of a failed repair attempt.
+
+    This is passed to subsequent repair attempts so Sonnet doesn't
+    repeat the same mistakes.
+
+    "El fixer debe aprender de sus errores anteriores."
+    """
+    attempt_number: int
+    failure_reason: str  # "destructive" | "insufficient" | "no_html"
+    inputs_before: int   # Original interactive count
+    inputs_after: int    # After repair (for destructive detection)
+    responsive_before: int
+    responsive_after: int
+    # What the fixer tried that didn't work
+    key_changes_attempted: List[str] = field(default_factory=list)
+
+    def to_summary(self) -> str:
+        """Generate human-readable summary for prompt."""
+        if self.failure_reason == "destructive":
+            return (
+                f"Attempt {self.attempt_number}: REJECTED (destructive) - "
+                f"Removed {self.inputs_before - self.inputs_after} interactive elements "
+                f"(had {self.inputs_before}, now {self.inputs_after})"
+            )
+        elif self.failure_reason == "insufficient":
+            return (
+                f"Attempt {self.attempt_number}: FAILED (insufficient) - "
+                f"Only {self.responsive_after}/{self.inputs_after} responsive "
+                f"(was {self.responsive_before}/{self.inputs_before})"
+            )
+        else:
+            return f"Attempt {self.attempt_number}: FAILED - {self.failure_reason}"
 
 
 # ---------------------------------------------------------------------------

@@ -13,8 +13,8 @@ This service provides intelligent calendar event search that handles:
 Architecture:
 =============
 1. Fetch calendar events for specified time range (or next 365 days by default)
-2. Send events + user query to OpenAI GPT for semantic matching
-3. GPT returns matched events (handles typos, translations, synonyms)
+2. Send events + user query to Gemini 3 Flash for semantic matching
+3. Gemini returns matched events (handles typos, translations, synonyms)
 4. Return only matched events
 
 Usage:
@@ -44,7 +44,7 @@ from app.models.oauth_credential import OAuthCredential
 from app.environments.google.calendar.client import GoogleCalendarClient
 from app.environments.google.calendar.schemas import CalendarEvent
 from app.environments.base import APIError
-from app.ai.providers.openai_provider import openai_provider
+from app.ai.providers.gemini import gemini_provider
 from app.ai.prompts.calendar_search_prompts import build_matcher_prompt
 
 
@@ -63,8 +63,8 @@ class SmartSearchResult:
 class CalendarSearchService:
     """
     Service for semantic calendar event search using LLM matching.
-    
-    This service fetches calendar events and uses GPT to intelligently
+
+    This service fetches calendar events and uses Gemini 3 Flash to intelligently
     match them against user queries, handling typos, translations, and synonyms.
     """
     
@@ -190,26 +190,29 @@ class CalendarSearchService:
         events: List[CalendarEvent],
     ) -> SmartSearchResult:
         """
-        Use OpenAI GPT to semantically match query to events.
-        
+        Use Gemini 3 Flash to semantically match query to events.
+
         Args:
             query: User's search query
             events: List of calendar events to match against
-        
+
         Returns:
             SmartSearchResult with matched events
         """
         # Build the prompt
         prompt = build_matcher_prompt(query, events)
-        
-        # Call OpenAI
-        response = await openai_provider.generate_json(
+
+        # Call Gemini 3 Flash for semantic matching
+        response = await gemini_provider.generate(
             prompt=prompt,
             system_prompt="You are a calendar event matcher. Return only valid JSON.",
+            response_mime_type="application/json",
+            temperature=0.2,
+            max_tokens=1024,
         )
         
         if not response.success:
-            logger.error(f"OpenAI request failed: {response.error}")
+            logger.error(f"Gemini request failed: {response.error}")
             return SmartSearchResult(
                 events=[],
                 error=f"Search service unavailable: {response.error}",

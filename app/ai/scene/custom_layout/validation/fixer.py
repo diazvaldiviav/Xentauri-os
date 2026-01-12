@@ -1,31 +1,35 @@
 """
-Direct Fixer - Phase 7: Send full context to Sonnet for repair.
+Direct Fixer - Phase 7: Send full context to Gemini 3 Pro for repair.
 
 Sprint 6: Visual-based validation system.
-Sprint 7: Vision-enhanced repair with screenshots + extended thinking.
+Sprint 7: Vision-enhanced repair with screenshots.
+Sprint 9: Migrated from Sonnet 4.5 to Gemini 3 Pro for cost optimization.
 
 Key difference from old system:
-- NO Gemini diagnosis step
-- Send ALL phase failures directly to Sonnet
+- NO separate diagnosis step
+- Send ALL phase failures directly to Gemini 3 Pro
 - Full context = better repairs
 - Sprint 7: Screenshot analysis for invisible element detection
 """
 
 import logging
 import re
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 
-from .contracts import SandboxResult
+from .contracts import SandboxResult, FailedRepairAttempt
+
+if TYPE_CHECKING:
+    pass  # Future type hints
 
 logger = logging.getLogger("jarvis.ai.scene.custom_layout.validation.fixer")
 
 
 # ---------------------------------------------------------------------------
-# REPAIR PROMPTS
+# REPAIR PROMPTS - UNIFIED BASE + EXTENSIONS
 # ---------------------------------------------------------------------------
 
-REPAIR_SYSTEM_PROMPT = """You are an HTML repair specialist for interactive web layouts.
-
+# Base rules shared by both text and vision repair
+_BASE_REPAIR_RULES = """
 ## VALIDATION SYSTEM
 
 The system uses SCREENSHOT COMPARISON to detect visual changes after clicks.
@@ -43,7 +47,11 @@ The system uses MULTI-SCALE comparison: tight (20px), normal (100px), and full-p
    - Handler is broken or not connected
    - FIX: Check onclick, ensure it modifies visible CSS
 
-3. **error** - JavaScript error occurred
+3. **element_invisible** - Element exists in DOM but has NO visible pixels
+   - CSS transforms, opacity:0, or z-index issues hiding it
+   - FIX: Make the element visible (see INVISIBLE ELEMENT ISSUES below)
+
+4. **error** - JavaScript error occurred
    - FIX: Fix the error shown in the message
 
 ## 🚫 ABSOLUTE PROHIBITIONS
@@ -53,6 +61,7 @@ The system uses MULTI-SCALE comparison: tight (20px), normal (100px), and full-p
 1. **REMOVE or HIDE interactive elements** (buttons, inputs, clickable items)
 2. **ADD display:none, visibility:hidden, or opacity:0** to hide elements
 3. **DELETE containers** that hold interactive content
+4. **SIMPLIFY** by removing functionality - FIX the broken parts instead
 
 The validation system counts interactive elements. If original has 2 buttons, repaired MUST have 2+ buttons.
 
@@ -78,27 +87,27 @@ The validator compares SCREENSHOTS before/after click. Background change is MAND
 
 ```css
 /* MANDATORY: Always include background change */
-[data-X="value"].selected { 
+[data-X="value"].selected {
   background: #ffffff !important;  /* or rgba(0,255,0,0.3) */
-  color: #000000 !important; 
+  color: #000000 !important;
 }
 
 /* GOOD: Background + border */
-[data-X="value"].selected { 
-  background: rgba(0, 255, 0, 0.3) !important; 
-  border: 4px solid #00ff00 !important; 
+[data-X="value"].selected {
+  background: rgba(0, 255, 0, 0.3) !important;
+  border: 4px solid #00ff00 !important;
 }
 
 /* GOOD: Background + transform */
-[data-X="value"].selected { 
+[data-X="value"].selected {
   background: rgba(255,255,255,0.2) !important;
-  transform: scale(1.05); 
+  transform: scale(1.05);
 }
 
 /* GOOD: Background + glow */
-[data-X="value"].selected { 
+[data-X="value"].selected {
   background: rgba(0, 255, 0, 0.2) !important;
-  box-shadow: 0 0 20px 8px #00ff00 !important; 
+  box-shadow: 0 0 20px 8px #00ff00 !important;
 }
 ```
 
@@ -107,63 +116,6 @@ The validator compares SCREENSHOTS before/after click. Background change is MAND
 2. Use CONCRETE colors: #ffffff, #00ff00, rgba(0,255,0,0.3)
 3. NEVER use var(--anything) - it may not exist
 4. Border/shadow/transform are ADDITIONS, not replacements for background
-
-## OUTPUT
-
-Return ONLY the fixed HTML from <!DOCTYPE html> to </html>.
-No markdown, no explanations, no code blocks."""
-
-
-# ---------------------------------------------------------------------------
-# SPRINT 7: VISION-ENHANCED REPAIR PROMPTS
-# ---------------------------------------------------------------------------
-
-VISION_REPAIR_SYSTEM_PROMPT = """You are an expert HTML repair specialist with VISUAL ANALYSIS capabilities.
-
-You are receiving:
-1. A SCREENSHOT of the rendered HTML page
-2. The original user request describing what they wanted
-3. A validation report showing what failed
-4. The HTML code that needs fixing
-
-## YOUR PRIMARY TASK
-
-LOOK AT THE SCREENSHOT and compare it to what the user requested.
-Identify what is VISUALLY WRONG or MISSING and fix it.
-
-## 🚫 ABSOLUTE PROHIBITIONS - VIOLATION = AUTOMATIC REJECTION
-
-**NEVER do any of the following - your repair will be REJECTED:**
-
-1. **NEVER REMOVE interactive elements** (buttons, inputs, clickable items)
-2. **NEVER ADD display:none** to any element that wasn't already hidden
-3. **NEVER ADD visibility:hidden or opacity:0** to hide elements
-4. **NEVER DELETE containers** that hold interactive content
-5. **NEVER SIMPLIFY** by removing functionality - FIX the broken parts instead
-
-The validation system will REJECT repairs that reduce the number of interactive elements.
-If original HTML has 2 buttons, your repaired HTML MUST have at least 2 buttons.
-
-**YOUR JOB IS TO FIX, NOT TO REMOVE OR HIDE.**
-
-## CRITICAL ANALYSIS STEPS
-
-1. **Visual Coherence Check**
-   - Does the screenshot show what the user requested?
-   - Example: If user asked for "solar system simulation", do you see the sun AND planets?
-   - If elements are MISSING from the visual, they need to be made visible
-
-2. **Invisible Element Detection**
-   - Elements may exist in HTML/DOM but be INVISIBLE due to:
-     - CSS transforms placing them off-screen (rotateX/Y with perspective)
-     - opacity: 0 or visibility: hidden
-     - z-index issues (behind other elements)
-     - size: 0x0 pixels
-     - JavaScript not initializing properly
-
-3. **Interactive Feedback Check**
-   - Buttons/interactive elements should have VISIBLE feedback when clicked
-   - Background color change is MANDATORY (not just border/shadow)
 
 ## COMMON INVISIBLE ELEMENT ISSUES
 
@@ -198,16 +150,63 @@ planets.forEach((p, i) => {
 });
 ```
 
-## OUTPUT FORMAT
+### Z-Index Issues
+```css
+/* BROKEN - Element behind other elements */
+.button { z-index: 1; }
+.overlay { z-index: 999; }
 
-Return ONLY the corrected HTML from <!DOCTYPE html> to </html>.
-No markdown code blocks, no explanations - just the HTML."""
+/* FIXED - Ensure interactive elements are on top */
+.button { z-index: 1000; position: relative; }
+```
+"""
+
+# Text-only repair system prompt
+REPAIR_SYSTEM_PROMPT = f"""You are an HTML repair specialist for interactive web layouts.
+
+{_BASE_REPAIR_RULES}
+
+## OUTPUT
+
+Return ONLY the fixed HTML from <!DOCTYPE html> to </html>.
+No markdown, no explanations, no code blocks."""
+
+
+# ---------------------------------------------------------------------------
+# SPRINT 7: VISION-ENHANCED REPAIR PROMPT
+# ---------------------------------------------------------------------------
+
+VISION_REPAIR_SYSTEM_PROMPT = f"""You are an HTML repair specialist with VISUAL ANALYSIS capabilities.
+
+You are receiving:
+1. A SCREENSHOT of the rendered HTML page
+2. The original user request describing what they wanted
+3. A validation report showing what failed
+4. The HTML code that needs fixing
+
+## YOUR PRIMARY TASK
+
+LOOK AT THE SCREENSHOT FIRST and compare it to what the user requested.
+Identify what is VISUALLY WRONG or MISSING and fix it.
+
+## VISUAL ANALYSIS FOCUS
+
+1. **Visual Coherence**: Does the screenshot show what the user requested?
+2. **Invisible Elements**: Elements may exist in DOM but be invisible (transforms, opacity, z-index)
+
+{_BASE_REPAIR_RULES}
+
+## OUTPUT
+
+Return ONLY the fixed HTML from <!DOCTYPE html> to </html>.
+No markdown, no explanations, no code blocks."""
 
 
 def build_vision_repair_prompt(
     html: str,
     sandbox_result: SandboxResult,
     user_request: str,
+    failed_attempts: Optional[List[FailedRepairAttempt]] = None,
 ) -> str:
     """
     Sprint 7: Build repair prompt WITH SCREENSHOT for vision-based repair.
@@ -219,12 +218,17 @@ def build_vision_repair_prompt(
     1. Emphasizes VISUAL coherence check
     2. Asks Claude to compare screenshot vs user request
     3. Focuses on invisible element detection
+
+    Sprint 8: Added failed_attempts parameter for repair history.
     """
     # Build phase summary (same as before)
     phase_summary = _build_phase_summary(sandbox_result)
 
     # Build invisible elements report (Sprint 7)
     invisible_report = _build_invisible_elements_report(sandbox_result)
+
+    # Sprint 8: Build repair history section
+    repair_history_section = _build_repair_history_section(failed_attempts or [])
 
     # Truncate HTML if needed
     max_html_len = 10000
@@ -256,24 +260,12 @@ If NOT, what is MISSING or WRONG?
 {invisible_report}
 
 ---
-
+{repair_history_section}
 ## HTML TO FIX
 
 ```html
 {truncated_html}
 ```
-
-## REPAIR INSTRUCTIONS
-
-1. **FIRST**: Look at the screenshot and identify what's visually wrong
-2. **SECOND**: Check the invisible elements report above
-3. **THIRD**: Fix the HTML so that ALL requested elements are VISIBLE
-
-Common fixes needed:
-- If elements exist but aren't visible → Fix their CSS positioning/transforms
-- If 3D transforms are used → Ensure preserve-3d and proper perspective
-- If JavaScript creates elements → Ensure they have visible positions
-- If click feedback is too subtle → Add background-color changes
 
 ## OUTPUT
 
@@ -329,30 +321,81 @@ def _extract_css_from_html(html: str) -> str:
     return "\n".join(css_blocks)
 
 
+# State classes/pseudo-classes that indicate interactive feedback
+_STATE_PATTERNS = [
+    # Classes
+    '.selected', '.active', '.highlighted', '.chosen', '.clicked',
+    '.checked', '.focused', '.current', '.on', '.pressed', '.toggled',
+    '.enabled', '.disabled', '.hover', '.focus',
+    # Pseudo-classes (CSS)
+    ':hover', ':focus', ':active', ':checked', ':focus-visible',
+    # ARIA states
+    '[aria-selected="true"]', '[aria-pressed="true"]', '[aria-checked="true"]',
+]
+
+
+def extract_state_css_rules(html: str) -> List[str]:
+    """
+    Sprint 8: Extract all CSS rules with state patterns from HTML.
+
+    This extracts rules like:
+    - .button.selected { ... }
+    - .option:hover { ... }
+    - [data-option].active { ... }
+
+    Used to show Sonnet what CSS it tried that didn't work.
+
+    Args:
+        html: Full HTML with embedded CSS
+
+    Returns:
+        List of CSS rule strings (selector + properties)
+    """
+    css = _extract_css_from_html(html)
+    rules = []
+
+    # Pattern to find CSS rules: selector { properties }
+    rule_pattern = r'([^{}]+)\{([^{}]+)\}'
+
+    for match in re.finditer(rule_pattern, css):
+        selector = match.group(1).strip()
+        properties = match.group(2).strip()
+
+        # Check if this rule involves any state pattern
+        has_state_pattern = any(pattern in selector for pattern in _STATE_PATTERNS)
+        if has_state_pattern:
+            # Format as readable CSS
+            formatted = f"{selector} {{ {properties} }}"
+            rules.append(formatted)
+
+    return rules
+
+
 def _find_css_rules_for_classes(css: str, classes: list) -> list:
     """
-    Find CSS rules that match any of the given classes combined with .selected or .active.
-    
+    Find CSS rules that match any of the given classes combined with state indicators.
+
     Args:
         css: CSS content
         classes: List of class names (e.g., ['celestial-body', 'venus'])
-    
+
     Returns:
         List of dicts with rule info: [{"selector": "...", "properties": "...", "has_background": bool}]
     """
     rules = []
-    
+
     # Pattern to find CSS rules: selector { properties }
     rule_pattern = r'([^{}]+)\{([^{}]+)\}'
-    
+
     for match in re.finditer(rule_pattern, css):
         selector = match.group(1).strip()
         properties = match.group(2).strip()
-        
-        # Check if this rule involves .selected or .active
-        if '.selected' not in selector and '.active' not in selector:
+
+        # Check if this rule involves any state pattern
+        has_state_pattern = any(pattern in selector for pattern in _STATE_PATTERNS)
+        if not has_state_pattern:
             continue
-        
+
         # Check if this rule involves any of our classes
         for cls in classes:
             if f'.{cls}' in selector:
@@ -364,7 +407,7 @@ def _find_css_rules_for_classes(css: str, classes: list) -> list:
                     "matched_class": cls,
                 })
                 break  # Don't add same rule multiple times
-    
+
     return rules
 
 
@@ -399,9 +442,15 @@ def analyze_css_for_element(html: str, element_classes: list) -> dict:
     }
     
     if not rules:
-        # No .selected/.active rules found for these classes
-        result["diagnosis"] = f"No se encontró regla .selected/.active para clases: {', '.join(element_classes)}"
-        result["fix_action"] = f"Crear regla CSS: .{element_classes[0]}.selected {{ background-color: rgba(0,200,255,0.3); }}"
+        # No state rules found for these classes
+        result["diagnosis"] = (
+            f"No se encontró regla de estado (.selected, .active, :hover, etc.) "
+            f"para clases: {', '.join(element_classes)}"
+        )
+        result["fix_action"] = (
+            f"Crear regla CSS con estado: .{element_classes[0]}.selected {{ background-color: rgba(0,200,255,0.3); }} "
+            f"O usar el patrón que ya use el código (.active, .highlighted, :hover, etc.)"
+        )
         return result
     
     # Check if any rule has background
@@ -641,10 +690,49 @@ def _format_element_context(elem: dict, pixels: dict = None, strategy: str = Non
     return "\n".join(lines)
 
 
+def _build_repair_history_section(failed_attempts: List[FailedRepairAttempt]) -> str:
+    """
+    Sprint 8: Build prompt section showing previous failed repair attempts.
+
+    Shows what CSS was tried so Sonnet doesn't repeat the same mistakes.
+    Note: Detailed CSS diagnosis is already in _build_css_diagnosis(),
+    so we only show the raw CSS rules here to avoid DRY violation.
+    """
+    if not failed_attempts:
+        return ""
+
+    lines = []
+    lines.append("## ⚠️ PREVIOUS REPAIR ATTEMPTS FAILED\n")
+    lines.append("The following approaches have ALREADY BEEN TRIED and FAILED.")
+    lines.append("**DO NOT repeat these mistakes:**\n")
+
+    for attempt in failed_attempts:
+        lines.append(f"### {attempt.to_summary()}")
+
+        if attempt.failure_reason == "destructive":
+            lines.append("❌ You REMOVED or HID interactive elements instead of fixing them.")
+            lines.append("✅ FIX the broken CSS/JS, don't delete elements.\n")
+        elif attempt.failure_reason == "insufficient":
+            lines.append("❌ Visual feedback was still too subtle to detect.")
+            lines.append("✅ Use MORE DRAMATIC background color changes.\n")
+
+        # Show CSS rules that were tried (let Sonnet see exactly what didn't work)
+        if attempt.key_changes_attempted:
+            lines.append("**CSS rules that DIDN'T WORK:**")
+            lines.append("```css")
+            for rule in attempt.key_changes_attempted[:5]:
+                lines.append(rule)
+            lines.append("```\n")
+
+    lines.append("---\n")
+    return "\n".join(lines)
+
+
 def build_repair_prompt(
     html: str,
     sandbox_result: SandboxResult,
     user_request: str,
+    failed_attempts: Optional[List[FailedRepairAttempt]] = None,
 ) -> str:
     """
     Sprint 6.5: Build repair prompt with PROGRESSIVE CONTEXT and CSS DIAGNOSIS.
@@ -704,6 +792,9 @@ Do NOT add click handlers to clocks, weather widgets, calendars, or charts.
 ---
 """
 
+    # Sprint 8: Build repair history section
+    repair_history_section = _build_repair_history_section(failed_attempts or [])
+
     return f"""Fix this HTML that failed visual validation.
 
 {phase_summary}
@@ -713,7 +804,7 @@ Do NOT add click handlers to clocks, weather widgets, calendars, or charts.
 {css_diagnosis}
 
 ---
-{protected_section}{display_only_note}
+{repair_history_section}{protected_section}{display_only_note}
 ## ORIGINAL REQUEST
 
 "{user_request[:300]}"
@@ -723,16 +814,6 @@ Do NOT add click handlers to clocks, weather widgets, calendars, or charts.
 ```html
 {truncated_html}
 ```
-
-## REPAIR INSTRUCTIONS
-
-Based on the CSS DIAGNOSIS above, make these specific changes:
-
-1. **For each failing element**: Find the CSS rule mentioned in the diagnosis
-2. **Add background-color**: This is MANDATORY for passing validation
-3. **Use concrete colors**: `rgba(0,200,255,0.3)`, `#ffffff`, `#00ff00`
-4. **DO NOT use**: `var(--anything)`, `filter:`, `opacity:` alone
-5. **DO NOT modify** protected elements (marked with ✅)
 
 ## OUTPUT
 
@@ -746,10 +827,10 @@ Return ONLY the corrected HTML from <!DOCTYPE html> to </html>.
 
 class DirectFixer:
     """
-    Phase 7: Send full phase report to Sonnet 4.5 for repair.
+    Phase 7: Send full phase report to Gemini 3 Pro for repair.
 
-    Sprint 6.2: Upgraded from Codex-Max to Sonnet 4.5 for better repair quality.
-    Sonnet 4.5 has stronger reasoning for CSS/JS fixes with concrete pixel guidance.
+    Sprint 9: Migrated from Sonnet 4.5 to Gemini 3 Pro for cost optimization.
+    Gemini 3 Pro has strong reasoning for CSS/JS fixes with concrete pixel guidance.
     """
 
     async def repair(
@@ -758,15 +839,17 @@ class DirectFixer:
         sandbox_result: SandboxResult,
         user_request: str,
         max_tokens: int = 16384,
+        failed_attempts: Optional[List[FailedRepairAttempt]] = None,
     ) -> Optional[str]:
         """
-        Send all phase failures directly to Sonnet 4.5 for repair.
+        Send all phase failures directly to Gemini 3 Pro for repair.
 
         Args:
             html: HTML that failed validation
             sandbox_result: Full validation result
             user_request: Original user request
             max_tokens: Max tokens for response
+            failed_attempts: Sprint 8 - Previous failed repair attempts
 
         Returns:
             Repaired HTML or None if repair failed
@@ -776,26 +859,31 @@ class DirectFixer:
             return html
 
         logger.info(
-            f"Starting Sonnet 4.5 repair - "
-            f"failures: {sandbox_result.failure_summary}"
+            f"Starting Gemini 3 Pro repair - "
+            f"failures: {sandbox_result.failure_summary}, "
+            f"previous_attempts: {len(failed_attempts) if failed_attempts else 0}"
         )
 
         try:
-            from app.ai.providers.anthropic_provider import anthropic_provider
+            from app.ai.providers.gemini import gemini_provider
+            from app.core.config import settings
 
-            # Build prompt with full context
-            prompt = build_repair_prompt(html, sandbox_result, user_request)
+            # Build prompt with full context (Sprint 8: includes repair history)
+            prompt = build_repair_prompt(html, sandbox_result, user_request, failed_attempts)
 
-            # Call Sonnet 4.5 directly (upgraded from Codex-Max)
-            response = await anthropic_provider.generate(
+            # Call Gemini 3 Pro with thinking mode for deeper reasoning
+            response = await gemini_provider.generate(
                 prompt=prompt,
                 system_prompt=REPAIR_SYSTEM_PROMPT,
                 temperature=0.2,  # Low temperature for consistent repairs
                 max_tokens=max_tokens,
+                model_override=settings.GEMINI_PRO_MODEL,
+                use_thinking=True,
+                thinking_level="HIGH",
             )
 
             if not response.success:
-                logger.warning(f"Sonnet 4.5 repair failed: {response.error}")
+                logger.warning(f"Gemini 3 Pro repair failed: {response.error}")
                 return None
 
             # Clean and extract HTML
@@ -825,61 +913,22 @@ class DirectFixer:
         max_tokens: int = 16384,
     ) -> Optional[str]:
         """
-        Repair using Sonnet 4.5 (same as repair(), kept for API compatibility).
+        Repair using Gemini 3 Pro (same as repair(), kept for API compatibility).
 
-        Sprint 6.2: Sonnet 4.5 has strong reasoning built-in, no special mode needed.
+        Sprint 9: Migrated to Gemini 3 Pro.
 
         Args:
             html: HTML that failed validation
             sandbox_result: Full validation result
             user_request: Original user request
-            effort: Ignored (Sonnet 4.5 has built-in reasoning)
+            effort: Ignored (kept for API compatibility)
             max_tokens: Max tokens for response
 
         Returns:
             Repaired HTML or None if repair failed
         """
-        if sandbox_result.valid:
-            return html
-
-        logger.info(
-            f"Starting Sonnet 4.5 reasoning repair - "
-            f"failures: {sandbox_result.failure_summary}"
-        )
-
-        try:
-            from app.ai.providers.anthropic_provider import anthropic_provider
-
-            prompt = build_repair_prompt(html, sandbox_result, user_request)
-
-            # Sonnet 4.5 has strong reasoning built-in
-            response = await anthropic_provider.generate(
-                prompt=prompt,
-                system_prompt=REPAIR_SYSTEM_PROMPT,
-                temperature=0.1,  # Even lower for reasoning mode
-                max_tokens=max_tokens,
-            )
-
-            if not response.success:
-                logger.warning(f"Sonnet 4.5 reasoning repair failed: {response.error}")
-                return None
-
-            repaired_html = self._clean_html_response(response.content)
-
-            if repaired_html:
-                logger.info(
-                    f"Reasoning repair completed - "
-                    f"original: {len(html)} chars, "
-                    f"repaired: {len(repaired_html)} chars"
-                )
-                return repaired_html
-            else:
-                logger.warning("Failed to extract valid HTML from reasoning repair")
-                return None
-
-        except Exception as e:
-            logger.error(f"Reasoning repair error: {e}", exc_info=True)
-            return None
+        # Just delegate to repair() - same implementation
+        return await self.repair(html, sandbox_result, user_request, max_tokens)
 
     async def repair_with_vision(
         self,
@@ -888,16 +937,17 @@ class DirectFixer:
         user_request: str,
         screenshot: bytes,
         max_tokens: int = 16384,
-        thinking_budget: int = 10000,
+        thinking_budget: int = 10000,  # Kept for API compatibility, ignored
+        failed_attempts: Optional[List[FailedRepairAttempt]] = None,
     ) -> Optional[str]:
         """
-        Sprint 7: Repair using vision (screenshot analysis) + extended thinking.
+        Sprint 7: Repair using vision (screenshot analysis).
+        Sprint 9: Migrated to Gemini 3 Pro.
 
         This is the most powerful repair method. It:
-        1. Shows Claude the actual rendered screenshot
-        2. Uses extended thinking for complex reasoning
-        3. Compares what user requested vs what's visible
-        4. Identifies invisible elements and fixes them
+        1. Shows Gemini the actual rendered screenshot
+        2. Compares what user requested vs what's visible
+        3. Identifies invisible elements and fixes them
 
         Args:
             html: HTML that failed validation
@@ -905,7 +955,8 @@ class DirectFixer:
             user_request: Original user request
             screenshot: PNG screenshot bytes of the rendered page
             max_tokens: Max tokens for response
-            thinking_budget: Extended thinking budget
+            thinking_budget: Ignored (kept for API compatibility)
+            failed_attempts: Sprint 8 - Previous failed repair attempts
 
         Returns:
             Repaired HTML or None if repair failed
@@ -914,35 +965,36 @@ class DirectFixer:
             return html
 
         logger.info(
-            f"Starting vision-enhanced repair - "
+            f"Starting Gemini 3 Pro vision repair - "
             f"failures: {sandbox_result.failure_summary}, "
-            f"invisible_count: {sandbox_result.invisible_elements_count}"
+            f"invisible_count: {sandbox_result.invisible_elements_count}, "
+            f"previous_attempts: {len(failed_attempts) if failed_attempts else 0}"
         )
 
         try:
-            from app.ai.providers.anthropic_provider import anthropic_provider
+            from app.ai.providers.gemini import gemini_provider
+            from app.core.config import settings
 
-            # Build vision repair prompt
-            prompt = build_vision_repair_prompt(html, sandbox_result, user_request)
+            # Build vision repair prompt (Sprint 8: includes repair history)
+            prompt = build_vision_repair_prompt(html, sandbox_result, user_request, failed_attempts)
 
             # Resize screenshot for optimal API performance
             from .visual_analyzer import resize_image_for_api
             optimized_screenshot = resize_image_for_api(screenshot)
 
-            # Call with vision + extended thinking
-            response = await anthropic_provider.generate_with_vision(
+            # Call Gemini 3 Pro with vision
+            response = await gemini_provider.generate_with_vision(
                 prompt=prompt,
                 images=[optimized_screenshot],
                 system_prompt=VISION_REPAIR_SYSTEM_PROMPT,
                 max_tokens=max_tokens,
-                use_extended_thinking=True,
-                thinking_budget=thinking_budget,
+                model_override=settings.GEMINI_PRO_MODEL,
             )
 
             if not response.success:
-                logger.warning(f"Vision repair failed: {response.error}")
-                # Fallback to regular repair
-                return await self.repair(html, sandbox_result, user_request, max_tokens)
+                logger.warning(f"Gemini vision repair failed: {response.error}")
+                # Fallback to regular repair (pass failed_attempts)
+                return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
 
             # Clean and extract HTML
             repaired_html = self._clean_html_response(response.content)
@@ -957,13 +1009,13 @@ class DirectFixer:
                 return repaired_html
             else:
                 logger.warning("Failed to extract valid HTML from vision repair")
-                # Fallback to regular repair
-                return await self.repair(html, sandbox_result, user_request, max_tokens)
+                # Fallback to regular repair (pass failed_attempts)
+                return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
 
         except Exception as e:
-            logger.error(f"Vision repair error: {e}", exc_info=True)
-            # Fallback to regular repair
-            return await self.repair(html, sandbox_result, user_request, max_tokens)
+            logger.error(f"Gemini vision repair error: {e}", exc_info=True)
+            # Fallback to regular repair (pass failed_attempts)
+            return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
 
     def _clean_html_response(self, content: str) -> Optional[str]:
         """

@@ -50,6 +50,8 @@ from .contracts import (
     # Interaction types
     InputCandidate,
     InteractionResult,
+    # Sprint 8: Repair history
+    FailedRepairAttempt,
 )
 from .sandbox import sandbox_renderer, RenderContext
 from .visual_analyzer import visual_analyzer, save_screenshot
@@ -386,6 +388,8 @@ __all__ = [
     # Interaction types
     "InputCandidate",
     "InteractionResult",
+    # Sprint 8: Repair history
+    "FailedRepairAttempt",
     # Render context
     "RenderContext",
     # Individual components (for advanced usage)

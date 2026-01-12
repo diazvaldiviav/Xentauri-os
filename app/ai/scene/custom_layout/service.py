@@ -61,9 +61,11 @@ from app.ai.scene.custom_layout.validation import (
     VisualValidator,
     ValidationContract,
     SandboxResult,
+    FailedRepairAttempt,
     visual_validator,
     direct_fixer,
 )
+from app.ai.scene.custom_layout.validation.fixer import extract_state_css_rules
 from app.core.config import settings
 
 # Opus 4.5 for HTML generation + Fixer for repairs (Sprint 6.1)
@@ -485,31 +487,55 @@ class CustomLayoutService:
         # Sprint 7: Check if vision repair is enabled
         use_vision_repair = getattr(settings, 'VISION_REPAIR_ENABLED', True)
 
-        # Track original interactive count to prevent destructive repairs
+        # Track original HTML and validation for consistent repair attempts
+        # IMPORTANT: Always repair from original, not from failed repair attempts
+        original_html = html
+        original_validation_result = validation_result
         original_inputs_tested = validation_result.inputs_tested
+        original_inputs_responsive = validation_result.inputs_responsive
+
+        # Track best repair attempt (in case all fail, return the best one)
+        best_repaired_html = None
+        best_responsive_count = 0
+
+        # Sprint 8: Track failed repair attempts to avoid repeating mistakes
+        failed_attempts: list[FailedRepairAttempt] = []
 
         for attempt in range(max_repair_attempts):
             logger.info(f"Visual repair attempt {attempt + 1}/{max_repair_attempts} (direct flow)")
 
             # Sprint 7: Use vision repair if screenshot is available
-            if use_vision_repair and validation_result.page_screenshot:
+            # ALWAYS repair from ORIGINAL HTML to avoid accumulating errors
+            # Sprint 8: Pass failed_attempts so fixer learns from previous failures
+            if use_vision_repair and original_validation_result.page_screenshot:
                 logger.info("Using vision-enhanced repair with screenshot")
                 repaired_html = await direct_fixer.repair_with_vision(
-                    html=html,
-                    sandbox_result=validation_result,
+                    html=original_html,
+                    sandbox_result=original_validation_result,
                     user_request=user_request,
-                    screenshot=validation_result.page_screenshot,
+                    screenshot=original_validation_result.page_screenshot,
+                    failed_attempts=failed_attempts,
                 )
             else:
                 # Fallback to text-only repair
                 repaired_html = await direct_fixer.repair(
-                    html=html,
-                    sandbox_result=validation_result,
+                    html=original_html,
+                    sandbox_result=original_validation_result,
                     user_request=user_request,
+                    failed_attempts=failed_attempts,
                 )
 
             if not repaired_html:
                 logger.warning(f"Repair attempt {attempt + 1} failed to produce HTML")
+                # Sprint 8: Record failed attempt
+                failed_attempts.append(FailedRepairAttempt(
+                    attempt_number=attempt + 1,
+                    failure_reason="no_html",
+                    inputs_before=original_inputs_tested,
+                    inputs_after=0,
+                    responsive_before=original_inputs_responsive,
+                    responsive_after=0,
+                ))
                 continue
 
             # Save repaired HTML for debugging
@@ -534,8 +560,23 @@ class CustomLayoutService:
                     f"Original had {original_inputs_tested} inputs, repair has {repair_validation.inputs_tested}. "
                     f"Fixer removed/hid interactive elements instead of fixing them."
                 )
-                # Don't update html or validation_result - keep original for next attempt
+                # Sprint 8: Record destructive attempt with CSS rules tried
+                css_rules_tried = extract_state_css_rules(repaired_html)
+                failed_attempts.append(FailedRepairAttempt(
+                    attempt_number=attempt + 1,
+                    failure_reason="destructive",
+                    inputs_before=original_inputs_tested,
+                    inputs_after=repair_validation.inputs_tested,
+                    responsive_before=original_inputs_responsive,
+                    responsive_after=repair_validation.inputs_responsive,
+                    key_changes_attempted=css_rules_tried,
+                ))
                 continue
+
+            # Track best attempt (most responsive inputs)
+            if repair_validation.inputs_responsive > best_responsive_count:
+                best_repaired_html = repaired_html
+                best_responsive_count = repair_validation.inputs_responsive
 
             if repair_validation.valid:
                 logger.info(
@@ -549,20 +590,33 @@ class CustomLayoutService:
                     latency_ms=(time.time() - start_time) * 1000,
                 )
 
-            # Update for next repair attempt
-            html = repaired_html
-            validation_result = repair_validation
+            logger.warning(
+                f"Repair attempt {attempt + 1} improved but not enough: "
+                f"{repair_validation.inputs_responsive}/{repair_validation.inputs_tested} responsive"
+            )
+            # Sprint 8: Record insufficient attempt with CSS rules tried
+            css_rules_tried = extract_state_css_rules(repaired_html)
+            failed_attempts.append(FailedRepairAttempt(
+                attempt_number=attempt + 1,
+                failure_reason="insufficient",
+                inputs_before=original_inputs_tested,
+                inputs_after=repair_validation.inputs_tested,
+                responsive_before=original_inputs_responsive,
+                responsive_after=repair_validation.inputs_responsive,
+                key_changes_attempted=css_rules_tried,
+            ))
 
         # All repair attempts failed - return best effort
+        final_html = best_repaired_html or original_html
         logger.warning(
-            f"All repair attempts failed (direct flow). Returning last HTML. "
-            f"Final: {validation_result.inputs_responsive}/{validation_result.inputs_tested} responsive"
+            f"All repair attempts failed (direct flow). Returning best HTML. "
+            f"Best responsive count: {best_responsive_count}/{original_inputs_tested}"
         )
 
         return CustomLayoutResult(
-            html=html,
+            html=final_html,
             success=True,  # Return HTML anyway, let user see it
-            error=f"Validation incomplete: {validation_result.failure_summary}",
+            error=f"Validation incomplete: {original_validation_result.failure_summary}",
             latency_ms=(time.time() - start_time) * 1000,
         )
 
@@ -1000,31 +1054,55 @@ class CustomLayoutService:
         # Sprint 7: Check if vision repair is enabled
         use_vision_repair = getattr(settings, 'VISION_REPAIR_ENABLED', True)
 
-        # Track original interactive count to prevent destructive repairs
+        # Track original HTML and validation for consistent repair attempts
+        # IMPORTANT: Always repair from original, not from failed repair attempts
+        original_html = html
+        original_validation_result = validation_result
         original_inputs_tested = validation_result.inputs_tested
+        original_inputs_responsive = validation_result.inputs_responsive
+
+        # Track best repair attempt (in case all fail, return the best one)
+        best_repaired_html = None
+        best_responsive_count = 0
+
+        # Sprint 8: Track failed repair attempts to avoid repeating mistakes
+        failed_attempts: list[FailedRepairAttempt] = []
 
         for attempt in range(max_repair_attempts):
             logger.info(f"Visual repair attempt {attempt + 1}/{max_repair_attempts}")
 
             # Sprint 7: Use vision repair if screenshot is available
-            if use_vision_repair and validation_result.page_screenshot:
+            # ALWAYS repair from ORIGINAL HTML to avoid accumulating errors
+            # Sprint 8: Pass failed_attempts so fixer learns from previous failures
+            if use_vision_repair and original_validation_result.page_screenshot:
                 logger.info("Using vision-enhanced repair with screenshot")
                 repaired_html = await direct_fixer.repair_with_vision(
-                    html=html,
-                    sandbox_result=validation_result,
+                    html=original_html,
+                    sandbox_result=original_validation_result,
                     user_request=user_request,
-                    screenshot=validation_result.page_screenshot,
+                    screenshot=original_validation_result.page_screenshot,
+                    failed_attempts=failed_attempts,
                 )
             else:
                 # Fallback to text-only repair (Sonnet 4.5)
                 repaired_html = await direct_fixer.repair(
-                    html=html,
-                    sandbox_result=validation_result,
+                    html=original_html,
+                    sandbox_result=original_validation_result,
                     user_request=user_request,
+                    failed_attempts=failed_attempts,
                 )
 
             if not repaired_html:
                 logger.warning(f"Repair attempt {attempt + 1} failed to produce HTML")
+                # Sprint 8: Record failed attempt
+                failed_attempts.append(FailedRepairAttempt(
+                    attempt_number=attempt + 1,
+                    failure_reason="no_html",
+                    inputs_before=original_inputs_tested,
+                    inputs_after=0,
+                    responsive_before=original_inputs_responsive,
+                    responsive_after=0,
+                ))
                 continue
 
             # Save repaired HTML for debugging
@@ -1049,8 +1127,23 @@ class CustomLayoutService:
                     f"Original had {original_inputs_tested} inputs, repair has {repair_validation.inputs_tested}. "
                     f"Fixer removed/hid interactive elements instead of fixing them."
                 )
-                # Don't update html or validation_result - keep original for next attempt
+                # Sprint 8: Record destructive attempt with CSS rules tried
+                css_rules_tried = extract_state_css_rules(repaired_html)
+                failed_attempts.append(FailedRepairAttempt(
+                    attempt_number=attempt + 1,
+                    failure_reason="destructive",
+                    inputs_before=original_inputs_tested,
+                    inputs_after=repair_validation.inputs_tested,
+                    responsive_before=original_inputs_responsive,
+                    responsive_after=repair_validation.inputs_responsive,
+                    key_changes_attempted=css_rules_tried,
+                ))
                 continue
+
+            # Track best attempt (most responsive inputs)
+            if repair_validation.inputs_responsive > best_responsive_count:
+                best_repaired_html = repaired_html
+                best_responsive_count = repair_validation.inputs_responsive
 
             if repair_validation.valid:
                 logger.info(
@@ -1064,22 +1157,41 @@ class CustomLayoutService:
                     latency_ms=(time.time() - start_time) * 1000,
                 )
 
-            # Update for next attempt
-            html = repaired_html
-            validation_result = repair_validation
             logger.warning(
-                f"Repaired HTML still failed validation: {repair_validation.failure_summary}"
+                f"Repair attempt {attempt + 1} improved but not enough: "
+                f"{repair_validation.inputs_responsive}/{repair_validation.inputs_tested} responsive"
             )
+            # Sprint 8: Record insufficient attempt with CSS rules tried
+            css_rules_tried = extract_state_css_rules(repaired_html)
+            failed_attempts.append(FailedRepairAttempt(
+                attempt_number=attempt + 1,
+                failure_reason="insufficient",
+                inputs_before=original_inputs_tested,
+                inputs_after=repair_validation.inputs_tested,
+                responsive_before=original_inputs_responsive,
+                responsive_after=repair_validation.inputs_responsive,
+                key_changes_attempted=css_rules_tried,
+            ))
 
-        # All repair attempts failed
+        # All repair attempts failed - return best effort or fail
         logger.error(
-            f"Visual validation failed after {max_repair_attempts} repair attempts"
+            f"Visual validation failed after {max_repair_attempts} repair attempts. "
+            f"Best responsive count: {best_responsive_count}/{original_inputs_tested}"
         )
+
+        # If we have a best attempt that improved things, return it
+        if best_repaired_html and best_responsive_count > 0:
+            return CustomLayoutResult(
+                html=best_repaired_html,
+                success=True,  # Partial success
+                error=f"Validation incomplete: {original_validation_result.failure_summary}",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
 
         return CustomLayoutResult(
             html=None,
             success=False,
-            error=f"Visual validation failed: {validation_result.failure_summary}",
+            error=f"Visual validation failed: {original_validation_result.failure_summary}",
             latency_ms=(time.time() - start_time) * 1000,
         )
 

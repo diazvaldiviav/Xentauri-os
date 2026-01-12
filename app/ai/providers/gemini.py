@@ -8,7 +8,7 @@ import time
 import json
 import logging
 import warnings
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 
 # --- NUEVO IMPORT PARA EL SDK V2 ---
 from google import genai
@@ -48,6 +48,8 @@ class GeminiProvider(AIProvider):
         response_mime_type: Optional[str] = None,
         response_schema: Optional[Dict[str, Any]] = None,
         model_override: Optional[str] = None,
+        use_thinking: bool = False,
+        thinking_level: str = "HIGH",
         **kwargs
     ) -> AIResponse:
         start_time = time.time()
@@ -65,13 +67,20 @@ class GeminiProvider(AIProvider):
                 "max_output_tokens": max_tokens,
                 "system_instruction": system_prompt,
             }
-            
+
             # Only add response_mime_type and response_schema if provided
             if response_mime_type is not None:
                 config_kwargs["response_mime_type"] = response_mime_type
             if response_schema is not None:
                 config_kwargs["response_schema"] = response_schema
-            
+
+            # Enable thinking mode for deeper reasoning (Gemini 3 Pro)
+            if use_thinking:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(
+                    thinking_level=thinking_level,
+                    include_thoughts=False,
+                )
+
             # Construcción de configuración V2
             config = types.GenerateContentConfig(**config_kwargs)
 
@@ -190,6 +199,105 @@ class GeminiProvider(AIProvider):
             )
 
         except Exception as e:
+            return self._error(str(e), start_time)
+
+    async def generate_with_vision(
+        self,
+        prompt: str,
+        images: List[bytes],
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.2,
+        max_tokens: int = 16384,
+        model_override: Optional[str] = None,
+        use_thinking: bool = True,
+        thinking_level: str = "HIGH",
+        **kwargs
+    ) -> AIResponse:
+        """
+        Generate content with vision (image analysis) using Gemini 3 Pro.
+
+        Args:
+            prompt: Text prompt to accompany the image(s)
+            images: List of image bytes (PNG/JPEG)
+            system_prompt: Optional system instruction
+            temperature: Generation temperature (default 0.2 for repairs)
+            max_tokens: Maximum output tokens
+            model_override: Optional model override (defaults to GEMINI_PRO_MODEL)
+            use_thinking: Enable thinking mode for deeper reasoning (default True)
+            thinking_level: "HIGH" (deeper) or "LOW" (faster)
+
+        Returns:
+            AIResponse with generated content
+        """
+        start_time = time.time()
+
+        if not self._client:
+            return self._error("API key missing", start_time)
+
+        # Use pro model for vision by default
+        model = model_override or settings.GEMINI_PRO_MODEL
+
+        try:
+            # Build multimodal content: images + text
+            # Format: [image1, image2, ..., "text prompt"]
+            contents = []
+
+            # Add images as inline data using types.Part.from_image
+            for img_bytes in images:
+                # Detect image type
+                if img_bytes[:8] == b'\x89PNG\r\n\x1a\n':
+                    mime_type = "image/png"
+                elif img_bytes[:2] == b'\xff\xd8':
+                    mime_type = "image/jpeg"
+                else:
+                    mime_type = "image/png"  # Default to PNG
+
+                # Use Part.from_bytes for image data
+                contents.append(
+                    types.Part.from_bytes(data=img_bytes, mime_type=mime_type)
+                )
+
+            # Add text prompt as string (SDK handles conversion)
+            contents.append(prompt)
+
+            # Build config with thinking mode for Gemini 3 Pro
+            config_kwargs = {
+                "temperature": temperature,
+                "max_output_tokens": max_tokens,
+                "system_instruction": system_prompt,
+            }
+
+            # Enable thinking mode for deeper reasoning
+            if use_thinking:
+                config_kwargs["thinking_config"] = types.ThinkingConfig(
+                    thinking_level=thinking_level,
+                    include_thoughts=False,  # Don't need thoughts in output
+                )
+
+            config = types.GenerateContentConfig(**config_kwargs)
+
+            # Call Gemini with multimodal content
+            response = self._client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config
+            )
+
+            latency_ms = self._measure_latency(start_time)
+            usage = self._extract_usage(response)
+
+            return AIResponse(
+                content=response.text,
+                provider=self.provider_type,
+                model=model,
+                usage=usage,
+                latency_ms=latency_ms,
+                success=True,
+                raw_response=response,
+            )
+
+        except Exception as e:
+            logger.error(f"Gemini vision generation failed: {e}")
             return self._error(str(e), start_time)
 
     async def generate_with_grounding(
