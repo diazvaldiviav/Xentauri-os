@@ -135,7 +135,7 @@ class ComponentPosition(BaseModel):
     grid_area: Optional[str] = Field(default=None, description="CSS grid-area name")
     
     # Flex positioning (Flexbox)
-    flex: Optional[int] = Field(default=None, description="Flex grow value (1, 2, etc.)")
+    flex: Optional[str] = Field(default=None, description="CSS flex value (e.g., '1', '0 1 auto')")
     align_self: Optional[str] = Field(default=None, description="CSS align-self value")
     order: Optional[int] = Field(default=None, description="CSS order value")
     
