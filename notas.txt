@@ -1,0 +1,1 @@
+loop de reparacion usa html modificado (puede acumular errores)

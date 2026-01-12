@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1920, initial-scale=1" />
+  <title>Exploradores del Sistema Solar — Digital Learning Board</title>
+  <style>
+    :root{
+      --bg0:#050713;
+      --bg1:#070a1a;
+      --panel:#0b1026cc;
+      --stroke:#1b2a55;
+      --text:#eaf1ff;
+      --muted:#a9b8e8;
+      --neon:#63fff2;
+      --neon2:#a66bff;
+      --neon3:#ff4fd8;
+
+      --shadow: 0 18px 60px rgba(0,0,0,.55);
+      --shadow2: 0 10px 30px rgba(0,0,0,.55);
+      --radius: 22px;
+    }
+
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+      color:var(--text);
+      background:
+        radial-gradient(1100px 700px at 20% 15%, rgba(102, 255, 242, .12), transparent 55%),
+        radial-gradient(900px 600px at 85% 30%, rgba(166, 107, 255, .12), transparent 60%),
+        radial-gradient(1000px 800px at 60% 95%, rgba(255, 79, 216, .10), transparent 55%),
+        radial-gradient(2px 2px at 10% 20%, rgba(255,255,255,.75), transparent 60%),
+        radial-gradient(1px 1px at 25% 72%, rgba(255,255,255,.55), transparent 60%),
+        radial-gradient(1px 1px at 73% 18%, rgba(255,255,255,.55), transparent 60%),
+        radial-gradient(2px 2px at 82% 67%, rgba(255,255,255,.6), transparent 60%),
+        radial-gradient(1px 1px at 55% 40%, rgba(255,255,255,.45), transparent 60%),
+        linear-gradient(180deg, var(--bg0), var(--bg1));
+      overflow:hidden;
+    }
+
+    /* 1920x1080 board frame */
+    .board{
+      width:1920px;
+      height:1080px;
+      margin:0 auto;
+      position:relative;
+      padding:64px 72px 56px;
+      display:flex;
+      flex-direction:column;
+      gap:42px;
+    }
+
+    header{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      padding:22px 26px;
+      border-radius:var(--radius);
+      background: linear-gradient(180deg, rgba(11, 16, 38, .72), rgba(11, 16, 38, .42));
+      border:1px solid rgba(99, 255, 242, .18);
+      box-shadow: var(--shadow2);
+      backdrop-filter: blur(10px);
+      position:relative;
+      overflow:hidden;
+    }
+
+    header::before{
+      content:"";
+      position:absolute;
+      inset:-2px;
+      background:
+        radial-gradient(700px 200px at 20% 10%, rgba(99,255,242,.18), transparent 55%),
+        radial-gradient(600px 220px at 90% 0%, rgba(166,107,255,.18), transparent 60%);
+      filter: blur(8px);
+      opacity:.9;
+      pointer-events:none;
+    }
+
+    .title-wrap{
+      position:relative;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      z-index:1;
+    }
+
+    h1{
+      margin:0;
+      font-size:56px;
+      line-height:1.05;
+      letter-spacing:.4px;
+      text-transform:none;
+      text-shadow: 0 0 22px rgba(99,255,242,.18);
+    }
+
+    .topic{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      color:var(--muted);
+      font-size:24px;
+      letter-spacing:.2px;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 14px;
+      border-radius:999px;
+      border:1px solid rgba(166,107,255,.35);
+      background: rgba(14, 18, 42, .55);
+      box-shadow: 0 0 0 1px rgba(99,255,242,.10) inset;
+    }
+
+    .legend{
+      position:relative;
+      z-index:1;
+      display:flex;
+      flex-direction:column;
+      align-items:flex-end;
+      gap:10px;
+      text-align:right;
+      max-width:520px;
+    }
+
+    .legend .hint{
+      color:rgba(234,241,255,.86);
+      font-size:22px;
+      line-height:1.2;
+    }
+    .legend .hint strong{
+      color:var(--neon);
+      font-weight:700;
+      text-shadow:0 0 16px rgba(99,255,242,.28);
+    }
+    .legend .subhint{
+      color:rgba(169,184,232,.9);
+      font-size:18px;
+    }
+
+    /* Cards grid */
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap:34px;
+      flex:1;
+      align-items:stretch;
+    }
+
+    /* Checkbox hack setup */
+    .flip-toggle{
+      position:absolute;
+      opacity:0;
+      pointer-events:none;
+    }
+
+    .card{
+      display:block;
+      position:relative;
+      height:100%;
+      min-height:700px;
+      border-radius:var(--radius);
+      cursor:pointer;
+      user-select:none;
+      perspective: 1400px;
+      outline:none;
+    }
+
+    .card:focus-visible{
+      box-shadow: 0 0 0 3px rgba(99,255,242,.55), 0 0 0 8px rgba(99,255,242,.15);
+    }
+
+    .card-inner{
+      position:absolute;
+      inset:0;
+      transform-style: preserve-3d;
+      transition: transform 900ms cubic-bezier(.2,.85,.2,1);
+      border-radius:var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    /* Flip on checked */
+    .flip-toggle:checked + .card .card-inner{
+      transform: rotateY(180deg);
+    }
+
+    /* Front / Back faces */
+    .face{
+      position:absolute;
+      inset:0;
+      border-radius:var(--radius);
+      backface-visibility:hidden;
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      padding:34px 34px 30px;
+      border:1px solid rgba(255,255,255,.06);
+      background:
+        radial-gradient(900px 420px at 20% 10%, rgba(99,255,242,.14), transparent 50%),
+        radial-gradient(700px 480px at 100% 100%, rgba(166,107,255,.14), transparent 55%),
+        linear-gradient(180deg, rgba(11,16,38,.75), rgba(11,16,38,.45));
+      backdrop-filter: blur(12px);
+    }
+
+    .face::after{
+      content:"";
+      position:absolute;
+      inset:-2px;
+      border-radius:var(--radius);
+      background:
+        radial-gradient(500px 220px at 20% 0%, rgba(99,255,242,.22), transparent 60%),
+        radial-gradient(520px 260px at 95% 20%, rgba(255,79,216,.16), transparent 60%),
+        linear-gradient(90deg, rgba(99,255,242,.10), rgba(166,107,255,.08));
+      opacity:.65;
+      filter: blur(10px);
+      pointer-events:none;
+    }
+
+    .front{
+      transform: rotateY(0deg);
+    }
+
+    .back{
+      transform: rotateY(180deg);
+      background:
+        radial-gradient(900px 480px at 10% 15%, rgba(255,79,216,.14), transparent 55%),
+        radial-gradient(800px 520px at 95% 90%, rgba(99,255,242,.14), transparent 55%),
+        linear-gradient(180deg, rgba(11,16,38,.78), rgba(11,16,38,.48));
+    }
+
+    /* Decorative top line */
+    .topline{
+      position:relative;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:18px;
+      z-index:1;
+    }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:12px;
+      padding:12px 14px;
+      border-radius:999px;
+      border:1px solid rgba(99,255,242,.24);
+      background: rgba(8, 12, 28, .55);
+      box-shadow: 0 0 0 1px rgba(255,255,255,.04) inset;
+    }
+
+    .icon{
+      font-size:42px;
+      line-height:1;
+      filter: drop-shadow(0 0 18px rgba(99,255,242,.12));
+    }
+
+    .planet-name{
+      font-size:34px;
+      font-weight:800;
+      letter-spacing:.4px;
+    }
+
+    .chip{
+      font-size:16px;
+      letter-spacing:.12em;
+      text-transform:uppercase;
+      color:rgba(234,241,255,.78);
+      padding:10px 12px;
+      border-radius:999px;
+      border:1px solid rgba(166,107,255,.28);
+      background: rgba(8, 12, 28, .35);
+    }
+
+    .subtitle{
+      position:relative;
+      z-index:1;
+      margin-top:18px;
+      font-size:28px;
+      color:rgba(169,184,232,.95);
+      letter-spacing:.2px;
+    }
+
+    .hero{
+      position:relative;
+      z-index:1;
+      margin-top:26px;
+      flex:1;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    .orbit{
+      width:min(520px, 88%);
+      aspect-ratio: 1 / 1;
+      border-radius:50%;
+      position:relative;
+      border:1px solid rgba(99,255,242,.20);
+      background:
+        radial-gradient(circle at 45% 40%, rgba(99,255,242,.10), transparent 55%),
+        radial-gradient(circle at 70% 65%, rgba(166,107,255,.10), transparent 60%);
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,.04) inset,
+        0 0 60px rgba(99,255,242,.08);
+    }
+
+    .orbit::before{
+      content:"";
+      position:absolute;
+      inset:12%;
+      border-radius:50%;
+      border:1px dashed rgba(255,255,255,.14);
+      opacity:.9;
+    }
+
+    .planet{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform: translate(-50%,-50%);
+      width: 46%;
+      aspect-ratio: 1/1;
+      border-radius:50%;
+      background:
+        radial-gradient(circle at 30% 25%, rgba(255,255,255,.22), transparent 35%),
+        radial-gradient(circle at 35% 40%, rgba(99,255,242,.10), transparent 60%),
+        radial-gradient(circle at 60% 70%, rgba(166,107,255,.12), transparent 55%),
+        linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.18));
+      border:1px solid rgba(255,255,255,.10);
+      box-shadow:
+        0 0 0 1px rgba(99,255,242,.10) inset,
+        0 0 80px rgba(166,107,255,.10);
+    }
+
+    /* Planet color accents per card */
+    .mars .planet{
+      background:
+        radial-gradient(circle at 30% 25%, rgba(255,255,255,.18), transparent 35%),
+        radial-gradient(circle at 40% 60%, rgba(255,79,216,.10), transparent 62%),
+        radial-gradient(circle at 55% 55%, rgba(255,80,80,.22), transparent 52%),
+        linear-gradient(180deg, rgba(255,110,110,.15), rgba(0,0,0,.22));
+      box-shadow: 0 0 90px rgba(255,79,216,.10);
+    }
+    .jupiter .planet{
+      background:
+        radial-gradient(circle at 30% 25%, rgba(255,255,255,.18), transparent 35%),
+        radial-gradient(circle at 55% 65%, rgba(255,224,120,.22), transparent 55%),
+        radial-gradient(circle at 45% 50%, rgba(99,255,242,.10), transparent 62%),
+        linear-gradient(180deg, rgba(255,210,140,.14), rgba(0,0,0,.22));
+      box-shadow: 0 0 90px rgba(99,255,242,.10);
+    }
+    .saturn .planet{
+      background:
+        radial-gradient(circle at 30% 25%, rgba(255,255,255,.18), transparent 35%),
+        radial-gradient(circle at 55% 65%, rgba(166,107,255,.22), transparent 55%),
+        radial-gradient(circle at 45% 50%, rgba(255,230,170,.10), transparent 62%),
+        linear-gradient(180deg, rgba(255,230,170,.10), rgba(0,0,0,.22));
+      box-shadow: 0 0 90px rgba(166,107,255,.12);
+    }
+
+    .saturn .orbit::after{
+      content:"";
+      position:absolute;
+      left:50%;
+      top:50%;
+      width: 72%;
+      height: 22%;
+      transform: translate(-50%,-50%) rotate(-18deg);
+      border-radius: 999px;
+      border:1px solid rgba(255,255,255,.18);
+      background: linear-gradient(90deg, rgba(99,255,242,.10), rgba(255,255,255,.04), rgba(166,107,255,.10));
+      box-shadow: 0 0 40px rgba(255,255,255,.06);
+      opacity:.95;
+    }
+
+    .cta{
+      position:relative;
+      z-index:1;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-top:18px;
+      padding-top:18px;
+      border-top:1px solid rgba(255,255,255,.08);
+      color:rgba(234,241,255,.78);
+      font-size:18px;
+      letter-spacing:.2px;
+    }
+
+    .cta .tap{
+      display:inline-flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 12px;
+      border-radius:999px;
+      border:1px solid rgba(99,255,242,.22);
+      background: rgba(8,12,28,.35);
+    }
+
+    .cta .tap b{
+      color:var(--neon);
+      text-shadow:0 0 14px rgba(99,255,242,.22);
+    }
+
+    /* Back content */
+    .back .content{
+      position:relative;
+      z-index:1;
+      display:flex;
+      flex-direction:column;
+      height:100%;
+      gap:22px;
+    }
+
+    .back h2{
+      margin:0;
+      font-size:44px;
+      letter-spacing:.3px;
+    }
+
+    .fact{
+      font-size:28px;
+      line-height:1.28;
+      color:rgba(234,241,255,.92);
+      padding:22px;
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.08);
+      background: rgba(8, 12, 28, .38);
+      box-shadow: 0 0 0 1px rgba(99,255,242,.08) inset;
+    }
+
+    .data-row{
+      display:flex;
+      gap:18px;
+      margin-top:auto;
+    }
+
+    .stat{
+      flex:1;
+      padding:18px 18px 16px;
+      border-radius:18px;
+      border:1px solid rgba(99,255,242,.20);
+      background: linear-gradient(180deg, rgba(8, 12, 28, .45), rgba(8, 12, 28, .28));
+      box-shadow: 0 0 40px rgba(99,255,242,.06);
+    }
+
+    .stat .label{
+      font-size:16px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      color:rgba(169,184,232,.92);
+      margin-bottom:10px;
+    }
+
+    .stat .value{
+      font-size:40px;
+      font-weight:900;
+      letter-spacing:.4px;
+      color:rgba(234,241,255,.98);
+      text-shadow: 0 0 18px rgba(166,107,255,.10);
+    }
+
+    .back .footer{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:14px;
+      padding-top:18px;
+      border-top:1px solid rgba(255,255,255,.08);
+      color:rgba(169,184,232,.95);
+      font-size:18px;
+    }
+
+    .back .footer .reset{
+      padding:10px 12px;
+      border-radius:999px;
+      border:1px solid rgba(255,79,216,.22);
+      background: rgba(8,12,28,.35);
+      color:rgba(234,241,255,.86);
+    }
+
+    /* Subtle hover glow (safe for TV remotes: no hover, but ok for mouse) */
+    @media (hover:hover){
+      .card:hover .card-inner{
+        box-shadow: 0 22px 80px rgba(0,0,0,.62), 0 0 0 1px rgba(99,255,242,.12);
+      }
+    }
+
+    /* TV-safe scaling if viewport differs */
+    @media (max-width: 1920px){
+      body{ overflow:auto; }
+      .board{
+        width:100vw;
+        height:100vh;
+      }
+      .card{ min-height: min(700px, 58vh); }
+    }
+
+    /* Accessibility: reduce motion */
+    @media (prefers-reduced-motion: reduce){
+      .card-inner{ transition:none; }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="board" role="application" aria-label="Digital Learning Board">
+    <header>
+      <div class="title-wrap">
+        <h1>Exploradores del Sistema Solar</h1>
+        <div class="topic">
+          <span class="pill">
+            <span style="width:10px;height:10px;border-radius:999px;background:var(--neon);box-shadow:0 0 18px rgba(99,255,242,.45);"></span>
+            <span><strong>Astronomy</strong> · Tablero interactivo</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="legend" aria-hidden="true">
+        <div class="hint">Toca una tarjeta para <strong>voltearla</strong> y ver datos.</div>
+        <div class="subhint">Vuelve a tocar para regresar al frente.</div>
+      </div>
+    </header>
+
+    <section class="grid" aria-label="Tarjetas de planetas">
+      <!-- MARTE -->
+      <div style="position:relative;">
+        <input class="flip-toggle" type="checkbox" id="card_mars" />
+        <label class="card mars" for="card_mars" tabindex="0" aria-label="Marte: tocar para voltear la tarjeta">
+          <div class="card-inner">
+            <article class="face front" aria-hidden="false">
+              <div class="topline">
+                <div class="badge">
+                  <div class="icon" aria-hidden="true">🔴</div>
+                  <div class="planet-name">Marte</div>
+                </div>
+                <div class="chip">Planeta</div>
+              </div>
+
+              <div class="subtitle">El Planeta Rojo</div>
+
+              <div class="hero" aria-hidden="true">
+                <div class="orbit">
+                  <div class="planet"></div>
+                </div>
+              </div>
+
+              <div class="cta">
+                <div class="tap">Acción: <b>Voltear</b></div>
+                <div>Modo: 3D Flip</div>
+              </div>
+            </article>
+
+            <article class="face back">
+              <div class="content">
+                <h2>Marte</h2>
+
+                <div class="fact">
+                  Tiene la montaña más alta del sistema solar (Monte Olimpo, 21km).
+                </div>
+
+                <div class="data-row">
+                  <div class="stat">
+                    <div class="label">Dato rápido</div>
+                    <div class="value">2 Lunas</div>
+                  </div>
+                  <div class="stat" style="border-color: rgba(255,79,216,.22);">
+                    <div class="label">Pista</div>
+                    <div class="value" style="font-size:28px;font-weight:800;line-height:1.1;">
+                      Busca cráteres y volcanes gigantes
+                    </div>
+                  </div>
+                </div>
+
+                <div class="footer">
+                  <div class="reset">Toca para volver</div>
+                  <div style="opacity:.9;">Lectura a distancia · Alto contraste</div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </label>
+      </div>
+
+      <!-- JÚPITER -->
+      <div style="position:relative;">
+        <input class="flip-toggle" type="checkbox" id="card_jupiter" />
+        <label class="card jupiter" for="card_jupiter" tabindex="0" aria-label="Júpiter: tocar para voltear la tarjeta">
+          <div class="card-inner">
+            <article class="face front">
+              <div class="topline">
+                <div class="badge">
+                  <div class="icon" aria-hidden="true">⚡</div>
+                  <div class="planet-name">Júpiter</div>
+                </div>
+                <div class="chip">Planeta</div>
+              </div>
+
+              <div class="subtitle">El Gigante Gaseoso</div>
+
+              <div class="hero" aria-hidden="true">
+                <div class="orbit">
+                  <div class="planet"></div>
+                </div>
+              </div>
+
+              <div class="cta">
+                <div class="tap">Acción: <b>Voltear</b></div>
+                <div>Modo: 3D Flip</div>
+              </div>
+            </article>
+
+            <article class="face back">
+              <div class="content">
+                <h2>Júpiter</h2>
+
+                <div class="fact">
+                  Es tan grande que cabrían 1,300 Tierras dentro de él.
+                </div>
+
+                <div class="data-row">
+                  <div class="stat">
+                    <div class="label">Dato rápido</div>
+                    <div class="value">79+ Lunas</div>
+                  </div>
+                  <div class="stat" style="border-color: rgba(166,107,255,.26);">
+                    <div class="label">Pista</div>
+                    <div class="value" style="font-size:28px;font-weight:800;line-height:1.1;">
+                      Observa sus bandas y tormentas
+                    </div>
+                  </div>
+                </div>
+
+                <div class="footer">
+                  <div class="reset">Toca para volver</div>
+                  <div style="opacity:.9;">Lectura a distancia · Alto contraste</div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </label>
+      </div>
+
+      <!-- SATURNO -->
+      <div style="position:relative;">
+        <input class="flip-toggle" type="checkbox" id="card_saturn" />
+        <label class="card saturn" for="card_saturn" tabindex="0" aria-label="Saturno: tocar para voltear la tarjeta">
+          <div class="card-inner">
+            <article class="face front">
+              <div class="topline">
+                <div class="badge">
+                  <div class="icon" aria-hidden="true">🪐</div>
+                  <div class="planet-name">Saturno</div>
+                </div>
+                <div class="chip">Planeta</div>
+              </div>
+
+              <div class="subtitle">El Señor de los Anillos</div>
+
+              <div class="hero" aria-hidden="true">
+                <div class="orbit">
+                  <div class="planet"></div>
+                </div>
+              </div>
+
+              <div class="cta">
+                <div class="tap">Acción: <b>Voltear</b></div>
+                <div>Modo: 3D Flip</div>
+              </div>
+            </article>
+
+            <article class="face back">
+              <div class="content">
+                <h2>Saturno</h2>
+
+                <div class="fact">
+                  Sus anillos están hechos principalmente de hielo y roca.
+                </div>
+
+                <div class="data-row">
+                  <div class="stat">
+                    <div class="label">Dato rápido</div>
+                    <div class="value">82+ Lunas</div>
+                  </div>
+                  <div class="stat" style="border-color: rgba(99,255,242,.22);">
+                    <div class="label">Pista</div>
+                    <div class="value" style="font-size:28px;font-weight:800;line-height:1.1;">
+                      Identifica los anillos y su brillo
+                    </div>
+                  </div>
+                </div>
+
+                <div class="footer">
+                  <div class="reset">Toca para volver</div>
+                  <div style="opacity:.9;">Lectura a distancia · Alto contraste</div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </label>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

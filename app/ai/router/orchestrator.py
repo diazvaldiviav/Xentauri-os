@@ -54,7 +54,6 @@ from typing import Optional, Dict, Any
 from app.ai.providers import (
     gemini_provider,
     openai_provider,
-    anthropic_provider,
     AIResponse,
 )
 from app.ai.prompts.router_prompts import (
@@ -140,7 +139,7 @@ class AIRouter:
         """Initialize the router with all providers."""
         self.orchestrator = gemini_provider  # Fast analyzer
         self.executor = openai_provider  # Code/tools
-        self.reasoner = anthropic_provider  # Deep thinking
+        self.reasoner = gemini_provider  # Gemini 3 Flash for reasoning (with thinking mode)
         logger.info("AI Router initialized")
     
     async def analyze_request(self, request: str, context: Optional[Dict] = None) -> RoutingDecision:
@@ -282,7 +281,7 @@ class AIRouter:
         providers = {
             "gemini": self.orchestrator,
             "openai": self.executor,
-            "anthropic": self.reasoner,
+            "anthropic": self.reasoner,  # Now also Gemini
         }
         return providers.get(provider_name, self.orchestrator)
     

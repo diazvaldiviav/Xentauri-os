@@ -38,7 +38,7 @@ from sqlalchemy.orm import Session
 from app.models.oauth_credential import OAuthCredential
 from app.environments.google.docs import GoogleDocsClient, DocContent
 from app.environments.base import APIError
-from app.ai.providers import gemini_provider, anthropic_provider
+from app.ai.providers import gemini_provider
 from app.ai.prompts.doc_prompts import (
     build_summary_prompt,
     build_key_points_prompt,
@@ -187,14 +187,16 @@ class DocIntelligenceService:
         
         try:
             if is_complex:
-                # Use Claude for complex documents
-                logger.info(f"Using Claude for complex document ({doc_content.char_count} chars)")
-                response = await anthropic_provider.generate(
+                # Use Gemini 3 Flash with thinking mode for complex documents
+                logger.info(f"Using Gemini 3 Flash (thinking) for complex document ({doc_content.char_count} chars)")
+                response = await gemini_provider.generate(
                     prompt=prompt,
                     temperature=0.3,
                     max_tokens=1024,
+                    use_thinking=True,
+                    thinking_level="HIGH",
                 )
-                model_used = "claude"
+                model_used = "gemini"
             else:
                 # Use Gemini for simple documents
                 logger.info(f"Using Gemini for simple document ({doc_content.char_count} chars)")
@@ -339,11 +341,14 @@ class DocIntelligenceService:
         
         try:
             if is_complex:
-                logger.info(f"Using Claude for complex meeting doc")
-                response = await anthropic_provider.generate(
+                # Use Gemini 3 Flash with thinking mode for complex meeting docs
+                logger.info(f"Using Gemini 3 Flash (thinking) for complex meeting doc")
+                response = await gemini_provider.generate(
                     prompt=prompt,
                     temperature=0.3,
                     max_tokens=1024,
+                    use_thinking=True,
+                    thinking_level="HIGH",
                 )
             else:
                 logger.info(f"Using Gemini for simple meeting doc")

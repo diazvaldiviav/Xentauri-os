@@ -1745,9 +1745,9 @@ IMPORTANT INSTRUCTIONS:
         db: Session,
         user_id: UUID,
     ) -> IntentResult:
-        """Handle complex tasks requiring GPT or Claude."""
+        """Handle complex tasks requiring GPT or Gemini reasoning."""
         from app.ai.providers.openai_provider import openai_provider
-        from app.ai.providers.anthropic_provider import anthropic_provider
+        from app.ai.providers.gemini import gemini_provider
         from app.ai.context import build_unified_context
         from app.ai.prompts.execution_prompts import build_execution_prompt
         from app.ai.prompts.base_prompt import build_reasoner_prompt
@@ -1757,14 +1757,15 @@ IMPORTANT INSTRUCTIONS:
             ClarificationResponse,
             ActionSequenceResponse,
         )
-        
+
         if provider == "openai":
             ai_provider = openai_provider
             model_name = settings.OPENAI_MODEL
             task_type = "execution"
         else:
-            ai_provider = anthropic_provider
-            model_name = settings.ANTHROPIC_MODEL
+            # Sprint 9: Migrated from Anthropic to Gemini 3 Flash for reasoning
+            ai_provider = gemini_provider
+            model_name = settings.GEMINI_MODEL
             task_type = "reasoning"
         
         ai_monitor.track_event(
@@ -1806,13 +1807,19 @@ IMPORTANT INSTRUCTIONS:
             # Sprint 4.4.0: Pass routing_decision for router analysis injection (GAP #7)
             prompt = build_execution_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
             system_prompt = "You are a smart display execution assistant. Return valid JSON."
+            response = await ai_provider.generate(prompt=prompt, system_prompt=system_prompt)
         else:
-            # Sprint 4.2.8: Pass conversation history to reasoner (Claude) for context awareness
+            # Sprint 4.2.8: Pass conversation history to reasoner (Gemini) for context awareness
             # Sprint 4.4.0: Pass routing_decision for router analysis injection (GAP #7)
+            # Sprint 9: Use Gemini 3 Flash with thinking mode for deep reasoning
             prompt = build_reasoner_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
             system_prompt = "You are a strategic advisor for smart home systems."
-        
-        response = await ai_provider.generate(prompt=prompt, system_prompt=system_prompt)
+            response = await ai_provider.generate(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                use_thinking=True,
+                thinking_level="HIGH",
+            )
         processing_time = (time.time() - start_time) * 1000
         
         if not response.success:

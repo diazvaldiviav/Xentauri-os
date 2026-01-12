@@ -1,0 +1,1127 @@
+================================================================================
+                    SPECIAL SPRINT - MEMORY PROJECTS MODULE
+                   Context-Aware Content Generation Memory
+================================================================================
+
+Fecha de Creación: 2024-12-27
+Autor: Claude Sonnet 4.5 + Developer
+Estado: READY FOR IMPLEMENTATION
+Prerequisito: Sprint 4.1.0 Complete (Intelligent Conversations & Real-Time Data)
+
+================================================================================
+                              PROMPT PARA COPILOT
+================================================================================
+
+# PASO 1: ENTENDER EL PROYECTO COMPLETO
+
+Antes de hacer cualquier cambio, necesitas analizar estos archivos para entender
+la arquitectura completa del proyecto Jarvis:
+
+1. Lee COMPLETAMENTE @CONTEXT.md
+   - Entiende la arquitectura modular (app/ai/, app/services/, app/environments/)
+   - Entiende el flujo de intents: Router → Parser → IntentService → Handlers
+   - Entiende UnifiedContext system (línea ~268 en app/ai/context.py)
+   - Entiende los servicios existentes con TTL: pending_event_service, pending_edit_service, conversation_context_service
+   - Entiende Scene Graph (Sprint 4.0): SceneService, ComponentRegistry, text_block component
+   - Entiende el patrón DRY: NO duplicar llamadas a LLMs, usar providers existentes
+
+2. Lee COMPLETAMENTE @system.html
+   - Entiende el estado actual del proyecto (Sprint 4.1.0 Complete)
+   - Entiende los 679 tests pasando que NO deben romperse
+   - Entiende los 15 servicios core y cómo interactúan
+   - Entiende la arquitectura de 3 capas: Router → Intent → Service
+
+================================================================================
+                              PROBLEMA A RESOLVER
+================================================================================
+
+SÍNTOMA EN LOS LOGS:
+--------------------
+Usuario: "Crea una nota ABA"
+→ Intent: CONVERSATION, genera contenido ✅
+→ Respuesta: "Aquí está tu nota ABA: [contenido generado]"
+
+Usuario: "muestra la nota en la pantalla"
+→ Intent: DOC_QUERY ❌ (INCORRECTO - debería ser DISPLAY_CONTENT)
+→ Sistema no sabe que acabamos de generar una nota
+→ Busca en Google Docs, no encuentra nada
+→ Error: "No encontré ese documento"
+
+PROBLEMA RAÍZ:
+--------------
+1. _handle_conversation() genera contenido pero NO lo registra en ningún lado
+2. conversation_context_service solo guarda pending_content_request, NO el contenido generado
+3. Intent parser no tiene contexto de "acabamos de generar esto" para distinguir:
+   - "muestra la nota" (contenido GENERADO) → debería ser DISPLAY_CONTENT
+   - "muestra el documento de Google" (contenido EXTERNO) → debería ser DOC_QUERY
+4. No hay bridge entre CONVERSATION intent y DISPLAY_CONTENT intent
+5. Scene Graph existe y funciona, solo falta la fuente de datos de contenido generado
+
+SOLUCIÓN REQUERIDA:
+-------------------
+Crear un módulo Memory Projects que:
+1. Registre contenido generado cuando _handle_conversation() lo crea
+2. Mantenga memoria activa (in-memory con TTL) de proyectos generados
+3. Inyecte contexto en UnifiedContext para que el LLM sepa "hay contenido generado pendiente"
+4. Provea los datos para Scene Graph cuando usuario pida "muestra la nota"
+
+================================================================================
+                         ANÁLISIS DEL CÓDIGO ACTUAL
+================================================================================
+
+ARCHIVOS CRÍTICOS QUE DEBES LEER ANTES DE MODIFICAR:
+----------------------------------------------------
+
+1. app/services/intent_service.py (líneas 1405-1592)
+   - Método _handle_conversation(): Genera contenido con LLM pero NO lo guarda
+   - Líneas 1551-1556: Solo guarda en conversation_history, no como displayable content
+   - AQUÍ necesitas AGREGAR registro después de generar el mensaje
+
+2. app/ai/context.py (líneas 268-366, 372-525)
+   - UnifiedContext dataclass: Necesitas AGREGAR campo memory_bridge
+   - build_unified_context(): Necesitas AGREGAR inyección del memory bridge
+   - NO modificar campos existentes, solo AGREGAR nuevos
+
+3. app/services/conversation_context_service.py (líneas 44-109)
+   - UserConversationState: Solo tiene pending_content_request (línea 77-79)
+   - NO modificar esta clase, crear módulo separado para memoria
+   - Este servicio maneja pending requests, el nuevo módulo maneja generated content
+
+4. app/ai/prompts/intent_prompts.py (líneas 145-219)
+   - Reglas de clasificación DOC_QUERY vs CONVERSATION
+   - Necesitas AGREGAR reglas memory-aware DESPUÉS de las existentes
+   - NO modificar reglas existentes, solo AGREGAR contexto dinámico
+
+5. app/ai/scene/service.py
+   - SceneService.generate_scene() existe y funciona
+   - SceneService.populate_scene_data() existe para llenar datos
+   - ComponentRegistry tiene text_block component
+   - NO modificar estos métodos, solo USAR en _handle_display_content()
+
+6. app/ai/router/orchestrator.py (líneas 164-165)
+   - AIRouter inyecta context en prompts
+   - Necesitas AGREGAR inyección de memory_bridge.to_context_string()
+   - NO modificar la lógica de routing, solo AGREGAR contexto
+
+================================================================================
+                       DISEÑO DE LA SOLUCIÓN (DRY/SOLID)
+================================================================================
+
+PRINCIPIOS A SEGUIR:
+--------------------
+✅ DRY (Don't Repeat Yourself):
+   - NO duplicar llamadas a LLMs (usar providers existentes)
+   - NO duplicar lógica de TTL (seguir patrón de pending_event_service)
+   - NO duplicar lógica de Scene Graph (usar SceneService existente)
+
+✅ SOLID:
+   - Single Responsibility: Cada clase hace UNA cosa
+   - Open/Closed: Extender sin modificar (agregar campos, no cambiar existentes)
+   - Liskov Substitution: Nuevas clases compatibles con interfaces existentes
+   - Interface Segregation: Interfaces pequeñas y específicas
+   - Dependency Inversion: Depender de abstracciones, no de implementaciones
+
+✅ Separation of Concerns:
+   - app/ai/memory/ → Schemas y lógica de memoria (nueva)
+   - app/services/ → Service layer que usa la memoria (extender)
+   - app/ai/prompts/ → Prompts que incluyen contexto (extender)
+
+================================================================================
+                          ARCHIVOS A CREAR (NUEVOS)
+================================================================================
+
+MÓDULO 1: app/ai/memory/__init__.py
+------------------------------------
+```python
+"""
+Memory Projects Module - Sprint 4.1.1
+
+Tracks generated content across intent changes to enable display of AI-generated content.
+Follows the same TTL pattern as pending_event_service and pending_edit_service.
+"""
+
+from app.ai.memory.schemas import (
+    MemoryProject,
+    ContentStatus,
+    ContentType,
+    MemoryBridge,
+)
+from app.ai.memory.service import memory_project_service
+
+__all__ = [
+    "MemoryProject",
+    "ContentStatus",
+    "ContentType",
+    "MemoryBridge",
+    "memory_project_service",
+]
+```
+
+MÓDULO 2: app/ai/memory/schemas.py
+-----------------------------------
+```python
+"""
+Memory Project Schemas
+
+Dataclasses for tracking generated content lifecycle.
+"""
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional, List
+from enum import Enum
+
+
+class ContentStatus(Enum):
+    """Content lifecycle status"""
+    GENERATED = "generated"    # Just created, ready to display
+    DISPLAYED = "displayed"    # Shown on screen
+    ARCHIVED = "archived"      # Expired or manually archived
+
+
+class ContentType(Enum):
+    """Type of generated content"""
+    NOTE = "note"
+    EMAIL = "email"
+    MESSAGE = "message"
+    DOCUMENT = "document"
+    SUMMARY = "summary"
+    SCRIPT = "script"
+    TEMPLATE = "template"
+
+
+@dataclass
+class MemoryProject:
+    """
+    Represents generated content that persists across intent changes.
+
+    Similar to PendingEvent but for completed AI-generated content.
+    Follows TTL pattern from pending_event_service (300s default).
+    """
+    project_id: str                          # UUID
+    user_id: str
+    content_type: ContentType
+    content: str                             # Generated text content
+    status: ContentStatus
+    created_at: datetime
+    last_accessed: datetime
+    ttl_seconds: int = 300                   # 5 minutes (same as conversation_context)
+
+    # Source tracking
+    source_intent: str = "conversation"      # Which intent created this
+    source_request: Optional[str] = None     # Original user request
+
+    # Scene Graph metadata (for display)
+    display_title: Optional[str] = None      # "Nota ABA", "Email Draft", etc.
+
+    def is_expired(self) -> bool:
+        """Check if project has exceeded TTL"""
+        age = (datetime.now() - self.last_accessed).total_seconds()
+        return age >= self.ttl_seconds
+
+
+@dataclass
+class MemoryBridge:
+    """
+    Context bridge injected into UnifiedContext.
+
+    Provides memory-aware context to LLM for intent classification.
+    """
+    active_projects: List[MemoryProject] = field(default_factory=list)
+
+    def has_recent_generated_content(self) -> bool:
+        """Check if there's any generated content pending display"""
+        return any(p.status == ContentStatus.GENERATED for p in self.active_projects)
+
+    def get_latest_generated(self) -> Optional[MemoryProject]:
+        """Get most recently generated project"""
+        generated = [p for p in self.active_projects if p.status == ContentStatus.GENERATED]
+        if not generated:
+            return None
+        return max(generated, key=lambda p: p.created_at)
+
+    def to_context_string(self) -> str:
+        """
+        Format for injection into LLM prompts.
+
+        This helps the LLM distinguish between:
+        - "muestra la nota" (GENERATED content) → DISPLAY_CONTENT
+        - "muestra el documento de Google" (EXTERNAL content) → DOC_QUERY
+        """
+        if not self.active_projects:
+            return ""
+
+        lines = ["ACTIVE MEMORY PROJECTS:"]
+        for project in self.active_projects:
+            status_emoji = "⚡" if project.status == ContentStatus.GENERATED else "✓"
+            lines.append(
+                f"{status_emoji} [{project.content_type.value}] {project.display_title or 'Untitled'}"
+            )
+            if project.status == ContentStatus.GENERATED:
+                lines.append("  ⚠️ PENDING DISPLAY - User may reference this content")
+
+        return "\n".join(lines)
+```
+
+MÓDULO 3: app/ai/memory/service.py
+-----------------------------------
+```python
+"""
+Memory Project Service
+
+In-memory storage for generated content with TTL cleanup.
+Follows the same pattern as pending_event_service and conversation_context_service.
+"""
+
+import logging
+from typing import Dict, Optional, List
+from datetime import datetime
+import uuid
+
+from app.ai.memory.schemas import (
+    MemoryProject,
+    ContentStatus,
+    ContentType,
+    MemoryBridge,
+)
+
+logger = logging.getLogger("jarvis.ai.memory")
+
+
+class MemoryProjectService:
+    """
+    Manages AI-generated content with TTL-based cleanup.
+
+    Similar to:
+    - pending_event_service: Stores data with TTL
+    - conversation_context_service: Tracks user state
+
+    Differences:
+    - Stores COMPLETED content (not pending operations)
+    - Bridges between CONVERSATION and DISPLAY_CONTENT intents
+    """
+
+    def __init__(self):
+        # user_id -> List[MemoryProject]
+        self._storage: Dict[str, List[MemoryProject]] = {}
+        logger.info("MemoryProjectService initialized")
+
+    def register_generated_content(
+        self,
+        user_id: str,
+        content: str,
+        content_type: str,
+        source_request: str,
+        display_title: Optional[str] = None,
+        ttl_seconds: int = 300,
+    ) -> MemoryProject:
+        """
+        Register content generated in _handle_conversation().
+
+        This is the CRITICAL integration point that was missing.
+
+        Args:
+            user_id: User who generated the content
+            content: The generated text
+            content_type: "note", "email", "message", etc.
+            source_request: Original user request ("crea una nota ABA")
+            display_title: Optional title for display
+            ttl_seconds: Time to live (default 300s = 5 min)
+
+        Returns:
+            MemoryProject: The registered project
+        """
+        project = MemoryProject(
+            project_id=str(uuid.uuid4()),
+            user_id=user_id,
+            content_type=ContentType(content_type),
+            content=content,
+            status=ContentStatus.GENERATED,
+            created_at=datetime.now(),
+            last_accessed=datetime.now(),
+            ttl_seconds=ttl_seconds,
+            source_intent="conversation",
+            source_request=source_request,
+            display_title=display_title,
+        )
+
+        if user_id not in self._storage:
+            self._storage[user_id] = []
+
+        self._storage[user_id].append(project)
+        self._cleanup_expired(user_id)
+
+        logger.info(
+            f"Registered memory project: {project.project_id} "
+            f"({project.content_type.value}) for user {user_id}"
+        )
+
+        return project
+
+    def mark_as_displayed(self, project_id: str, user_id: str) -> bool:
+        """Mark project as displayed"""
+        projects = self._storage.get(user_id, [])
+        for project in projects:
+            if project.project_id == project_id:
+                project.status = ContentStatus.DISPLAYED
+                project.last_accessed = datetime.now()
+                logger.info(f"Marked project {project_id} as displayed")
+                return True
+        return False
+
+    def get_memory_bridge(self, user_id: str) -> MemoryBridge:
+        """
+        Get memory bridge for UnifiedContext injection.
+
+        This is injected into build_unified_context() and then into LLM prompts.
+        Helps the LLM classify intents correctly.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            MemoryBridge: Context about active projects
+        """
+        self._cleanup_expired(user_id)
+        projects = self._storage.get(user_id, [])
+
+        # Only include non-archived projects
+        active = [p for p in projects if p.status != ContentStatus.ARCHIVED]
+
+        return MemoryBridge(active_projects=active)
+
+    def _cleanup_expired(self, user_id: str):
+        """Remove expired projects (TTL exceeded)"""
+        if user_id not in self._storage:
+            return
+
+        active_projects = []
+        archived_count = 0
+
+        for project in self._storage[user_id]:
+            if project.is_expired():
+                archived_count += 1
+            else:
+                active_projects.append(project)
+
+        self._storage[user_id] = active_projects
+
+        if archived_count > 0:
+            logger.info(f"Cleaned up {archived_count} expired projects for user {user_id}")
+
+    def clear_user_memory(self, user_id: str):
+        """Clear all memory for a user (for testing or manual reset)"""
+        if user_id in self._storage:
+            count = len(self._storage[user_id])
+            del self._storage[user_id]
+            logger.info(f"Cleared {count} projects for user {user_id}")
+
+
+# Singleton instance (same pattern as pending_event_service)
+memory_project_service = MemoryProjectService()
+```
+
+================================================================================
+                    MODIFICACIONES A ARCHIVOS EXISTENTES
+================================================================================
+
+IMPORTANTE: NO modificar código que funciona, solo AGREGAR nuevas funcionalidades.
+
+================================================================================
+                      FLUJO ENTRE MODELOS (CRÍTICO)
+================================================================================
+
+El contexto de memoria DEBE propagarse a través de TODOS los modelos:
+
+FLUJO COMPLETO:
+---------------
+
+Request #1: "Crea una nota ABA"
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. build_unified_context(user_id, db)                                   │
+│    ├─ conversation_context (multi-turn history)                         │
+│    ├─ memory_bridge (VACÍO - no hay proyectos)                          │
+│    └─ oauth_status, devices, etc.                                       │
+│                                                                          │
+│ 2. AI Router (Gemini Flash)                                             │
+│    ├─ Recibe: UnifiedContext con memory_bridge vacío                    │
+│    ├─ Clasifica: SIMPLE                                                 │
+│    └─ Ruta: Intent Parser                                               │
+│                                                                          │
+│ 3. Intent Parser (Gemini Flash)                                         │
+│    ├─ Recibe: UnifiedContext con memory_bridge vacío                    │
+│    ├─ Clasifica: CONVERSATION (detecta "crea")                          │
+│    └─ Intent: ConversationIntent                                        │
+│                                                                          │
+│ 4. _handle_conversation (GPT-5.2 o Claude Opus 4.5)                     │
+│    ├─ Genera contenido: "Aquí está tu nota ABA: [contenido]"            │
+│    ├─ 🆕 REGISTRA en memory_project_service:                            │
+│    │   ├─ project_id: uuid                                              │
+│    │   ├─ content: [contenido generado]                                 │
+│    │   ├─ content_type: "note"                                          │
+│    │   ├─ status: GENERATED                                             │
+│    │   └─ display_title: "Nota ABA"                                     │
+│    └─ Guarda en conversation_history (como antes)                       │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Request #2: "muestra la nota en la pantalla"
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. build_unified_context(user_id, db)                                   │
+│    ├─ conversation_context (incluye request anterior)                   │
+│    ├─ 🆕 memory_bridge (1 proyecto GENERATED):                          │
+│    │   └─ "⚡ [note] Nota ABA - PENDING DISPLAY"                        │
+│    └─ oauth_status, devices, etc.                                       │
+│                                                                          │
+│ 2. AI Router (Gemini Flash)                                             │
+│    ├─ Recibe: UnifiedContext CON memory_bridge                          │
+│    ├─ Ve en prompt: "ACTIVE MEMORY PROJECTS: ⚡ [note] Nota ABA"        │
+│    ├─ Clasifica: SIMPLE (sigue siendo simple)                           │
+│    └─ Ruta: Intent Parser                                               │
+│                                                                          │
+│ 3. Intent Parser (Gemini Flash) ← CRÍTICO                               │
+│    ├─ Recibe: UnifiedContext CON memory_bridge                          │
+│    ├─ Ve en prompt: "ACTIVE MEMORY PROJECTS: ⚡ [note] Nota ABA"        │
+│    ├─ Ve reglas memory-aware:                                           │
+│    │   "If 'muestra la nota' AND [generated] note → DISPLAY_CONTENT"    │
+│    ├─ Clasifica: DISPLAY_CONTENT (NO DOC_QUERY) ✅                      │
+│    └─ Intent: DisplayContentIntent                                      │
+│                                                                          │
+│ 4. _handle_display_content                                              │
+│    ├─ Consulta memory_bridge.get_latest_generated()                     │
+│    ├─ Encuentra: MemoryProject con contenido                            │
+│    ├─ Usa Scene Graph (text_block component)                            │
+│    ├─ Marca como DISPLAYED                                              │
+│    └─ Retorna SceneGraph con contenido embebido                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+PUNTOS CRÍTICOS DE INYECCIÓN:
+------------------------------
+
+1. app/ai/context.py - build_unified_context()
+   └─ Crea memory_bridge ANTES de llamar a cualquier modelo
+
+2. app/ai/router/orchestrator.py - analyze_request()
+   └─ Inyecta memory_bridge.to_context_string() en prompt de Gemini Router
+
+3. app/ai/intent/parser.py - parse()
+   └─ Inyecta memory_bridge.to_context_string() en prompt de Gemini Parser
+
+4. app/services/intent_service.py - _handle_conversation()
+   └─ REGISTRA en memory_project_service después de generar
+
+5. app/services/intent_service.py - _handle_display_content()
+   └─ CONSULTA memory_project_service antes de Scene Graph
+
+VERIFICACIÓN:
+-------------
+Para cada modelo, verificar que el prompt incluya:
+
+```
+ACTIVE MEMORY PROJECTS:
+⚡ [note] Nota ABA
+  ⚠️ PENDING DISPLAY - User may reference this content
+```
+
+Si el modelo NO ve esto, el contexto no se está propagando correctamente.
+
+MODIFICACIÓN 1: app/ai/context.py
+----------------------------------
+UBICACIÓN: Línea ~319 (dentro de UnifiedContext dataclass)
+ACCIÓN: AGREGAR campo nuevo (NO modificar existentes)
+
+```python
+# EXISTING CODE (NO TOCAR):
+conversation_context: Optional[ConversationContext] = None
+
+# NEW CODE (AGREGAR DESPUÉS):
+# Sprint 4.1.1: Memory bridge for generated content tracking
+memory_bridge: Optional[MemoryBridge] = None
+```
+
+UBICACIÓN: Línea ~1 (imports al inicio del archivo)
+ACCIÓN: AGREGAR import
+
+```python
+# EXISTING IMPORTS (NO TOCAR)
+from app.ai.intent.schemas import Intent
+# ... otros imports ...
+
+# NEW IMPORT (AGREGAR):
+from app.ai.memory.schemas import MemoryBridge
+from app.ai.memory.service import memory_project_service
+```
+
+UBICACIÓN: Línea ~450 (dentro de build_unified_context, después de conversation_context)
+ACCIÓN: AGREGAR inyección de memory bridge
+
+```python
+# EXISTING CODE (NO TOCAR):
+conv_context = conversation_context_service.get_context(str(user_id))
+
+# NEW CODE (AGREGAR DESPUÉS):
+# Sprint 4.1.1: Inject memory bridge for content-aware intent classification
+memory_bridge = memory_project_service.get_memory_bridge(str(user_id))
+
+# EXISTING CODE (NO TOCAR):
+context = UnifiedContext(
+    user=user_context,
+    devices=devices_context,
+    oauth_status=oauth_status,
+    conversation_context=conv_context,
+    # NEW: AGREGAR ESTE CAMPO
+    memory_bridge=memory_bridge,
+)
+```
+
+MODIFICACIÓN 2: app/services/intent_service.py
+-----------------------------------------------
+UBICACIÓN: Línea ~1 (imports)
+ACCIÓN: AGREGAR import
+
+```python
+# EXISTING IMPORTS (NO TOCAR)
+from app.services.conversation_context_service import conversation_context_service
+# ... otros imports ...
+
+# NEW IMPORTS (AGREGAR):
+from app.ai.memory.service import memory_project_service
+from app.ai.memory.schemas import ContentType
+```
+
+UBICACIÓN: Línea ~1551 (dentro de _handle_conversation, DESPUÉS de generar el mensaje)
+ACCIÓN: AGREGAR registro de contenido generado
+
+```python
+# EXISTING CODE (generar mensaje con LLM - NO TOCAR):
+message = response.get("message", "")
+
+# NEW CODE (AGREGAR DESPUÉS, ANTES de conversation_context_service.add_conversation_turn):
+# Sprint 4.1.1: Register generated content for display
+# Detect if this is content generation (vs simple conversation)
+is_content_generation = any(
+    keyword in original_text.lower()
+    for keyword in ["crea", "genera", "escribe", "create", "generate", "write", "draft"]
+)
+
+if is_content_generation and len(message) > 100:  # Substantial content
+    # Detect content type from request
+    content_type = "note"  # default
+    if any(word in original_text.lower() for word in ["email", "correo"]):
+        content_type = "email"
+    elif any(word in original_text.lower() for word in ["mensaje", "message"]):
+        content_type = "message"
+    elif any(word in original_text.lower() for word in ["documento", "document"]):
+        content_type = "document"
+    elif any(word in original_text.lower() for word in ["resumen", "summary"]):
+        content_type = "summary"
+    elif any(word in original_text.lower() for word in ["script", "guion"]):
+        content_type = "script"
+    elif any(word in original_text.lower() for word in ["template", "plantilla"]):
+        content_type = "template"
+
+    # Extract title from request (simple heuristic)
+    display_title = None
+    if "nota" in original_text.lower():
+        # Extract words after "nota" as title
+        parts = original_text.lower().split("nota")
+        if len(parts) > 1:
+            title_part = parts[1].strip().split()[0:3]  # First 3 words
+            display_title = "Nota " + " ".join(title_part).title()
+
+    # Register the generated content
+    memory_project = memory_project_service.register_generated_content(
+        user_id=str(user_id),
+        content=message,
+        content_type=content_type,
+        source_request=original_text,
+        display_title=display_title,
+        ttl_seconds=300,
+    )
+
+    logger.info(f"Registered memory project: {memory_project.project_id}")
+
+# EXISTING CODE (conversation history - NO TOCAR):
+conversation_context_service.add_conversation_turn(
+    user_id=str(user_id),
+    user_message=original_text,
+    assistant_response=message,
+    intent_type="conversation",
+)
+```
+
+UBICACIÓN: Línea ~1594 (dentro de _handle_display_content o crear si no existe)
+ACCIÓN: AGREGAR uso de memoria para display
+
+NOTA: Si _handle_display_content NO existe, créalo siguiendo este template.
+Si ya existe, MODIFICA solo para agregar memoria al inicio.
+
+```python
+async def _handle_display_content(
+    self,
+    request_id: str,
+    intent: Any,  # DisplayContentIntent o DeviceCommand
+    user_id: UUID,
+    devices: List[Device],
+    start_time: float,
+    db: Session,
+) -> IntentResult:
+    """
+    Handle DISPLAY_CONTENT intent using Scene Graph.
+
+    Sprint 4.1.1: Now checks memory_project_service first for generated content.
+    """
+    import time
+
+    # Sprint 4.1.1: Check if there's generated content to display
+    memory_bridge = memory_project_service.get_memory_bridge(str(user_id))
+
+    if memory_bridge.has_recent_generated_content():
+        latest = memory_bridge.get_latest_generated()
+
+        logger.info(
+            f"Displaying generated content from memory: "
+            f"{latest.project_id} ({latest.content_type.value})"
+        )
+
+        # Use Scene Graph with text_block component to display
+        from app.ai.scene.service import SceneService
+        from app.ai.scene.schemas import (
+            SceneGraph,
+            LayoutSpec,
+            LayoutIntent,
+            LayoutEngine,
+            SceneComponent,
+            ComponentPosition,
+            ComponentPriority,
+            SceneMetadata,
+        )
+
+        # Create scene with text_block component
+        scene = SceneGraph(
+            scene_id=str(uuid.uuid4()),
+            version="1.1",
+            target_devices=[str(d.id) for d in devices if d.is_online][:1],
+            layout=LayoutSpec(
+                intent=LayoutIntent.FULLSCREEN,
+                engine=LayoutEngine.FLEX,
+                direction="column",
+            ),
+            components=[
+                SceneComponent(
+                    id="generated_content",
+                    type="text_block",
+                    priority=ComponentPriority.PRIMARY,
+                    position=ComponentPosition(flex=1),
+                    props={
+                        "content": latest.content,
+                        "title": latest.display_title or "Generated Content",
+                        "alignment": "left",
+                    },
+                    data={
+                        "is_placeholder": False,
+                        "content": latest.content,
+                    },
+                )
+            ],
+            metadata=SceneMetadata(
+                created_at=datetime.now().isoformat(),
+                ttl_seconds=3600,
+                user_request=intent.original_text if hasattr(intent, 'original_text') else "Display content",
+                generated_by="memory_project_service",
+            ),
+        )
+
+        # Mark as displayed
+        memory_project_service.mark_as_displayed(latest.project_id, str(user_id))
+
+        processing_time = (time.time() - start_time) * 1000
+
+        return IntentResult(
+            success=True,
+            intent_type=IntentResultType.DISPLAY_CONTENT,
+            confidence=0.95,
+            action="display_scene",
+            parameters={"scene_graph": scene.model_dump()},
+            message=f"Displaying generated {latest.content_type.value}",
+            processing_time_ms=processing_time,
+            request_id=request_id,
+        )
+
+    # EXISTING CODE: Si no hay contenido generado, usar Scene Graph normal
+    # (código existente de _handle_display_content si existe, o default scene)
+    # NO MODIFICAR ESTE CÓDIGO
+```
+
+MODIFICACIÓN 3A: app/ai/prompts/base_prompt.py (PREFERIDO - DRY)
+-----------------------------------------------------------------
+CRÍTICO: Esta es la forma MÁS EFICIENTE de inyectar memoria en TODOS los modelos.
+base_prompt.py ya construye el contexto base para Router, Executor, Reasoner y Parser.
+
+UBICACIÓN: Línea ~96 (al final de build_base_system_prompt, ANTES del return)
+ACCIÓN: AGREGAR sección de memoria activa
+
+```python
+# EXISTING CODE (NO TOCAR):
+AVAILABLE ACTIONS:
+  {actions_section}
+
+# NEW CODE (AGREGAR ANTES DEL RETURN):
+"""
+
+    # Sprint 4.1.1: Inject active memory projects
+    if hasattr(context, 'memory_bridge') and context.memory_bridge:
+        memory_context = context.memory_bridge.to_context_string()
+        if memory_context:
+            prompt += f"\n\n{memory_context}"
+
+    return prompt
+
+# EXISTING CODE (el return ya está arriba)
+```
+
+EXPLICACIÓN:
+------------
+Al agregar memoria en build_base_system_prompt(), AUTOMÁTICAMENTE se inyecta en:
+- build_router_prompt() (línea ~122) - usa build_base_system_prompt()
+- build_executor_prompt() (línea ~XXX) - usa build_base_system_prompt()
+- build_reasoner_prompt() (línea ~XXX) - usa build_base_system_prompt()
+- build_intent_prompt() (línea ~XXX) - usa build_base_system_prompt()
+
+Esto es DRY - una sola modificación beneficia a TODOS los modelos.
+
+MODIFICACIÓN 3B: app/ai/router/orchestrator.py (ALTERNATIVO)
+-------------------------------------------------------------
+Si base_prompt.py NO se usa en orchestrator, agregar aquí también:
+
+UBICACIÓN: Línea ~164 (dentro de analyze_request, donde se inyecta context)
+ACCIÓN: AGREGAR inyección de memory context en prompts
+
+```python
+# EXISTING CODE (NO TOCAR):
+if context:
+    context_str = f"\n\nContext:\n{json.dumps(context, indent=2)}"
+
+# NEW CODE (AGREGAR DESPUÉS):
+# Sprint 4.1.1: Inject memory bridge context for ALL models
+# This ensures Gemini (router), Gemini (parser), GPT, and Claude
+# ALL see active memory projects, not just on intent changes
+if hasattr(context, 'memory_bridge') and context.memory_bridge:
+    memory_context = context.memory_bridge.to_context_string()
+    if memory_context:
+        context_str += f"\n\n{memory_context}"
+        logger.debug(f"Injected memory context: {memory_context}")
+```
+
+VERIFICACIÓN DE TODOS LOS PROMPTS:
+-----------------------------------
+
+La carpeta app/ai/prompts/ tiene 9 archivos. Verificar dónde se usa UnifiedContext:
+
+✅ base_prompt.py (CRÍTICO - MODIFICAR)
+   - build_base_system_prompt(context) ← AGREGAR memoria aquí
+   - Este se usa en todos los otros prompts
+   - Una modificación beneficia a TODOS
+
+✅ router_prompts.py
+   - Usa base_prompt.py → heredará memoria automáticamente
+   - NO modificar (DRY)
+
+✅ execution_prompts.py
+   - Usa base_prompt.py → heredará memoria automáticamente
+   - NO modificar (DRY)
+
+✅ intent_prompts.py
+   - MODIFICAR reglas (agregar MEMORY-AWARE CLASSIFICATION)
+   - NO modificar build functions (ya heredan de base_prompt.py)
+
+⚠️ assistant_prompts.py
+   - VERIFICAR si usa UnifiedContext
+   - Si usa base_prompt.py → heredará automáticamente
+   - Si NO, agregar inyección manual
+
+⚠️ scene_prompts.py
+   - VERIFICAR si usa UnifiedContext
+   - Probablemente NO necesita memoria (solo layouts)
+
+⚠️ doc_prompts.py
+   - VERIFICAR si usa UnifiedContext
+   - Probablemente necesita memoria (para distinguir docs generados vs Google Docs)
+
+⚠️ calendar_search_prompts.py
+   - VERIFICAR si usa UnifiedContext
+   - Probablemente NO necesita memoria (solo búsqueda de eventos)
+
+REGLA GENERAL:
+--------------
+Si un prompt usa build_base_system_prompt() → heredará memoria automáticamente
+Si un prompt NO usa base_prompt.py → agregar inyección manual
+
+VERIFICACIÓN DE app/ai/intent/parser.py:
+-----------------------------------------
+
+UBICACIÓN: Buscar donde se llama parse() o parse_intent()
+ACCIÓN: VERIFICAR que recibe context con memory_bridge
+
+```python
+# DEBE SER ASÍ (verificar):
+intent = await self.parser.parse(
+    text=original_text,
+    context=unified_context,  # ← DEBE incluir memory_bridge
+)
+
+# NO así (sin contexto):
+intent = await self.parser.parse(text=original_text)  # ❌ INCORRECTO
+```
+
+UBICACIÓN: Dentro de IntentParser.parse() donde construye el prompt
+ACCIÓN: VERIFICAR si usa build_base_system_prompt() o build_intent_prompt()
+
+Si USA base_prompt:
+```python
+# Ya heredará memoria, NO agregar nada
+from app.ai.prompts.base_prompt import build_intent_prompt
+prompt = build_intent_prompt(context, user_text)
+# ↑ Ya incluye memoria automáticamente
+```
+
+Si NO USA base_prompt:
+```python
+# AGREGAR inyección manual:
+# Sprint 4.1.1: Inject memory bridge for intent classification
+if hasattr(context, 'memory_bridge') and context.memory_bridge:
+    memory_context_str = context.memory_bridge.to_context_string()
+    if memory_context_str:
+        prompt += f"\n\n{memory_context_str}"
+        logger.debug("Intent parser received memory context")
+```
+
+MODIFICACIÓN 4: app/ai/prompts/intent_prompts.py
+-------------------------------------------------
+UBICACIÓN: Línea ~165 (después de reglas DOC_QUERY vs CONVERSATION)
+ACCIÓN: AGREGAR reglas memory-aware
+
+```python
+# EXISTING RULES (NO TOCAR)
+# ... reglas de DOC_QUERY ...
+
+# NEW RULES (AGREGAR):
+"""
+MEMORY-AWARE INTENT CLASSIFICATION:
+------------------------------------
+
+When ACTIVE MEMORY PROJECTS are present in context:
+
+1. If user says "muestra la nota" AND there's [generated] note project:
+   → Intent: DISPLAY_CONTENT (not DOC_QUERY)
+   → Reason: User is referencing recently generated content
+
+2. If user says "show the email" AND there's [generated] email project:
+   → Intent: DISPLAY_CONTENT (not DOC_QUERY)
+   → Reason: User wants to display AI-generated content
+
+3. If user says "ponlo en la pantalla" with active memory project:
+   → Intent: DISPLAY_CONTENT
+   → Reason: "it" refers to generated content
+
+4. DOC_QUERY requires EXTERNAL document reference:
+   - "muestra el documento de Google Drive" → DOC_QUERY (external)
+   - "abre mi documento de ayer" → DOC_QUERY (external)
+   - Must explicitly reference Google Docs, Drive, or external storage
+
+PRIORITY: Memory projects take precedence over external document search.
+"""
+```
+
+================================================================================
+                              TESTING STRATEGY
+================================================================================
+
+TESTS A CREAR (siguiendo patrón existente):
+--------------------------------------------
+
+1. tests/ai/memory/test_schemas.py
+   - Test MemoryProject creation
+   - Test ContentStatus and ContentType enums
+   - Test MemoryBridge.to_context_string()
+   - Test MemoryProject.is_expired()
+
+2. tests/ai/memory/test_service.py
+   - Test register_generated_content()
+   - Test get_memory_bridge()
+   - Test TTL cleanup (_cleanup_expired)
+   - Test mark_as_displayed()
+
+3. tests/services/test_intent_service_memory.py
+   - Test _handle_conversation() registers content
+   - Test _handle_display_content() uses memory
+   - Test flow: generate → display
+
+4. tests/ai/test_context_memory_bridge.py
+   - Test build_unified_context() includes memory_bridge
+   - Test memory context injection in prompts
+
+VALIDACIÓN:
+-----------
+- Todos los 679 tests existentes deben seguir pasando
+- Los nuevos tests deben cubrir el flujo completo
+- NO romper funcionalidad existente
+
+================================================================================
+                           ORDEN DE IMPLEMENTACIÓN
+================================================================================
+
+FASE 1: Crear módulo base (sin integración)
+--------------------------------------------
+1. Crear app/ai/memory/__init__.py
+2. Crear app/ai/memory/schemas.py
+3. Crear app/ai/memory/service.py
+4. Crear tests/ai/memory/test_schemas.py
+5. Crear tests/ai/memory/test_service.py
+6. Verificar: Tests del módulo aislado pasan
+
+FASE 2: Integrar con UnifiedContext
+------------------------------------
+7. Modificar app/ai/context.py (agregar campo memory_bridge)
+8. Modificar app/ai/context.py (inyectar en build_unified_context)
+9. Crear tests/ai/test_context_memory_bridge.py
+10. Verificar: Tests de contexto pasan
+
+FASE 3: Integrar con IntentService
+-----------------------------------
+11. Modificar app/services/intent_service.py (_handle_conversation)
+12. Modificar app/services/intent_service.py (_handle_display_content)
+13. Crear tests/services/test_intent_service_memory.py
+14. Verificar: Tests de integración pasan
+
+FASE 4: Integrar con prompts
+-----------------------------
+15. Modificar app/ai/router/orchestrator.py (inyectar memoria en prompts)
+16. Modificar app/ai/prompts/intent_prompts.py (reglas memory-aware)
+17. Verificar: Intent classification funciona correctamente
+
+FASE 5: Validación final
+-------------------------
+18. Ejecutar TODOS los 679 tests existentes
+19. Verificar que ninguno se rompió
+20. Ejecutar prueba end-to-end:
+    - "Crea una nota ABA" → genera y registra
+    - "muestra la nota en la pantalla" → detecta memoria y muestra
+
+================================================================================
+                              RESTRICCIONES
+================================================================================
+
+CRITICAL - NO HACER:
+--------------------
+❌ NO modificar conversation_context_service (ya funciona, es para otro propósito)
+❌ NO modificar pending_event_service (es para eventos, no para contenido generado)
+❌ NO duplicar llamadas a LLMs (usar providers existentes)
+❌ NO modificar Scene Graph service (ya funciona, solo usar)
+❌ NO romper tests existentes (679 tests deben pasar)
+❌ NO crear nuevos endpoints REST (esto es backend-only)
+❌ NO modificar WebSocket (no es necesario para esta feature)
+
+MUST DO:
+--------
+✅ Seguir patrón TTL de pending_event_service (in-memory, 300s)
+✅ Seguir patrón singleton de conversation_context_service
+✅ Usar Scene Graph existente para display (text_block component)
+✅ Inyectar contexto en UnifiedContext (no crear sistema paralelo)
+✅ Agregar logging en cada operación importante
+✅ Escribir tests para cada componente nuevo
+✅ Preservar funcionalidad existente al 100%
+
+================================================================================
+                                 CHECKLIST
+================================================================================
+
+Antes de marcar como completo, verificar:
+
+MÓDULO NUEVO:
+□ Módulo app/ai/memory/ creado con __init__.py, schemas.py y service.py
+□ MemoryProject, ContentStatus, ContentType definidos correctamente
+□ MemoryBridge con to_context_string() implementado
+□ memory_project_service singleton creado
+
+INTEGRACIÓN CON UNIFIED CONTEXT:
+□ UnifiedContext tiene campo memory_bridge
+□ build_unified_context() inyecta memory bridge correctamente
+□ memory_bridge se crea ANTES de llamar a cualquier modelo
+
+INTEGRACIÓN CON PROMPTS (CRÍTICO):
+□ base_prompt.py inyecta memoria en build_base_system_prompt()
+□ VERIFICAR que router_prompts.py usa base_prompt.py
+□ VERIFICAR que execution_prompts.py usa base_prompt.py
+□ VERIFICAR que intent_prompts.py usa base_prompt.py
+□ intent_prompts.py tiene reglas memory-aware AGREGADAS (no reemplazadas)
+□ assistant_prompts.py verificado (usa base_prompt o inyección manual)
+□ doc_prompts.py verificado (si usa docs generados, necesita memoria)
+
+INTEGRACIÓN CON INTENT SERVICE:
+□ _handle_conversation() registra contenido generado
+□ Detección de content_type funciona (note, email, message, etc.)
+□ Extracción de display_title funciona
+□ _handle_display_content() existe o fue creado
+□ _handle_display_content() consulta memoria PRIMERO
+□ _handle_display_content() usa Scene Graph con text_block
+□ _handle_display_content() marca como DISPLAYED después de mostrar
+
+PROPAGACIÓN ENTRE MODELOS:
+□ AI Router (Gemini Flash) ve memory_bridge
+□ Intent Parser (Gemini Flash) ve memory_bridge
+□ GPT-5.2 (Conversation) ve memory_bridge
+□ Claude Opus 4.5 (Reasoning) ve memory_bridge
+□ Logging confirma: "Injected memory context" en cada modelo
+
+TESTS:
+□ tests/ai/memory/test_schemas.py creado y pasa
+□ tests/ai/memory/test_service.py creado y pasa
+□ tests/services/test_intent_service_memory.py creado y pasa
+□ tests/ai/test_context_memory_bridge.py creado y pasa
+□ Todos los 679 tests existentes siguen pasando
+
+FLUJO END-TO-END:
+□ Request #1: "crea una nota ABA"
+  □ Sistema: genera contenido con LLM
+  □ Sistema: registra en memory_project_service
+  □ Sistema: guarda en conversation_history
+  □ Response: contenido generado
+
+□ Request #2: "muestra la nota en la pantalla"
+  □ build_unified_context() incluye memory_bridge con proyecto
+  □ AI Router ve: "ACTIVE MEMORY PROJECTS: ⚡ [note] Nota ABA"
+  □ Intent Parser ve: "ACTIVE MEMORY PROJECTS: ⚡ [note] Nota ABA"
+  □ Intent Parser clasifica: DISPLAY_CONTENT (NO DOC_QUERY)
+  □ _handle_display_content() encuentra proyecto en memoria
+  □ Scene Graph creado con text_block component
+  □ Proyecto marcado como DISPLAYED
+  □ Response: SceneGraph con contenido embebido
+
+PRINCIPIOS DRY/SOLID:
+□ No hay código duplicado (una modificación en base_prompt beneficia a todos)
+□ No se modificó conversation_context_service (mantiene su responsabilidad)
+□ No se modificó pending_event_service (mantiene su responsabilidad)
+□ No se duplicaron llamadas a LLMs (usa providers existentes)
+□ No se duplicó lógica de Scene Graph (usa SceneService existente)
+□ Cada clase tiene una única responsabilidad
+
+LOGGING Y DEBUG:
+□ memory_project_service logea registros y cleanup
+□ build_unified_context() logea creación de memory_bridge
+□ base_prompt.py logea inyección de memoria
+□ _handle_conversation() logea registro de proyectos
+□ _handle_display_content() logea uso de memoria
+
+RESTRICCIONES:
+□ NO se modificó código que funciona
+□ NO se crearon endpoints REST nuevos
+□ NO se modificó WebSocket
+□ NO se rompió funcionalidad existente
+
+================================================================================
+                                    FIN
+================================================================================
+
+Este prompt proporciona TODO lo necesario para implementar el módulo Memory
+Projects correctamente, siguiendo principios DRY y SOLID, sin romper nada
+existente, y resolviendo el problema de los logs de forma limpia y escalable.
