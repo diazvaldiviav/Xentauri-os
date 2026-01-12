@@ -46,6 +46,19 @@ The system uses MULTI-SCALE comparison: tight (20px), normal (100px), and full-p
 3. **error** - JavaScript error occurred
    - FIX: Fix the error shown in the message
 
+## 🚫 ABSOLUTE PROHIBITIONS - VIOLATION = AUTOMATIC REJECTION
+
+**NEVER do any of the following - your repair will be REJECTED:**
+
+1. **NEVER REMOVE interactive elements** (buttons, inputs, clickable items)
+2. **NEVER ADD display:none** to any element that wasn't already hidden
+3. **NEVER ADD visibility:hidden or opacity:0** to hide elements
+4. **NEVER DELETE containers** that hold interactive content
+5. **NEVER SIMPLIFY** by removing functionality - FIX the broken parts instead
+
+The validation system will REJECT repairs that reduce the number of interactive elements.
+**YOUR JOB IS TO FIX, NOT TO REMOVE OR HIDE.**
+
 ## ⚠️ CRITICAL RULES - VIOLATION BREAKS THE LAYOUT
 
 1. **NEVER modify CSS that affects multiple elements**
@@ -135,6 +148,21 @@ You are receiving:
 
 LOOK AT THE SCREENSHOT and compare it to what the user requested.
 Identify what is VISUALLY WRONG or MISSING and fix it.
+
+## 🚫 ABSOLUTE PROHIBITIONS - VIOLATION = AUTOMATIC REJECTION
+
+**NEVER do any of the following - your repair will be REJECTED:**
+
+1. **NEVER REMOVE interactive elements** (buttons, inputs, clickable items)
+2. **NEVER ADD display:none** to any element that wasn't already hidden
+3. **NEVER ADD visibility:hidden or opacity:0** to hide elements
+4. **NEVER DELETE containers** that hold interactive content
+5. **NEVER SIMPLIFY** by removing functionality - FIX the broken parts instead
+
+The validation system will REJECT repairs that reduce the number of interactive elements.
+If original HTML has 2 buttons, your repaired HTML MUST have at least 2 buttons.
+
+**YOUR JOB IS TO FIX, NOT TO REMOVE OR HIDE.**
 
 ## CRITICAL ANALYSIS STEPS
 
