@@ -1758,9 +1758,9 @@ IMPORTANT INSTRUCTIONS:
             ActionSequenceResponse,
         )
 
-        # Sprint 9: All complex tasks now use Gemini Pro (for thinking mode)
+        # Sprint 9: All complex tasks now use Gemini 3 Flash (cost optimization)
         ai_provider = gemini_provider
-        model_name = settings.GEMINI_PRO_MODEL  # Pro model for thinking mode
+        model_name = settings.GEMINI_REASONING_MODEL  # Gemini 3 Flash for complex tasks
 
         # Determine task type from routing decision
         if routing_decision.complexity == TaskComplexity.COMPLEX_EXECUTION:
@@ -1802,7 +1802,7 @@ IMPORTANT INSTRUCTIONS:
         conversation_history = conversation_context_service.get_conversation_summary(str(user_id))
 
         # Build prompt and call AI
-        # Sprint 9: All complex tasks use Gemini with thinking mode
+        # Sprint 9: All complex tasks use Gemini 3 Flash
         if task_type == "execution":
             prompt = build_execution_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
             system_prompt = "You are a smart display execution assistant. Return valid JSON."
@@ -1810,13 +1810,11 @@ IMPORTANT INSTRUCTIONS:
             prompt = build_reasoner_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
             system_prompt = "You are a strategic advisor for smart home systems."
 
-        # Sprint 9: Use Gemini Pro with thinking mode for all complex tasks
+        # Sprint 9: Use Gemini 3 Flash for all complex tasks (no thinking mode)
         response = await ai_provider.generate(
             prompt=prompt,
             system_prompt=system_prompt,
-            model_override=settings.GEMINI_PRO_MODEL,
-            use_thinking=True,
-            thinking_level="HIGH",
+            model_override=settings.GEMINI_REASONING_MODEL,
         )
         processing_time = (time.time() - start_time) * 1000
         

@@ -1076,7 +1076,7 @@ class DirectFixer:
                 system_prompt=FLASH_ANALYZER_SYSTEM_PROMPT,
                 temperature=0.1,  # Very low for consistent analysis
                 max_tokens=2048,  # Diagnosis should be concise
-                # Uses default Flash model (no override needed)
+                model_override=settings.GEMINI_REASONING_MODEL,  # Gemini 3 Flash
             )
 
             if not flash_response.success:

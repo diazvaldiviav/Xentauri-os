@@ -34,15 +34,17 @@ SIMPLE (Gemini Flash handles):
 - Status queries: "Is the bedroom TV on?"
 - Casual conversation: "Hello", "Thanks"
 
-COMPLEX_EXECUTION (Route to OpenAI GPT):
+COMPLEX_EXECUTION (Route to Gemini 3 Flash):
 - Code generation: "Write a script to..."
 - API integrations: "Search Google for..."
 - Multi-step tools: "Calculate and then..."
+(Sprint 9: Migrated from OpenAI to Gemini for cost optimization)
 
-COMPLEX_REASONING (Route to Claude):
+COMPLEX_REASONING (Route to Gemini 3 Flash):
 - Planning: "Plan a movie night setup..."
 - Analysis: "Why might my TV keep turning off?"
 - Critical decisions: "What's the best automation strategy?"
+(Sprint 9: Migrated from Claude to Gemini for cost optimization)
 """
 
 import json
@@ -201,10 +203,11 @@ class AIRouter:
             )
             
             # Map provider string
+            # Sprint 9: All tasks now route to Gemini for cost optimization
             provider_map = {
                 "simple": "gemini",
-                "complex_execution": "openai",
-                "complex_reasoning": "anthropic",
+                "complex_execution": "gemini",  # Was openai, now Gemini 3 Flash
+                "complex_reasoning": "gemini",  # Was anthropic, now Gemini 3 Flash
             }
             target_provider = provider_map.get(complexity.value, "gemini")
             
