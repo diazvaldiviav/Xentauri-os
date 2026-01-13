@@ -2222,7 +2222,6 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
             # Generate content data with Gemini
             content_data = await scene_service.generate_content_data(
                 user_request=layout_description,
-                layout_type="interactive",
             )
 
             if content_data and settings.CUSTOM_LAYOUT_ENABLED:
