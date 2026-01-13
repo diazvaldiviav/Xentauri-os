@@ -694,14 +694,50 @@ def _build_phase_summary(sandbox_result) -> str:
 def _build_css_diagnosis(html: str, interaction_results: list, threshold: float = 0.02) -> str:
     """
     Sprint 6.5: Build detailed CSS diagnosis for each failing element.
-    
+    Sprint 11: Also includes WORKING elements so Flash can compare.
+
     This is the critical section that tells Sonnet EXACTLY what CSS to fix.
     """
     lines = []
+
+    # Sprint 11: First show elements that WORK (for comparison)
+    working_elements = [ir for ir in interaction_results if ir.get_repair_context(threshold=threshold)["failure_type"] == "passed"]
+    failing_elements = [ir for ir in interaction_results if ir.get_repair_context(threshold=threshold)["failure_type"] != "passed"]
+
+    # Summary for Flash
+    total = len(interaction_results)
+    working = len(working_elements)
+    failing = len(failing_elements)
+
+    if working > 0 and failing > 0:
+        lines.append(f"## ⚠️ PARTIAL SUCCESS: {working}/{total} elements work, {failing}/{total} fail\n")
+        lines.append("**CRITICAL**: Compare WORKING vs FAILING elements to find the pattern!\n")
+
+        # Show working elements first
+        lines.append("## ✅ WORKING ELEMENTS (use these as reference)\n")
+        for ir in working_elements[:3]:  # Limit to 3
+            ctx = ir.get_repair_context(threshold=threshold)
+            selector = ctx["selector"]
+            elem = ctx.get("element", {})
+            tag = elem.get("tag", "div")
+            text = elem.get("text_content", "")[:30] if elem.get("text_content") else ""
+            key_attrs = elem.get("key_attributes", {})
+            class_attr = key_attrs.get("class", "")
+            element_id = key_attrs.get("id", "")
+
+            lines.append(f"### ✅ `{selector}`")
+            lines.append(f"- Tag: `<{tag}>`, Classes: `{class_attr}`, ID: `{element_id}`")
+            if text:
+                lines.append(f"- Text: \"{text}\"")
+            lines.append(f"- Pixel Change: {ctx['pixel_diff_pct']} ✓")
+            lines.append("")
+
+        lines.append("---\n")
+
     lines.append("## 🔧 CSS DIAGNOSIS FOR FAILING ELEMENTS\n")
-    
+
     failing_count = 0
-    
+
     for ir in interaction_results:
         ctx = ir.get_repair_context(threshold=threshold)
         
