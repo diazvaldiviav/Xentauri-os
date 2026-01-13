@@ -1884,8 +1884,15 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
         
         # Handle execution tasks (parse and execute JSON)
         try:
+            # Sprint 9: Debug logging for Gemini response
+            logger.info(f"[{request_id}] Gemini raw response: {response.content[:1000] if response.content else 'None'}")
+
             action_response = parse_action_response(response.content, strict=False)
-            
+
+            # Sprint 9: Debug logging for parsed action
+            if hasattr(action_response, 'action_name'):
+                logger.info(f"[{request_id}] Parsed action: {action_response.action_name}, params: {getattr(action_response, 'parameters', {})}")
+
             if isinstance(action_response, ClarificationResponse):
                 # Sprint 4.2.9: Save GPT's clarification to conversation context
                 conversation_context_service.add_conversation_turn(
@@ -2071,12 +2078,27 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
         """Execute content display actions."""
         from app.services.content_token import content_token_service
         from urllib.parse import quote
-        
+
         if action == "clear_content":
             result = await command_service.clear_content(device.id)
         else:
+            # Sprint 9: Check for custom_layout content type → route to Scene Graph
+            content_type = (parameters or {}).get("content_type", "url")
+            logger.info(f"[{request_id}] _execute_content_action: action={action}, content_type={content_type}, params={parameters}")
+
+            if content_type == "custom_layout":
+                # Route to Scene Graph for custom HTML generation (games, quizzes, etc.)
+                return await self._execute_custom_layout_action(
+                    request_id=request_id,
+                    device=device,
+                    user_id=user_id,
+                    parameters=parameters,
+                    confidence=confidence,
+                    start_time=start_time,
+                )
+
             content_token = content_token_service.generate(user_id, content_type="calendar")
-            
+
             if action == "show_calendar":
                 url = f"/cloud/calendar?token={content_token}"
                 if parameters and "date" in parameters:
@@ -2103,7 +2125,7 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
             else:
                 url = f"/cloud/calendar?token={content_token}"
                 content_type = "url"
-            
+
             result = await command_service.show_content(
                 device_id=device.id,
                 url=url,
@@ -2142,7 +2164,157 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
             processing_time_ms=processing_time,
             request_id=request_id,
         )
-    
+
+    async def _execute_custom_layout_action(
+        self,
+        request_id: str,
+        device: Device,
+        user_id: UUID,
+        parameters: Optional[Dict],
+        confidence: float,
+        start_time: float,
+    ) -> IntentResult:
+        """
+        Execute custom layout generation via Scene Graph.
+
+        Sprint 9: Routes content_type="custom_layout" requests to the Scene Graph
+        system for HTML generation by Opus 4.5.
+
+        Args:
+            request_id: Unique request identifier
+            device: Target device for display
+            user_id: User's UUID
+            parameters: Must contain 'layout_description' with the user's request
+            confidence: AI confidence score
+            start_time: Start time for latency tracking
+        """
+        from app.ai.scene.custom_layout import custom_layout_service
+        from app.ai.scene import scene_service
+
+        layout_description = (parameters or {}).get("layout_description", "")
+
+        if not layout_description:
+            processing_time = (time.time() - start_time) * 1000
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.DEVICE_COMMAND,
+                confidence=confidence,
+                device=device,
+                action="show_content",
+                parameters=parameters,
+                command_sent=False,
+                message="Missing layout_description for custom layout",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+
+        logger.info(f"[{request_id}] Routing to Scene Graph for custom layout: {layout_description[:100]}...")
+
+        try:
+            # Send loading indicator to device
+            await connection_manager.send_command(
+                device_id=device.id,
+                command_type="loading_start",
+                parameters={"message": "Generando contenido...", "phase": 1},
+            )
+
+            # Generate content data with Gemini
+            content_data = await scene_service.generate_content_data(
+                user_request=layout_description,
+                layout_type="interactive",
+            )
+
+            if content_data and settings.CUSTOM_LAYOUT_ENABLED:
+                # Loading Phase 2
+                await connection_manager.send_command(
+                    device_id=device.id,
+                    command_type="loading_start",
+                    parameters={"message": "Diseñando experiencia...", "phase": 2},
+                )
+
+                # Generate HTML with visual validation
+                layout_result = await custom_layout_service.generate_and_validate_html_from_data(
+                    content_data=content_data,
+                    user_request=layout_description,
+                    layout_type=content_data.get("content_type"),
+                )
+
+                if layout_result.success and layout_result.html:
+                    custom_layout = layout_result.html
+                    scene_dict = {"scene_id": request_id, "direct_flow": True}
+
+                    # Send to device
+                    result = await command_service.display_scene(
+                        device_id=device.id,
+                        scene=scene_dict,
+                        custom_layout=custom_layout,
+                    )
+
+                    processing_time = (time.time() - start_time) * 1000
+
+                    ai_monitor.track_command(
+                        request_id=request_id,
+                        device_id=device.id,
+                        device_name=device.name,
+                        action="display_scene",
+                        command_id=result.command_id,
+                        success=result.success,
+                        error=result.error,
+                    )
+
+                    return IntentResult(
+                        success=result.success,
+                        intent_type=IntentResultType.DISPLAY_CONTENT,
+                        confidence=confidence,
+                        device=device,
+                        action="display_scene",
+                        parameters=parameters,
+                        command_sent=result.success,
+                        command_id=result.command_id if result.success else None,
+                        message=f"Displaying custom content on {device.name}",
+                        processing_time_ms=processing_time,
+                        request_id=request_id,
+                    )
+
+            # Fallback: Layout generation failed
+            processing_time = (time.time() - start_time) * 1000
+            error_msg = "Content generation failed"
+            if content_data is None:
+                error_msg = "Failed to generate content data"
+            elif 'layout_result' in dir() and layout_result:
+                error_msg = layout_result.error or "Unknown layout error"
+            logger.warning(f"[{request_id}] Custom layout failed: {error_msg}")
+
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.DEVICE_COMMAND,
+                confidence=confidence,
+                device=device,
+                action="show_content",
+                parameters=parameters,
+                command_sent=False,
+                message=f"Failed to generate custom layout: {error_msg}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+
+        except Exception as e:
+            processing_time = (time.time() - start_time) * 1000
+            logger.error(f"[{request_id}] Custom layout error: {e}", exc_info=True)
+
+            return IntentResult(
+                success=False,
+                intent_type=IntentResultType.DEVICE_COMMAND,
+                confidence=confidence,
+                device=device,
+                action="show_content",
+                parameters=parameters,
+                command_sent=False,
+                message=f"Error generating custom layout: {str(e)}",
+                processing_time_ms=processing_time,
+                request_id=request_id,
+            )
+
     async def _execute_device_command(
         self,
         request_id: str,
@@ -2153,7 +2325,7 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
         start_time: float,
     ) -> IntentResult:
         """Execute standard device commands."""
-        
+
         result = await command_service.send_command(
             device_id=device.id,
             command_type=action,
