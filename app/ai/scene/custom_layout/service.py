@@ -1073,28 +1073,29 @@ class CustomLayoutService:
             logger.info(f"Visual repair attempt {attempt + 1}/{max_repair_attempts}")
 
             # Sprint 7: Use vision repair if screenshot is available
-            # ALWAYS repair from ORIGINAL HTML to avoid accumulating errors in code
-            # Sprint 11: BUT use CURRENT validation results for diagnosis (sees updated state)
+            # Sprint 11: Opus builds INCREMENTALLY on its previous work
+            # - Cycle 1: Repairs Flash's HTML
+            # - Cycle 2+: Repairs its own previous output (accumulates fixes)
             # Sprint 8: Pass failed_attempts so fixer learns from previous failures
             screenshot = current_validation_result.page_screenshot or original_validation_result.page_screenshot
 
             if use_vision_repair and screenshot:
                 logger.info(
-                    f"Using vision-enhanced repair with screenshot "
-                    f"(cycle {attempt + 1}, current state: {current_validation_result.inputs_responsive}/{current_validation_result.inputs_tested})"
+                    f"Using vision-enhanced repair "
+                    f"(cycle {attempt + 1}, state: {current_validation_result.inputs_responsive}/{current_validation_result.inputs_tested})"
                 )
                 repaired_html = await direct_fixer.repair_with_vision(
-                    html=original_html,  # Always from original to avoid error accumulation
-                    sandbox_result=current_validation_result,  # Sprint 11: Use CURRENT validation
+                    html=original_html,  # Sprint 11: From previous cycle's output
+                    sandbox_result=current_validation_result,  # Current validation state
                     user_request=user_request,
                     screenshot=screenshot,
                     failed_attempts=failed_attempts,
                 )
             else:
-                # Fallback to text-only repair (Sonnet 4.5)
+                # Fallback to text-only repair
                 repaired_html = await direct_fixer.repair(
-                    html=original_html,  # Always from original
-                    sandbox_result=current_validation_result,  # Sprint 11: Use CURRENT validation
+                    html=original_html,  # Sprint 11: From previous cycle's output
+                    sandbox_result=current_validation_result,  # Current validation state
                     user_request=user_request,
                     failed_attempts=failed_attempts,
                 )
@@ -1180,11 +1181,13 @@ class CustomLayoutService:
                 key_changes_attempted=css_rules_tried,
             ))
 
-            # Sprint 11: Update current validation for next cycle
-            # Flash will now see the UPDATED state (which elements now work vs still fail)
+            # Sprint 11: Update for next cycle
+            # 1. Use NEW validation results for diagnosis (Flash sees current state)
+            # 2. Use REPAIRED HTML as base for next repair (Opus builds on previous fix)
             current_validation_result = repair_validation
+            original_html = repaired_html  # Sprint 11: Opus builds on its previous work
             logger.info(
-                f"Sprint 11: Next cycle will diagnose from updated state "
+                f"Sprint 11: Next cycle builds on Opus's HTML "
                 f"({repair_validation.inputs_responsive}/{repair_validation.inputs_tested} responsive)"
             )
 
