@@ -1065,26 +1065,36 @@ class CustomLayoutService:
         # Sprint 8: Track failed repair attempts to avoid repeating mistakes
         failed_attempts: list[FailedRepairAttempt] = []
 
+        # Sprint 11: Track current validation results for diagnosis
+        # This gets updated after each re-validation so Flash sees the CURRENT state
+        current_validation_result = validation_result
+
         for attempt in range(max_repair_attempts):
             logger.info(f"Visual repair attempt {attempt + 1}/{max_repair_attempts}")
 
             # Sprint 7: Use vision repair if screenshot is available
-            # ALWAYS repair from ORIGINAL HTML to avoid accumulating errors
+            # ALWAYS repair from ORIGINAL HTML to avoid accumulating errors in code
+            # Sprint 11: BUT use CURRENT validation results for diagnosis (sees updated state)
             # Sprint 8: Pass failed_attempts so fixer learns from previous failures
-            if use_vision_repair and original_validation_result.page_screenshot:
-                logger.info("Using vision-enhanced repair with screenshot")
+            screenshot = current_validation_result.page_screenshot or original_validation_result.page_screenshot
+
+            if use_vision_repair and screenshot:
+                logger.info(
+                    f"Using vision-enhanced repair with screenshot "
+                    f"(cycle {attempt + 1}, current state: {current_validation_result.inputs_responsive}/{current_validation_result.inputs_tested})"
+                )
                 repaired_html = await direct_fixer.repair_with_vision(
-                    html=original_html,
-                    sandbox_result=original_validation_result,
+                    html=original_html,  # Always from original to avoid error accumulation
+                    sandbox_result=current_validation_result,  # Sprint 11: Use CURRENT validation
                     user_request=user_request,
-                    screenshot=original_validation_result.page_screenshot,
+                    screenshot=screenshot,
                     failed_attempts=failed_attempts,
                 )
             else:
                 # Fallback to text-only repair (Sonnet 4.5)
                 repaired_html = await direct_fixer.repair(
-                    html=original_html,
-                    sandbox_result=original_validation_result,
+                    html=original_html,  # Always from original
+                    sandbox_result=current_validation_result,  # Sprint 11: Use CURRENT validation
                     user_request=user_request,
                     failed_attempts=failed_attempts,
                 )
@@ -1169,6 +1179,14 @@ class CustomLayoutService:
                 responsive_after=repair_validation.inputs_responsive,
                 key_changes_attempted=css_rules_tried,
             ))
+
+            # Sprint 11: Update current validation for next cycle
+            # Flash will now see the UPDATED state (which elements now work vs still fail)
+            current_validation_result = repair_validation
+            logger.info(
+                f"Sprint 11: Next cycle will diagnose from updated state "
+                f"({repair_validation.inputs_responsive}/{repair_validation.inputs_tested} responsive)"
+            )
 
         # All repair attempts failed - return best effort or fail
         logger.error(
