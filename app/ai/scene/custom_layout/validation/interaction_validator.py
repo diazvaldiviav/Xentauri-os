@@ -392,6 +392,9 @@ class InteractionValidator:
                 scene_after=after_scene,
                 responsive=responsive,
                 duration_ms=(time.time() - start_time) * 1000,
+                # Sprint 10: Save screenshots for vision-based repair
+                screenshot_before=before_screenshot.image_bytes,
+                screenshot_after=after_screenshot.image_bytes,
             )
 
         except asyncio.TimeoutError:
@@ -535,6 +538,9 @@ class InteractionValidator:
                 scene_after=after_scene,
                 responsive=responsive,
                 duration_ms=(time.time() - start_time) * 1000,
+                # Sprint 10: Save screenshots for vision-based repair
+                screenshot_before=before_screenshot.image_bytes,
+                screenshot_after=after_screenshot.image_bytes,
             )
 
         except asyncio.TimeoutError:

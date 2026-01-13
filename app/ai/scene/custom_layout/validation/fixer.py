@@ -178,141 +178,82 @@ No markdown, no explanations, no code blocks."""
 
 
 # ---------------------------------------------------------------------------
-# SPRINT 9: TWO-STEP PIPELINE - FLASH ANALYZER PROMPT
+# SPRINT 10: FLASH VISUAL VERIFIER PROMPT (with before/after analysis)
 # ---------------------------------------------------------------------------
 
-FLASH_ANALYZER_SYSTEM_PROMPT = """You are an HTML/CSS diagnostic specialist. Your job is to analyze
-validation failures and produce a PRECISE, LINE-BY-LINE diagnosis for the repair model.
+FLASH_ANALYZER_SYSTEM_PROMPT = """You are an HTML/CSS diagnostic VERIFIER with INTERACTION ANALYSIS.
 
-You may receive a SCREENSHOT of the rendered page - use it to visually identify elements that
-should change but don't when clicked.
+You receive:
+1. A CSS DIAGNOSIS already computed programmatically (100% accurate for CSS issues)
+2. MULTIPLE SCREENSHOTS:
+   - Image 0: Initial page state
+   - Image pairs (1-2, 3-4, etc.): BEFORE/AFTER clicking each failing element
 
-## YOUR OUTPUT FORMAT
+## YOUR PRIMARY ROLE
 
-For each failing element, provide:
-1. The EXACT line number(s) in the HTML where the problem is
-2. The EXACT CSS selector that needs modification
-3. The SPECIFIC property that's missing or wrong
-4. The CONCRETE fix needed (with actual values, not variables)
+Analyze the BEFORE/AFTER screenshot pairs to detect BEHAVIORAL issues:
+- Does clicking cause a MODAL/OVERLAY that blocks other elements?
+- Does a popup appear but never close?
+- Is there a visual change that blocks subsequent interactions?
+
+These are NOT CSS issues - they require JavaScript/behavioral fixes.
+
+## WHAT TO LOOK FOR
+
+1. **Modal Blocking Issue** (MOST COMMON):
+   - BEFORE: All buttons visible
+   - AFTER: A modal/result/feedback panel appears and COVERS other buttons
+   - FIX NEEDED: Add close button, auto-dismiss after X seconds, or click-outside-to-close
+
+2. **CSS Visual Feedback Issue**:
+   - Element clicked but no visible state change
+   - FIX: Add background-color change to .selected/.active state
+
+3. **Invisible Element Issue**:
+   - Element exists in HTML but not visible in screenshot
+   - FIX: CSS positioning, z-index, or transform issues
+
+## OUTPUT FORMAT
+
+```
+## BEHAVIORAL ISSUES (from before/after analysis)
+[Describe what happens when clicking - modals blocking, etc.]
+
+## CSS ISSUES (from programmatic diagnosis)
+[Confirm or adjust the CSS diagnosis]
+
+## FINAL DIAGNOSIS
+ISSUE 1: [type - modal_blocking / css_feedback / invisible]
+- Problem: [description]
+- Fix: [concrete fix - add close button / add background-color / fix z-index]
+```
+
+## SEMANTIC CONCORDANCE (Animation/Motion Validation)
+
+Compare the USER REQUEST with what you see in the SCREENSHOTS:
+
+1. If the request implies MOTION (orbit, rotate, spin, move, flow, animate):
+   - Check BEFORE vs AFTER screenshots - do elements change position?
+   - If request says "planets orbiting" but planets are static → ANIMATION ISSUE
+   - If request says "spinning wheel" but wheel doesn't rotate → ANIMATION ISSUE
+
+2. Report animation issues as:
+   ```
+   ISSUE: animation_missing
+   - Problem: User requested [X motion] but elements are static
+   - Fix: Add CSS @keyframes animation for [specific motion needed]
+   ```
+
+Note: Don't assume what animation should be - base it ONLY on what the user requested.
+If user wants "sun orbiting planet" (unusual), that's what should happen.
 
 ## CRITICAL RULES
 
-1. Be EXTREMELY SPECIFIC - line numbers, selectors, property names
-2. Use CONCRETE values (#4CAF50, rgba(0,255,0,0.3)) - NEVER var()
-3. Focus on background-color for visual feedback - it's MANDATORY for screenshot comparison
-4. If clicking an element produces no background-color change, that's THE bug
-5. If you see an image, correlate visual elements with the HTML/CSS code
-
-## OUTPUT STRUCTURE
-
-```
-ELEMENT 1: [selector]
-- Line: [exact line number]
-- Problem: [precise description]
-- Fix: Add/Change [property]: [concrete value]
-
-ELEMENT 2: [selector]
-- Line: [exact line number]
-- Problem: [precise description]
-- Fix: Add/Change [property]: [concrete value]
-```
-
-Be concise but complete. The repair model will use your diagnosis verbatim."""
-
-
-def build_flash_diagnosis_prompt(
-    html: str,
-    sandbox_result: "SandboxResult",
-    threshold: float = 0.02,
-    user_request: str = "",
-) -> str:
-    """
-    Sprint 9: Build prompt for Gemini 3 Flash to analyze validation failures.
-
-    Flash analyzes the HTML and sandbox_result to produce a structured diagnosis
-    that Gemini 3 Pro can follow precisely.
-
-    Args:
-        html: The HTML that failed validation
-        sandbox_result: Full validation result with interaction results
-        threshold: Pixel change threshold for failure detection
-        user_request: Original user request for context
-
-    Returns:
-        Prompt for Flash diagnosis
-    """
-    # Get failing elements info
-    failing_elements = []
-    for ir in sandbox_result.interaction_results:
-        ctx = ir.get_repair_context(threshold=threshold)
-        if ctx["failure_type"] != "passed":
-            failing_elements.append({
-                "selector": ctx["selector"],
-                "failure_type": ctx["failure_type"],
-                "pixel_diff_pct": ctx["pixel_diff_pct"],
-                "threshold": ctx["threshold"],
-                "element": ctx.get("element", {}),
-            })
-
-    # Build failing elements summary
-    failing_summary = []
-    for i, elem in enumerate(failing_elements, 1):
-        tag = elem["element"].get("tag", "unknown") or "unknown"
-        classes = elem["element"].get("key_attributes", {}).get("class", "") or ""
-        text_content = elem["element"].get("text_content") or ""
-        text = text_content[:30] if text_content else ""
-        failing_summary.append(
-            f"{i}. `{elem['selector']}` ({tag}, classes: {classes})\n"
-            f"   - Failure: {elem['failure_type']}\n"
-            f"   - Pixel change: {elem['pixel_diff_pct']} (need {elem['threshold']})\n"
-            f"   - Text: \"{text}\""
-        )
-
-    # Truncate HTML for Flash (it doesn't need full HTML, just enough to find lines)
-    # But we need line numbers, so keep structure
-    html_with_lines = ""
-    for i, line in enumerate(html.split('\n'), 1):
-        if len(html_with_lines) < 15000:  # Limit for Flash
-            html_with_lines += f"{i:4d}| {line}\n"
-        else:
-            html_with_lines += f"... [truncated at line {i}] ...\n"
-            break
-
-    # Truncate user request for context
-    request_preview = user_request[:200] if len(user_request) > 200 else user_request
-
-    # Include user request section only if provided
-    user_request_section = ""
-    if user_request:
-        user_request_section = f"""## USER REQUEST (context)
-
-"{request_preview}"
-
-"""
-
-    return f"""Analyze this HTML that failed visual validation and produce a PRECISE diagnosis.
-
-{user_request_section}## FAILING ELEMENTS ({len(failing_elements)} total)
-
-{chr(10).join(failing_summary)}
-
-## HTML (with line numbers)
-
-```html
-{html_with_lines}
-```
-
-## YOUR TASK
-
-For EACH failing element above:
-1. Find the CSS rules that apply to its state (.selected, .active, :hover, etc.)
-2. Check if those rules have background-color changes (REQUIRED for visual detection)
-3. Identify the EXACT line number and the SPECIFIC fix needed
-
-Remember: The validation uses SCREENSHOT COMPARISON. Without background-color change,
-clicks produce no visible pixel difference → validation fails.
-
-Produce your diagnosis now:"""
+1. PRIORITIZE behavioral issues (modals blocking) over CSS issues
+2. If a modal blocks other elements, the CSS diagnosis is irrelevant until modal is fixed
+3. Check SEMANTIC CONCORDANCE - does the output match what user asked for?
+4. Use CONCRETE values for CSS fixes (#4CAF50, rgba(0,255,0,0.3))
+5. Be concise - the repair model will follow your diagnosis exactly"""
 
 
 def build_pro_repair_prompt_with_diagnosis(
@@ -1084,38 +1025,24 @@ class DirectFixer:
             from app.core.config import settings
 
             # ===================================================================
-            # STEP 1: Flash Analysis (fast, cheap)
+            # STEP 1: Programmatic CSS Diagnosis (no LLM call needed)
             # ===================================================================
-            logger.info("Step 1: Gemini 3 Flash analyzing HTML for precise diagnosis...")
+            # Sprint 10: Use _build_css_diagnosis directly instead of Flash.
+            # Without a screenshot, Flash has nothing to visually verify.
+            # The programmatic analysis is 100% accurate for CSS issues.
+            logger.info("Step 1: Building CSS diagnosis programmatically...")
 
-            diagnosis_prompt = build_flash_diagnosis_prompt(html, sandbox_result, user_request=user_request)
-
-            flash_response = await gemini_provider.generate(
-                prompt=diagnosis_prompt,
-                system_prompt=FLASH_ANALYZER_SYSTEM_PROMPT,
-                temperature=0.1,  # Very low for consistent analysis
-                max_tokens=2048,  # Diagnosis should be concise
-                model_override=settings.GEMINI_REASONING_MODEL,  # Gemini 3 Flash
-            )
-
-            if not flash_response.success:
-                logger.warning(f"Flash diagnosis failed: {flash_response.error}")
-                # Fallback to legacy single-step repair
-                return await self._legacy_repair(
-                    html, sandbox_result, user_request, max_tokens, failed_attempts
-                )
-
-            flash_diagnosis = flash_response.content.strip()
-            logger.info(f"Flash diagnosis complete ({len(flash_diagnosis)} chars)")
+            css_diagnosis = _build_css_diagnosis(html, sandbox_result.interaction_results)
+            logger.info(f"CSS diagnosis complete ({len(css_diagnosis)} chars)")
 
             # ===================================================================
-            # STEP 2: Pro Repair (using Flash's diagnosis)
+            # STEP 2: Pro Repair (using CSS diagnosis)
             # ===================================================================
-            logger.info("Step 2: Gemini 3 Pro repairing using Flash diagnosis...")
+            logger.info("Step 2: Gemini 3 Pro repairing using CSS diagnosis...")
 
             repair_prompt = build_pro_repair_prompt_with_diagnosis(
                 html=html,
-                flash_diagnosis=flash_diagnosis,
+                flash_diagnosis=css_diagnosis,  # Programmatic diagnosis, not from Flash
                 user_request=user_request,
                 failed_attempts=failed_attempts,
             )
@@ -1273,29 +1200,104 @@ class DirectFixer:
             optimized_screenshot = resize_image_for_api(screenshot)
 
             # ===================================================================
-            # STEP 1: Flash 3 Analysis with Vision (debugger)
+            # STEP 1: Programmatic CSS Diagnosis + Flash Vision Verification
             # ===================================================================
-            logger.info("Step 1: Flash 3 analyzing HTML + screenshot for precise diagnosis...")
+            # Sprint 10: Build CSS diagnosis programmatically, then have Flash
+            # verify against screenshots (initial + before/after interactions).
+            logger.info("Step 1: Building CSS diagnosis + Flash vision verification...")
 
-            # Build diagnosis prompt for Flash (includes validation failures)
-            flash_diagnosis_prompt = build_flash_diagnosis_prompt(html, sandbox_result, user_request=user_request)
+            # 1a. Build programmatic CSS diagnosis
+            css_diagnosis = _build_css_diagnosis(html, sandbox_result.interaction_results)
 
-            # Flash analyzes with vision to see the actual rendered output
+            # 1b. Collect interaction screenshots (before/after for failed elements)
+            # Limit to first 3 failed interactions to avoid API limits
+            interaction_screenshots = []
+            interaction_descriptions = []
+            MAX_INTERACTION_SCREENSHOTS = 3
+
+            failed_interactions = [
+                ir for ir in sandbox_result.interaction_results
+                if not ir.responsive and ir.screenshot_before and ir.screenshot_after
+            ]
+
+            for ir in failed_interactions[:MAX_INTERACTION_SCREENSHOTS]:
+                # Add before screenshot
+                before_img = resize_image_for_api(ir.screenshot_before)
+                interaction_screenshots.append(before_img)
+
+                # Add after screenshot
+                after_img = resize_image_for_api(ir.screenshot_after)
+                interaction_screenshots.append(after_img)
+
+                interaction_descriptions.append(
+                    f"  - Images {len(interaction_screenshots)-1} & {len(interaction_screenshots)}: "
+                    f"BEFORE/AFTER clicking `{ir.input.selector}`"
+                )
+
+            # Build image list: initial page + interaction before/after pairs
+            all_images = [optimized_screenshot] + interaction_screenshots
+
+            # Build prompt with image descriptions
+            interaction_section = ""
+            if interaction_descriptions:
+                interaction_section = f"""
+## INTERACTION SCREENSHOTS ({len(failed_interactions)} failed, showing {len(interaction_descriptions)})
+
+Image 0: Initial page state
+{chr(10).join(interaction_descriptions)}
+
+IMPORTANT: Compare BEFORE vs AFTER screenshots for each interaction.
+If AFTER shows a modal/overlay blocking other elements, that's the problem!
+The layout may need: a close button, auto-dismiss, or different modal behavior.
+"""
+
+            # 1c. Have Flash verify against all screenshots
+            # Truncate user request for prompt
+            user_request_preview = user_request[:500] if len(user_request) > 500 else user_request
+
+            flash_verification_prompt = f"""Verify this CSS DIAGNOSIS against the SCREENSHOTS and USER REQUEST.
+
+## USER REQUEST (what was asked for)
+
+"{user_request_preview}"
+
+## PRE-ANALYZED CSS DIAGNOSIS
+
+{css_diagnosis}
+{interaction_section}
+## YOUR TASK
+
+1. Look at Image 0 (initial page state)
+2. Check SEMANTIC CONCORDANCE: Does the visual output match what the user requested?
+   - If user asked for motion/animation, verify elements actually move between screenshots
+   - If elements should orbit/rotate/spin but are static, this is an ANIMATION ISSUE
+3. For each BEFORE/AFTER pair, check what happens after click
+4. If a modal/overlay appears and BLOCKS other elements, note this as MODAL BLOCKING ISSUE
+5. Produce a FINAL diagnosis combining: CSS analysis + semantic concordance + visual observations
+
+CRITICAL: Base your diagnosis on what the USER REQUESTED, not assumptions."""
+
+            logger.info(
+                f"Flash receiving {len(all_images)} images "
+                f"(1 initial + {len(interaction_screenshots)} interaction screenshots)"
+            )
+
             flash_response = await gemini_provider.generate_with_vision(
-                prompt=flash_diagnosis_prompt,
-                images=[optimized_screenshot],
+                prompt=flash_verification_prompt,
+                images=all_images,
                 system_prompt=FLASH_ANALYZER_SYSTEM_PROMPT,
-                max_tokens=4096,  # Diagnosis needs space for detailed analysis
+                max_tokens=8192,  # Max output for Flash 3 - don't truncate diagnosis
                 model_override=settings.GEMINI_REASONING_MODEL,  # Flash 3
             )
 
             if not flash_response.success:
-                logger.warning(f"Flash vision diagnosis failed: {flash_response.error}")
-                # Fallback to non-vision two-step repair
-                return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
+                logger.warning(f"Flash vision verification failed: {flash_response.error}")
+                # Fallback: use CSS diagnosis directly without Flash verification
+                flash_diagnosis = css_diagnosis
+            else:
+                flash_diagnosis = flash_response.content.strip()
 
-            flash_diagnosis = flash_response.content.strip()
-            logger.info(f"Flash vision diagnosis complete ({len(flash_diagnosis)} chars)")
+            logger.info(f"Diagnosis complete ({len(flash_diagnosis)} chars)")
 
             # ===================================================================
             # STEP 2: Pro Repair with Vision (using Flash's diagnosis)

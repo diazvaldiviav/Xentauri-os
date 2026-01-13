@@ -121,6 +121,34 @@ Use modern web features: CSS flexbox, grid, animations, :has(), scroll-snap.
 Use JavaScript when needed for interactivity (quizzes, games, dynamic content).
 Make it visually stunning and interactive.
 
+## ANIMATION CONCORDANCE (CRITICAL):
+
+Your animations MUST match what the user requested. Read the request carefully
+and implement animations that fulfill the user's intent.
+
+If the user asks for something that implies motion (orbiting, rotating, spinning,
+moving, flowing, etc.), you MUST implement that motion with CSS animations or JS.
+
+Examples (for reference, not absolute rules):
+```css
+/* Orbit animation - object moves around a center point */
+@keyframes orbit {
+  from { transform: rotate(0deg) translateX(150px) rotate(0deg); }
+  to { transform: rotate(360deg) translateX(150px) rotate(-360deg); }
+}
+.orbiting-object { animation: orbit 10s linear infinite; }
+
+/* Rotation animation - object spins in place */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spinning-object { animation: spin 2s linear infinite; }
+```
+
+The validator will check if your animations match the user's request.
+If user asks for "planets orbiting the sun" but planets don't move, validation FAILS.
+
 Technical constraints:
 - Standalone HTML with inline CSS/JS
 - Target: 1920x1080 touchscreen
@@ -184,5 +212,35 @@ Every clickable element MUST have a .selected or .active class with:
 2. OVERLAY approach:
    - Click shows a large overlay with feedback
    - Example: "Selected!" overlay covering 20%+ of screen
+
+## MODAL/OVERLAY RULES (CRITICAL):
+
+If you show feedback overlays, modals, or result panels after clicks:
+
+1. They MUST auto-dismiss after 1-2 seconds, OR
+2. They MUST have a visible close button (X or "Continue"), OR
+3. They MUST close on click-outside
+
+NEVER let a modal/overlay BLOCK other interactive elements permanently.
+The validator clicks multiple elements sequentially - if one click shows a modal
+that blocks the other elements, validation will FAIL (e.g., 1/8 responsive).
+
+Example auto-dismiss:
+```javascript
+function showFeedback(text) {
+  const overlay = document.getElementById('feedback');
+  overlay.textContent = text;
+  overlay.style.display = 'block';
+  setTimeout(() => overlay.style.display = 'none', 1500); // Auto-dismiss
+}
+```
+
+Example close button:
+```html
+<div class="modal">
+  <button class="close-btn" onclick="this.parentElement.style.display='none'">×</button>
+  <p>Your result here</p>
+</div>
+```
 
 Output only the HTML code."""
