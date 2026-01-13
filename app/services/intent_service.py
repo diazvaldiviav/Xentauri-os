@@ -2190,6 +2190,7 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
         """
         from app.ai.scene.custom_layout import custom_layout_service
         from app.ai.scene import scene_service
+        from app.services.websocket_manager import connection_manager
 
         layout_description = (parameters or {}).get("layout_description", "")
 
