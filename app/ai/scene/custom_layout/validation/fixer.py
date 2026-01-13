@@ -987,7 +987,7 @@ class DirectFixer:
         html: str,
         sandbox_result: SandboxResult,
         user_request: str,
-        max_tokens: int = 16384,
+        max_tokens: int = 32768,
         failed_attempts: Optional[List[FailedRepairAttempt]] = None,
     ) -> Optional[str]:
         """
@@ -1085,7 +1085,7 @@ class DirectFixer:
         html: str,
         sandbox_result: SandboxResult,
         user_request: str,
-        max_tokens: int = 16384,
+        max_tokens: int = 32768,
         failed_attempts: Optional[List[FailedRepairAttempt]] = None,
     ) -> Optional[str]:
         """
@@ -1129,7 +1129,7 @@ class DirectFixer:
         sandbox_result: SandboxResult,
         user_request: str,
         effort: str = "high",
-        max_tokens: int = 16384,
+        max_tokens: int = 32768,
     ) -> Optional[str]:
         """
         Repair using Gemini 3 Pro (same as repair(), kept for API compatibility).
@@ -1155,7 +1155,7 @@ class DirectFixer:
         sandbox_result: SandboxResult,
         user_request: str,
         screenshot: bytes,
-        max_tokens: int = 16384,
+        max_tokens: int = 32768,
         thinking_budget: int = 10000,  # Kept for API compatibility, ignored
         failed_attempts: Optional[List[FailedRepairAttempt]] = None,
     ) -> Optional[str]:
