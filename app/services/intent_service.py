@@ -1815,6 +1815,7 @@ IMPORTANT INSTRUCTIONS:
             prompt=prompt,
             system_prompt=system_prompt,
             model_override=settings.GEMINI_REASONING_MODEL,
+            max_tokens=8192,  # Sufficient for complex task responses
         )
         processing_time = (time.time() - start_time) * 1000
         
