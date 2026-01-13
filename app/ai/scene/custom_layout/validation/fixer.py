@@ -167,32 +167,6 @@ planets.forEach((p, i) => {
 /* FIXED - Ensure interactive elements are on top */
 .button { z-index: 1000; position: relative; }
 ```
-
-### Orbit/Container Blocking Clicks (VERY COMMON in solar systems!)
-```css
-/* BROKEN - Outer orbit containers block clicks on inner planets */
-.orbit-container {
-    position: absolute;
-    width: 400px;
-    height: 400px;
-    /* NO pointer-events set - blocks inner elements! */
-}
-
-/* FIXED - Containers don't capture clicks, only planets do */
-.orbit-container {
-    position: absolute;
-    width: 400px;
-    height: 400px;
-    pointer-events: none;  /* CRITICAL - let clicks pass through */
-}
-.planet {
-    pointer-events: auto;  /* Only planets receive clicks */
-}
-```
-
-**SYMPTOM:** Only the outermost planet responds to clicks (e.g., Neptune works but Mercury doesn't)
-**ROOT CAUSE:** Large orbit containers are stacked and block clicks to inner elements
-**FIX:** Add `pointer-events: none` to all containers, `pointer-events: auto` to clickable children
 """
 
 # Text-only repair system prompt
