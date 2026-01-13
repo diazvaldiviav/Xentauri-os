@@ -34,7 +34,6 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
-from app.ai.providers.openai_provider import openai_provider, OpenAIProvider
 from app.ai.providers.gemini import gemini_provider
 from app.ai.providers.anthropic_provider import AnthropicProvider
 from app.ai.scene.custom_layout.prompts import (
@@ -764,21 +763,24 @@ class CustomLayoutService:
                 diagnosis = diagnosis_response.content.strip()
                 logger.info(f"HTML diagnosis: {diagnosis}")
                 
-                # Step 2: Codex-Max repairs based on diagnosis
+                # Step 2: Gemini 3 Pro repairs based on diagnosis (Sprint 9)
                 repair_prompt = build_html_repair_prompt(
                     html=invalid_html,
                     diagnosis=diagnosis,
                     original_request=user_request,
                 )
-                repair_response = await openai_provider.generate(
+                repair_response = await gemini_provider.generate(
                     prompt=repair_prompt,
                     system_prompt=get_repair_system_prompt(),
                     temperature=0.2,
                     max_tokens=16384,
+                    model_override=settings.GEMINI_PRO_MODEL,
+                    use_thinking=True,
+                    thinking_level="HIGH",
                 )
-                
+
                 if not repair_response.success:
-                    logger.warning(f"Codex-Max repair failed: {repair_response.error}")
+                    logger.warning(f"Gemini repair failed: {repair_response.error}")
                     continue
                 
                 # Step 3: Clean and validate repaired HTML
@@ -848,19 +850,22 @@ class CustomLayoutService:
                 logger.info("Pass 2: No CSS interactivity issues found")
                 return html
 
-            # Step 2: Codex-Max fixes the issues
-            logger.info("Pass 2: Fixing CSS interactivity bugs with Codex-Max")
+            # Step 2: Gemini 3 Pro fixes the issues (Sprint 9)
+            logger.info("Pass 2: Fixing CSS interactivity bugs with Gemini 3 Pro")
             repair_prompt = build_css_debug_repair_prompt(html, diagnosis)
 
-            repair_response = await openai_provider.generate_with_reasoning(
+            repair_response = await gemini_provider.generate(
                 prompt=repair_prompt,
                 system_prompt=get_css_debug_repair_system_prompt(),
-                effort="high",
+                temperature=0.2,
                 max_tokens=16384,
+                model_override=settings.GEMINI_PRO_MODEL,
+                use_thinking=True,
+                thinking_level="HIGH",
             )
 
             if not repair_response.success:
-                logger.warning(f"CSS repair failed: {repair_response.error}")
+                logger.warning(f"Gemini CSS repair failed: {repair_response.error}")
                 return html  # Return original if repair fails
 
             repaired_html = self._clean_html_response(repair_response.content)
@@ -932,7 +937,7 @@ class CustomLayoutService:
                 diagnosis = diagnosis_response.content.strip()
                 logger.info(f"Validation diagnosis: {diagnosis}")
 
-                # Step 2: GPT Codex-Max repairs based on diagnosis
+                # Step 2: Gemini 3 Pro repairs based on diagnosis (Sprint 9)
                 repair_prompt = build_validation_repair_prompt(
                     html=current_html,
                     diagnosis=diagnosis,
@@ -940,15 +945,18 @@ class CustomLayoutService:
                     user_request=user_request,
                 )
 
-                repair_response = await openai_provider.generate(
+                repair_response = await gemini_provider.generate(
                     prompt=repair_prompt,
                     system_prompt=get_validation_repair_system_prompt(),
                     temperature=0.2,
                     max_tokens=16384,
+                    model_override=settings.GEMINI_PRO_MODEL,
+                    use_thinking=True,
+                    thinking_level="HIGH",
                 )
 
                 if not repair_response.success:
-                    logger.warning(f"Codex-Max repair failed: {repair_response.error}")
+                    logger.warning(f"Gemini repair failed: {repair_response.error}")
                     continue
 
                 # Step 3: Clean and validate repaired HTML

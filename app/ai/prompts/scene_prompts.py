@@ -1,10 +1,12 @@
 """
-Scene Generation Prompts - Templates for Claude scene generation.
+Scene Generation Prompts - Templates for Gemini scene generation.
 
 Sprint 4.0: These prompts are used when users request custom layouts
 that don't match any default scene template.
 
-Claude receives:
+Sprint 9: Migrated from Claude to Gemini 3 Flash.
+
+Gemini receives:
 1. System prompt with available components and schema
 2. Generation prompt with user request and hints
 3. Returns valid Scene Graph JSON
@@ -16,7 +18,7 @@ Usage:
         build_scene_generation_prompt,
     )
 
-    response = await anthropic_provider.generate_json(
+    response = await gemini_provider.generate_json(
         prompt=build_scene_generation_prompt(user_request, hints, info_type),
         system_prompt=SCENE_SYSTEM_PROMPT.format(
             components=component_registry.to_prompt_context(),
@@ -33,7 +35,7 @@ from app.ai.prompts.helpers import (
 )
 
 # ---------------------------------------------------------------------------
-# SCENE GRAPH SCHEMA (for Claude reference)
+# SCENE GRAPH SCHEMA (for LLM reference)
 # ---------------------------------------------------------------------------
 
 SCENE_GRAPH_SCHEMA = """

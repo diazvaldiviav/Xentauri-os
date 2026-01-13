@@ -1,15 +1,17 @@
 """
 Execution Prompts - Sprint 3.6
 
-Specialized prompts for GPT-4o when handling complex execution tasks.
+Specialized prompts for complex execution tasks.
 
-GPT-4o is used for:
+Sprint 9: Migrated from GPT-4o to Gemini 3 Flash with thinking mode.
+
+Gemini is used for:
 - Multi-step procedures
 - Code generation
 - Complex parameter extraction
 - Ambiguity resolution
 
-These prompts ensure GPT-4o ALWAYS returns valid, structured JSON
+These prompts ensure Gemini ALWAYS returns valid, structured JSON
 that can be parsed and executed by the system.
 
 Design:
@@ -27,7 +29,7 @@ from app.ai.context import build_unified_context
 
 context = await build_unified_context(user.id, db)
 prompt = build_execution_prompt(context, "Show calendar on TV for Dec 6")
-response = await openai_provider.generate(prompt)
+response = await gemini_provider.generate(prompt, use_thinking=True)
 ```
 """
 

@@ -680,17 +680,19 @@ Fix the issue and generate a valid Scene Graph."""
         conversation_context: Dict[str, Any] = None,
     ) -> SceneGraph:
         """
-        Use Claude to generate a creative layout.
-        
+        Generate a creative layout using Gemini.
+
+        Sprint 9: Migrated from Claude to Gemini 3 Flash with thinking mode.
+
         NOTE: This method is kept for backwards compatibility but is no longer
         used in the main flow. Gemini 3 Flash + repair is now the primary path.
-        
+
         Builds a prompt with component registry context and calls
-        anthropic_provider.generate_json() to get the scene structure.
-        
+        gemini_provider.generate_json() to get the scene structure.
+
         Sprint 4.1: Now accepts realtime_data to embed in components.
         Sprint 4.2: Now accepts conversation_context for multi-turn awareness.
-        
+
         Args:
             hints: Normalized layout hints
             info_type: Content type
@@ -698,24 +700,24 @@ Fix the issue and generate a valid Scene Graph."""
             target_devices: Target device IDs
             realtime_data: Pre-fetched real-time data from Gemini
             conversation_context: Previous conversation history and generated content
-            
+
         Returns:
-            SceneGraph from Claude's response
-            
+            SceneGraph from Gemini's response
+
         Raises:
-            Exception: If Claude fails or returns invalid JSON
+            Exception: If Gemini fails or returns invalid JSON
         """
-        from app.ai.providers import anthropic_provider
+        from app.ai.providers import gemini_provider
         from app.ai.prompts.scene_prompts import (
             build_scene_system_prompt,
             build_scene_generation_prompt,
         )
-        
+
         # Build prompts
         system_prompt = build_scene_system_prompt(
             components_context=component_registry.to_prompt_context()
         )
-        
+
         # Sprint 4.1: Pass realtime_data to prompt builder
         # Sprint 4.2: Pass conversation_context for multi-turn awareness
         generation_prompt = build_scene_generation_prompt(
@@ -726,27 +728,27 @@ Fix the issue and generate a valid Scene Graph."""
             realtime_data=realtime_data or {},
             conversation_context=conversation_context or {},
         )
-        
-        logger.debug("Calling Claude for scene generation")
-        
-        # Call Claude
-        response = await anthropic_provider.generate_json(
+
+        logger.debug("Calling Gemini for scene generation")
+
+        # Sprint 9: Call Gemini with thinking mode
+        response = await gemini_provider.generate_json(
             prompt=generation_prompt,
             system_prompt=system_prompt,
         )
-        
+
         if not response.success:
-            raise Exception(f"Claude generation failed: {response.error}")
+            raise Exception(f"Gemini generation failed: {response.error}")
         
         # Parse response into SceneGraph
         try:
             scene_data = json.loads(response.content)
 
-            # Sprint 5.1.1: Check if Claude returned an error object
+            # Sprint 5.1.1: Check if Gemini returned an error object
             if "error" in scene_data and "message" in scene_data:
                 error_type = scene_data.get("error", "unknown_error")
                 error_message = scene_data.get("message", "Unknown error")
-                logger.warning(f"Claude returned error: {error_type} - {error_message}")
+                logger.warning(f"Gemini returned error: {error_type} - {error_message}")
                 raise Exception(error_message)
 
             scene = self._parse_scene_response(
@@ -757,8 +759,8 @@ Fix the issue and generate a valid Scene Graph."""
             )
             return scene
         except json.JSONDecodeError as e:
-            logger.error(f"Claude JSON parsing failed: {e}")
-            logger.debug(f"Raw Claude response: {response.content[:500]}...")
+            logger.error(f"Gemini JSON parsing failed: {e}")
+            logger.debug(f"Raw Gemini response: {response.content[:500]}...")
 
             # Try to clean common JSON errors
             try:

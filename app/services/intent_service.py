@@ -281,6 +281,7 @@ class IntentService:
             )
             
             # Route based on complexity
+            # Sprint 9: Both complex_execution and complex_reasoning now use Gemini
             if routing_decision.complexity == TaskComplexity.COMPLEX_EXECUTION:
                 return await self._handle_complex_task(
                     request_id=request_id,
@@ -288,7 +289,7 @@ class IntentService:
                     routing_decision=routing_decision,
                     context=context,
                     start_time=start_time,
-                    provider="openai",
+                    provider="gemini",  # Sprint 9: Migrated from OpenAI to Gemini
                     db=db,
                     user_id=user_id,
                 )
@@ -300,7 +301,7 @@ class IntentService:
                     routing_decision=routing_decision,
                     context=context,
                     start_time=start_time,
-                    provider="anthropic",
+                    provider="gemini",  # Sprint 9: Migrated from Anthropic to Gemini
                     db=db,
                     user_id=user_id,
                 )
@@ -1741,12 +1742,11 @@ IMPORTANT INSTRUCTIONS:
         routing_decision,
         context: Dict[str, Any],
         start_time: float,
-        provider: str,
+        provider: str,  # Sprint 9: Deprecated - all tasks now use Gemini
         db: Session,
         user_id: UUID,
     ) -> IntentResult:
-        """Handle complex tasks requiring GPT or Gemini reasoning."""
-        from app.ai.providers.openai_provider import openai_provider
+        """Handle complex tasks using Gemini with thinking mode (Sprint 9)."""
         from app.ai.providers.gemini import gemini_provider
         from app.ai.context import build_unified_context
         from app.ai.prompts.execution_prompts import build_execution_prompt
@@ -1758,21 +1758,21 @@ IMPORTANT INSTRUCTIONS:
             ActionSequenceResponse,
         )
 
-        if provider == "openai":
-            ai_provider = openai_provider
-            model_name = settings.OPENAI_MODEL
+        # Sprint 9: All complex tasks now use Gemini
+        ai_provider = gemini_provider
+        model_name = settings.GEMINI_MODEL
+
+        # Determine task type from routing decision
+        if routing_decision.complexity == TaskComplexity.COMPLEX_EXECUTION:
             task_type = "execution"
         else:
-            # Sprint 9: Migrated from Anthropic to Gemini 3 Flash for reasoning
-            ai_provider = gemini_provider
-            model_name = settings.GEMINI_MODEL
             task_type = "reasoning"
         
         ai_monitor.track_event(
             request_id=request_id,
             event_type="complex_task_routing",
             data={
-                "provider": provider,
+                "provider": "gemini",
                 "model": model_name,
                 "task_type": task_type,
             }
@@ -1802,30 +1802,27 @@ IMPORTANT INSTRUCTIONS:
         conversation_history = conversation_context_service.get_conversation_summary(str(user_id))
 
         # Build prompt and call AI
+        # Sprint 9: All complex tasks use Gemini with thinking mode
         if task_type == "execution":
-            # Sprint 4.2.9: Pass conversation history to executor (GPT) for context awareness
-            # Sprint 4.4.0: Pass routing_decision for router analysis injection (GAP #7)
             prompt = build_execution_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
             system_prompt = "You are a smart display execution assistant. Return valid JSON."
-            response = await ai_provider.generate(prompt=prompt, system_prompt=system_prompt)
         else:
-            # Sprint 4.2.8: Pass conversation history to reasoner (Gemini) for context awareness
-            # Sprint 4.4.0: Pass routing_decision for router analysis injection (GAP #7)
-            # Sprint 9: Use Gemini 3 Flash with thinking mode for deep reasoning
             prompt = build_reasoner_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
             system_prompt = "You are a strategic advisor for smart home systems."
-            response = await ai_provider.generate(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                use_thinking=True,
-                thinking_level="HIGH",
-            )
+
+        # Sprint 9: Use Gemini with thinking mode for all complex tasks
+        response = await ai_provider.generate(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            use_thinking=True,
+            thinking_level="HIGH",
+        )
         processing_time = (time.time() - start_time) * 1000
         
         if not response.success:
             ai_monitor.track_response(
                 request_id=request_id,
-                provider=provider,
+                provider="gemini",
                 model=model_name,
                 content="",
                 prompt_tokens=0,
@@ -1834,7 +1831,7 @@ IMPORTANT INSTRUCTIONS:
                 success=False,
                 error=response.error or "Unknown error",
             )
-            
+
             return IntentResult(
                 success=False,
                 intent_type=IntentResultType.COMPLEX_EXECUTION if task_type == "execution" else IntentResultType.COMPLEX_REASONING,
@@ -1843,11 +1840,11 @@ IMPORTANT INSTRUCTIONS:
                 processing_time_ms=processing_time,
                 request_id=request_id,
             )
-        
+
         # Log successful response
         ai_monitor.track_response(
             request_id=request_id,
-            provider=provider,
+            provider="gemini",
             model=model_name,
             content=response.content[:500] if response.content else "",
             prompt_tokens=response.usage.prompt_tokens if response.usage else 0,
