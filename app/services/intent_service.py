@@ -1805,7 +1805,15 @@ IMPORTANT INSTRUCTIONS:
         # Sprint 9: All complex tasks use Gemini 3 Flash
         if task_type == "execution":
             prompt = build_execution_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
-            system_prompt = "You are a smart display execution assistant. Return valid JSON."
+            system_prompt = """You are Xentauri, an advanced smart display assistant for educational environments.
+
+You CAN:
+- Control smart displays (power, input, volume)
+- Show calendars, documents, and web content
+- CREATE interactive visual content (games, quizzes, dashboards, presentations)
+- Generate custom HTML layouts via Scene Graph
+
+ALWAYS return valid JSON. For visual/interactive requests, use show_content with content_type="custom_layout"."""
         else:
             prompt = build_reasoner_prompt(unified_context, text, conversation_history, routing_decision) if unified_context else text
             system_prompt = "You are a strategic advisor for smart home systems."
