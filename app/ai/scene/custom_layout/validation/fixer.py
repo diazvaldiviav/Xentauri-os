@@ -224,6 +224,7 @@ def build_flash_diagnosis_prompt(
     html: str,
     sandbox_result: "SandboxResult",
     threshold: float = 0.02,
+    user_request: str = "",
 ) -> str:
     """
     Sprint 9: Build prompt for Gemini 3 Flash to analyze validation failures.
@@ -235,6 +236,7 @@ def build_flash_diagnosis_prompt(
         html: The HTML that failed validation
         sandbox_result: Full validation result with interaction results
         threshold: Pixel change threshold for failure detection
+        user_request: Original user request for context
 
     Returns:
         Prompt for Flash diagnosis
@@ -275,9 +277,21 @@ def build_flash_diagnosis_prompt(
             html_with_lines += f"... [truncated at line {i}] ...\n"
             break
 
+    # Truncate user request for context
+    request_preview = user_request[:200] if len(user_request) > 200 else user_request
+
+    # Include user request section only if provided
+    user_request_section = ""
+    if user_request:
+        user_request_section = f"""## USER REQUEST (context)
+
+"{request_preview}"
+
+"""
+
     return f"""Analyze this HTML that failed visual validation and produce a PRECISE diagnosis.
 
-## FAILING ELEMENTS ({len(failing_elements)} total)
+{user_request_section}## FAILING ELEMENTS ({len(failing_elements)} total)
 
 {chr(10).join(failing_summary)}
 
@@ -1073,7 +1087,7 @@ class DirectFixer:
             # ===================================================================
             logger.info("Step 1: Gemini 3 Flash analyzing HTML for precise diagnosis...")
 
-            diagnosis_prompt = build_flash_diagnosis_prompt(html, sandbox_result)
+            diagnosis_prompt = build_flash_diagnosis_prompt(html, sandbox_result, user_request=user_request)
 
             flash_response = await gemini_provider.generate(
                 prompt=diagnosis_prompt,
@@ -1263,7 +1277,7 @@ class DirectFixer:
             logger.info("Step 1: Flash 3 analyzing HTML + screenshot for precise diagnosis...")
 
             # Build diagnosis prompt for Flash (includes validation failures)
-            flash_diagnosis_prompt = build_flash_diagnosis_prompt(html, sandbox_result)
+            flash_diagnosis_prompt = build_flash_diagnosis_prompt(html, sandbox_result, user_request=user_request)
 
             # Flash analyzes with vision to see the actual rendered output
             flash_response = await gemini_provider.generate_with_vision(
