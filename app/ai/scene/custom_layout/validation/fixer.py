@@ -1213,16 +1213,15 @@ class DirectFixer:
         failed_attempts: Optional[List[FailedRepairAttempt]] = None,
     ) -> Optional[str]:
         """
-        Sprint 7: Repair using vision (screenshot analysis).
-        Sprint 9: Uses Gemini 3 Pro with vision, falls back to two-step pipeline.
+        Sprint 9: Two-step vision repair pipeline.
 
-        This is the most powerful repair method. It:
-        1. Shows Gemini the actual rendered screenshot
-        2. Compares what user requested vs what's visible
-        3. Identifies invisible elements and fixes them
+        Step 1: Flash 3 analyzes HTML + screenshot + validation failures
+                to produce a precise, line-by-line diagnosis (debugger role)
 
-        If vision repair fails, falls back to the two-step pipeline
-        (Flash diagnosis → Pro repair).
+        Step 2: Pro repairs using Flash's diagnosis + screenshot
+
+        This approach ensures Pro receives exact instructions from Flash
+        rather than trying to figure out what's wrong on its own.
 
         Args:
             html: HTML that failed validation
@@ -1240,7 +1239,7 @@ class DirectFixer:
             return html
 
         logger.info(
-            f"Starting Gemini 3 Pro vision repair - "
+            f"Starting two-step vision repair - "
             f"failures: {sandbox_result.failure_summary}, "
             f"invisible_count: {sandbox_result.invisible_elements_count}, "
             f"previous_attempts: {len(failed_attempts) if failed_attempts else 0}"
@@ -1249,47 +1248,83 @@ class DirectFixer:
         try:
             from app.ai.providers.gemini import gemini_provider
             from app.core.config import settings
-
-            # Build vision repair prompt (Sprint 8: includes repair history)
-            prompt = build_vision_repair_prompt(html, sandbox_result, user_request, failed_attempts)
+            from .visual_analyzer import resize_image_for_api
 
             # Resize screenshot for optimal API performance
-            from .visual_analyzer import resize_image_for_api
             optimized_screenshot = resize_image_for_api(screenshot)
 
-            # Call Gemini 3 Pro with vision
-            response = await gemini_provider.generate_with_vision(
-                prompt=prompt,
+            # ===================================================================
+            # STEP 1: Flash 3 Analysis with Vision (debugger)
+            # ===================================================================
+            logger.info("Step 1: Flash 3 analyzing HTML + screenshot for precise diagnosis...")
+
+            # Build diagnosis prompt for Flash (includes validation failures)
+            flash_diagnosis_prompt = build_flash_diagnosis_prompt(html, sandbox_result)
+
+            # Flash analyzes with vision to see the actual rendered output
+            flash_response = await gemini_provider.generate_with_vision(
+                prompt=flash_diagnosis_prompt,
                 images=[optimized_screenshot],
-                system_prompt=VISION_REPAIR_SYSTEM_PROMPT,
+                system_prompt=FLASH_ANALYZER_SYSTEM_PROMPT,
+                max_tokens=4096,  # Diagnosis needs space for detailed analysis
+                model_override=settings.GEMINI_REASONING_MODEL,  # Flash 3
+            )
+
+            if not flash_response.success:
+                logger.warning(f"Flash vision diagnosis failed: {flash_response.error}")
+                # Fallback to non-vision two-step repair
+                return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
+
+            flash_diagnosis = flash_response.content.strip()
+            logger.info(f"Flash vision diagnosis complete ({len(flash_diagnosis)} chars)")
+
+            # ===================================================================
+            # STEP 2: Pro Repair with Vision (using Flash's diagnosis)
+            # ===================================================================
+            logger.info("Step 2: Pro repairing using Flash diagnosis + screenshot...")
+
+            # Build repair prompt with Flash's diagnosis
+            repair_prompt = build_pro_repair_prompt_with_diagnosis(
+                html=html,
+                flash_diagnosis=flash_diagnosis,
+                user_request=user_request,
+                failed_attempts=failed_attempts,
+            )
+
+            # Pro repairs with vision (can see the screenshot too)
+            pro_response = await gemini_provider.generate_with_vision(
+                prompt=repair_prompt,
+                images=[optimized_screenshot],
+                system_prompt=REPAIR_SYSTEM_PROMPT,
                 max_tokens=max_tokens,
                 model_override=settings.GEMINI_PRO_MODEL,
             )
 
-            if not response.success:
-                logger.warning(f"Gemini vision repair failed: {response.error}")
-                # Fallback to regular repair (pass failed_attempts)
+            if not pro_response.success:
+                logger.warning(f"Pro vision repair failed: {pro_response.error}")
+                # Fallback to non-vision two-step repair
                 return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
 
             # Clean and extract HTML
-            repaired_html = self._clean_html_response(response.content)
+            repaired_html = self._clean_html_response(pro_response.content)
 
             if repaired_html:
                 logger.info(
-                    f"Vision repair completed - "
+                    f"Two-step vision repair completed - "
                     f"original: {len(html)} chars, "
                     f"repaired: {len(repaired_html)} chars, "
-                    f"latency: {response.latency_ms:.0f}ms"
+                    f"flash_latency: {flash_response.latency_ms:.0f}ms, "
+                    f"pro_latency: {pro_response.latency_ms:.0f}ms"
                 )
                 return repaired_html
             else:
-                logger.warning("Failed to extract valid HTML from vision repair")
-                # Fallback to regular repair (pass failed_attempts)
+                logger.warning("Failed to extract valid HTML from Pro vision repair")
+                # Fallback to non-vision two-step repair
                 return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
 
         except Exception as e:
-            logger.error(f"Gemini vision repair error: {e}", exc_info=True)
-            # Fallback to regular repair (pass failed_attempts)
+            logger.error(f"Two-step vision repair error: {e}", exc_info=True)
+            # Fallback to non-vision two-step repair
             return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
 
     def _clean_html_response(self, content: str) -> Optional[str]:
