@@ -1,10 +1,11 @@
 """
 Conversation Logger - Registro tipo "chat de WhatsApp" del flujo de modelos.
 
-Registra el prompt y respuesta de cada modelo en el flujo:
-- Opus (genera HTML)
-- Flash (diagnostica)
-- Pro (repara)
+Sprint 11: Nuevo flujo de modelos:
+1. Flash (NO thinking) → Genera HTML
+2. Flash (NO thinking) → Visual concordance check
+3. Flash (WITH thinking) → Technical diagnosis
+4. Claude Opus → Repair con contexto completo
 
 Permite analizar exactamente qué recibe y responde cada modelo.
 """
@@ -57,7 +58,11 @@ Request ID: {self.request_id}
 {user_request}
 
 {'='*80}
-FLUJO DE MODELOS
+FLUJO DE MODELOS (Sprint 11)
+1. Flash (NO thinking) → Genera HTML
+2. Flash (NO thinking) → Visual concordance
+3. Flash (WITH thinking) → Technical diagnosis
+4. Claude Opus → Repair
 {'='*80}
 """
         self._write(header)
@@ -80,10 +85,14 @@ FLUJO DE MODELOS
             return text
         return text[:max_chars] + f"\n\n[... TRUNCADO - {len(text) - max_chars} chars más ...]"
 
-    def log_opus_prompt(self, system_prompt: str, user_prompt: str):
-        """Registra el prompt enviado a Opus."""
+    # =========================================================================
+    # STEP 1: Flash genera HTML
+    # =========================================================================
+
+    def log_flash_html_prompt(self, system_prompt: str, user_prompt: str):
+        """Registra el prompt enviado a Flash para generar HTML."""
         content = f"""
-[{self._format_timestamp()}] 📤 PROMPT A OPUS
+[{self._format_timestamp()}] 📤 STEP 1: PROMPT A FLASH (HTML Generation - NO thinking)
 {'─'*60}
 
 ## SYSTEM PROMPT:
@@ -95,10 +104,10 @@ FLUJO DE MODELOS
 """
         self._write(content)
 
-    def log_opus_response(self, response: str, latency_ms: float, tokens: int):
-        """Registra la respuesta de Opus."""
+    def log_flash_html_response(self, response: str, latency_ms: float, tokens: int = 0):
+        """Registra la respuesta de Flash (HTML generado)."""
         content = f"""
-[{self._format_timestamp()}] 📥 RESPUESTA DE OPUS ({latency_ms:.0f}ms, {tokens} tokens)
+[{self._format_timestamp()}] 📥 STEP 1: RESPUESTA DE FLASH - HTML ({latency_ms:.0f}ms, {tokens} tokens)
 {'─'*60}
 
 {self._truncate(response)}
@@ -106,26 +115,60 @@ FLUJO DE MODELOS
 """
         self._write(content)
 
-    def log_flash_prompt(self, system_prompt: str, user_prompt: str, num_images: int = 0):
-        """Registra el prompt enviado a Flash."""
+    # =========================================================================
+    # STEP 2: Flash Visual Concordance
+    # =========================================================================
+
+    def log_flash_concordance_prompt(self, prompt: str, has_screenshot: bool = True):
+        """Registra el prompt de concordance a Flash."""
+        screenshot_info = " + screenshot" if has_screenshot else ""
+        content = f"""
+[{self._format_timestamp()}] 📤 STEP 2: PROMPT A FLASH (Visual Concordance - NO thinking){screenshot_info}
+{'─'*60}
+
+## CONCORDANCE PROMPT:
+{self._truncate(prompt, 5000)}
+
+"""
+        self._write(content)
+
+    def log_flash_concordance_response(self, response: str, passed: bool, confidence: float, latency_ms: float):
+        """Registra la respuesta de concordance de Flash."""
+        status = "✅ PASS" if passed else "❌ FAIL"
+        content = f"""
+[{self._format_timestamp()}] 📥 STEP 2: RESPUESTA DE FLASH - Concordance {status} ({latency_ms:.0f}ms)
+{'─'*60}
+Confidence: {confidence:.2f}
+
+{self._truncate(response)}
+
+"""
+        self._write(content)
+
+    # =========================================================================
+    # STEP 3: Flash Technical Diagnosis (WITH thinking)
+    # =========================================================================
+
+    def log_flash_diagnosis_prompt(self, system_prompt: str, user_prompt: str, num_images: int = 0):
+        """Registra el prompt de diagnóstico a Flash."""
         images_info = f" + {num_images} imágenes" if num_images > 0 else ""
         content = f"""
-[{self._format_timestamp()}] 📤 PROMPT A FLASH{images_info}
+[{self._format_timestamp()}] 📤 STEP 3: PROMPT A FLASH (Diagnosis - WITH thinking){images_info}
 {'─'*60}
 
 ## SYSTEM PROMPT:
 {self._truncate(system_prompt, 10000)}
 
-## USER PROMPT:
+## USER PROMPT (con contexto de Steps 1-2):
 {self._truncate(user_prompt, 30000)}
 
 """
         self._write(content)
 
-    def log_flash_response(self, response: str, latency_ms: float):
-        """Registra la respuesta de Flash."""
+    def log_flash_diagnosis_response(self, response: str, latency_ms: float):
+        """Registra la respuesta de diagnóstico de Flash."""
         content = f"""
-[{self._format_timestamp()}] 📥 RESPUESTA DE FLASH ({latency_ms:.0f}ms)
+[{self._format_timestamp()}] 📥 STEP 3: RESPUESTA DE FLASH - Diagnosis ({latency_ms:.0f}ms)
 {'─'*60}
 
 {self._truncate(response)}
@@ -133,33 +176,69 @@ FLUJO DE MODELOS
 """
         self._write(content)
 
-    def log_pro_prompt(self, system_prompt: str, user_prompt: str, num_images: int = 0):
-        """Registra el prompt enviado a Pro."""
+    # =========================================================================
+    # STEP 4: Claude Opus Repair
+    # =========================================================================
+
+    def log_opus_repair_prompt(self, system_prompt: str, user_prompt: str, num_images: int = 0):
+        """Registra el prompt de repair a Opus."""
         images_info = f" + {num_images} imágenes" if num_images > 0 else ""
         content = f"""
-[{self._format_timestamp()}] 📤 PROMPT A PRO{images_info}
+[{self._format_timestamp()}] 📤 STEP 4: PROMPT A OPUS (Repair - contexto completo){images_info}
 {'─'*60}
 
 ## SYSTEM PROMPT:
 {self._truncate(system_prompt, 10000)}
 
-## USER PROMPT:
-{self._truncate(user_prompt, 30000)}
+## USER PROMPT (con contexto de Steps 1-3):
+{self._truncate(user_prompt, 40000)}
 
 """
         self._write(content)
 
-    def log_pro_response(self, response: str, latency_ms: float, success: bool = True):
-        """Registra la respuesta de Pro."""
+    def log_opus_repair_response(self, response: str, latency_ms: float, success: bool = True):
+        """Registra la respuesta de repair de Opus."""
         status = "✅" if success else "❌"
         content = f"""
-[{self._format_timestamp()}] 📥 RESPUESTA DE PRO {status} ({latency_ms:.0f}ms)
+[{self._format_timestamp()}] 📥 STEP 4: RESPUESTA DE OPUS - Repair {status} ({latency_ms:.0f}ms)
 {'─'*60}
 
 {self._truncate(response)}
 
 """
         self._write(content)
+
+    # =========================================================================
+    # Legacy methods (for backwards compatibility)
+    # =========================================================================
+
+    def log_opus_prompt(self, system_prompt: str, user_prompt: str):
+        """Legacy: Registra prompt a Opus (now used for repair)."""
+        self.log_opus_repair_prompt(system_prompt, user_prompt)
+
+    def log_opus_response(self, response: str, latency_ms: float, tokens: int = 0):
+        """Legacy: Registra respuesta de Opus."""
+        self.log_opus_repair_response(response, latency_ms)
+
+    def log_flash_prompt(self, system_prompt: str, user_prompt: str, num_images: int = 0):
+        """Legacy: Registra prompt a Flash (diagnosis)."""
+        self.log_flash_diagnosis_prompt(system_prompt, user_prompt, num_images)
+
+    def log_flash_response(self, response: str, latency_ms: float):
+        """Legacy: Registra respuesta de Flash."""
+        self.log_flash_diagnosis_response(response, latency_ms)
+
+    def log_pro_prompt(self, system_prompt: str, user_prompt: str, num_images: int = 0):
+        """Legacy: Pro ya no se usa, mapea a Opus."""
+        self.log_opus_repair_prompt(system_prompt, user_prompt, num_images)
+
+    def log_pro_response(self, response: str, latency_ms: float, success: bool = True):
+        """Legacy: Pro ya no se usa, mapea a Opus."""
+        self.log_opus_repair_response(response, latency_ms, success)
+
+    # =========================================================================
+    # Utility methods
+    # =========================================================================
 
     def log_validation_result(self, passed: bool, responsive: int, total: int, details: str = ""):
         """Registra el resultado de validación."""
@@ -168,6 +247,16 @@ FLUJO DE MODELOS
 [{self._format_timestamp()}] 🔍 VALIDACIÓN: {status} ({responsive}/{total} responsive)
 {'─'*60}
 {details}
+
+"""
+        self._write(content)
+
+    def log_pipeline_context(self, context_summary: str):
+        """Registra el estado del PipelineContext acumulado."""
+        content = f"""
+[{self._format_timestamp()}] 📋 PIPELINE CONTEXT ACUMULADO
+{'─'*60}
+{context_summary}
 
 """
         self._write(content)

@@ -374,8 +374,8 @@ class CustomLayoutService:
                 use_thinking=False,  # NO thinking for generation
             )
 
-            # Log response (reusing Opus logger format for compatibility)
-            conv.log_opus_response(
+            # Log Flash HTML generation response
+            conv.log_flash_html_response(
                 response.content if response.content else "ERROR: No content",
                 response.latency_ms,
                 response.usage.total_tokens if response.usage else 0
@@ -507,12 +507,33 @@ class CustomLayoutService:
         )
 
         # Step 2: Visual Concordance Check (Flash NO thinking)
+        conv = get_current_conversation()
         if validation_result.page_screenshot:
             logger.info("Sprint 11 Step 2: Visual concordance check (Flash NO thinking)")
+
+            # Log concordance prompt
+            concordance_prompt = f"Compare screenshot to user request: {user_request}"
+            if conv:
+                conv.log_flash_concordance_prompt(concordance_prompt, has_screenshot=True)
+
+            import time as _time
+            concordance_start = _time.time()
+
             concordance_passed, concordance_diagnosis, concordance_confidence = \
                 await visual_analyzer.check_visual_concordance(
                     screenshot_bytes=validation_result.page_screenshot,
                     user_request=user_request,
+                )
+
+            concordance_latency = (_time.time() - concordance_start) * 1000
+
+            # Log concordance response
+            if conv:
+                conv.log_flash_concordance_response(
+                    response=concordance_diagnosis,
+                    passed=concordance_passed,
+                    confidence=concordance_confidence,
+                    latency_ms=concordance_latency,
                 )
 
             # ACCUMULATE in context
