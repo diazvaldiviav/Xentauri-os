@@ -371,52 +371,42 @@ class VisualAnalyzer:
         optimized_screenshot = resize_image_for_api(screenshot_bytes)
 
         # Build concordance check prompt
-        prompt = f"""Analyze this screenshot and compare it to the user's request.
+        prompt = f"""Look at this screenshot and compare it to what the user requested.
 
-## USER REQUEST
-"{user_request}"
+USER REQUEST: "{user_request}"
 
-## YOUR TASK
-1. Look at the screenshot carefully
-2. Determine if the visual output matches what the user requested
-3. Check for:
-   - Correct content displayed (text, images, data)
-   - Appropriate layout for the request type
-   - Required elements present (buttons, inputs, charts, etc.)
-   - No obvious visual bugs (overlapping elements, cut-off text)
+YOUR TASK:
+1. Examine the screenshot carefully
+2. Check if the visual output matches the user's request
+3. Look for: correct content, appropriate layout, required elements present, no visual bugs
 
-## OUTPUT FORMAT
-Respond with EXACTLY this format:
+RESPOND WITH EXACTLY THIS FORMAT (3 lines, no extra text):
 
-CONCORDANCE: [PASS/FAIL]
-CONFIDENCE: [0.0-1.0]
-DIAGNOSIS: [1-2 sentences explaining what matches or doesn't match]
+CONCORDANCE: PASS
+CONFIDENCE: 0.95
+DIAGNOSIS: The screenshot shows [describe what you see and how it matches/doesn't match the request].
 
-Examples:
-- CONCORDANCE: PASS
-  CONFIDENCE: 0.95
-  DIAGNOSIS: Screenshot shows a trivia interface with question and 4 answer options as requested.
+OR if it fails:
 
-- CONCORDANCE: FAIL
-  CONFIDENCE: 0.85
-  DIAGNOSIS: User requested a solar system but only the sun is visible, planets are missing.
-"""
+CONCORDANCE: FAIL
+CONFIDENCE: 0.80
+DIAGNOSIS: The screenshot is missing [specific elements] that the user requested.
 
-        system_prompt = """You are a visual QA specialist. Your job is to verify that web page screenshots match user requirements.
+IMPORTANT: You MUST include all 3 lines with actual values. Do not leave any field empty."""
 
-Be strict but fair:
-- PASS if the core request is satisfied even if styling differs
-- FAIL if key elements are missing, invisible, or clearly broken
-- Always explain your reasoning briefly
+        system_prompt = """You are a visual QA checker. Output EXACTLY 3 lines:
+Line 1: CONCORDANCE: PASS or CONCORDANCE: FAIL
+Line 2: CONFIDENCE: followed by a number between 0.0 and 1.0
+Line 3: DIAGNOSIS: followed by your explanation
 
-Output ONLY the specified format, nothing else."""
+No other text. Just those 3 lines."""
 
         try:
             response = await gemini_provider.generate_with_vision(
                 prompt=prompt,
                 images=[optimized_screenshot],
                 system_prompt=system_prompt,
-                max_tokens=256,
+                max_tokens=512,  # Increased from 256
                 model_override=settings.GEMINI_REASONING_MODEL,  # Flash 3
             )
 
