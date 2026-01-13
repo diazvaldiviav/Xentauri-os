@@ -446,15 +446,20 @@ Output ONLY the specified format, nothing else."""
         """Parse the structured concordance response from Flash."""
         import re
 
+        # Log raw response for debugging
+        logger.debug(f"Parsing concordance response: {content[:500]}...")
+
         # Default values
         passed = True
-        diagnosis = "Unable to parse concordance response"
+        diagnosis = ""
         confidence = 0.5
+        parsed_successfully = False
 
-        # Parse CONCORDANCE
+        # Try structured format first: CONCORDANCE: PASS/FAIL
         concordance_match = re.search(r'CONCORDANCE:\s*(PASS|FAIL)', content, re.IGNORECASE)
         if concordance_match:
             passed = concordance_match.group(1).upper() == "PASS"
+            parsed_successfully = True
 
         # Parse CONFIDENCE
         confidence_match = re.search(r'CONFIDENCE:\s*([0-9.]+)', content)
@@ -466,9 +471,33 @@ Output ONLY the specified format, nothing else."""
                 pass
 
         # Parse DIAGNOSIS
-        diagnosis_match = re.search(r'DIAGNOSIS:\s*(.+?)(?:\n|$)', content, re.DOTALL)
+        diagnosis_match = re.search(r'DIAGNOSIS:\s*(.+?)(?:\n\n|\n[A-Z]|$)', content, re.DOTALL)
         if diagnosis_match:
             diagnosis = diagnosis_match.group(1).strip()
+
+        # Fallback: Try to infer from content if structured format not found
+        if not parsed_successfully:
+            content_lower = content.lower()
+            # Look for clear indicators
+            if any(word in content_lower for word in ['fail', 'missing', 'not visible', 'invisible', 'broken', 'incorrect']):
+                passed = False
+                confidence = 0.7
+                logger.info("Concordance: Inferred FAIL from content keywords")
+            elif any(word in content_lower for word in ['pass', 'correct', 'matches', 'shows', 'displays properly']):
+                passed = True
+                confidence = 0.7
+                logger.info("Concordance: Inferred PASS from content keywords")
+
+            # Use content as diagnosis if not parsed
+            if not diagnosis:
+                # Take first 200 chars as diagnosis
+                diagnosis = content[:200].strip()
+                if len(content) > 200:
+                    diagnosis += "..."
+
+        # Final fallback
+        if not diagnosis:
+            diagnosis = "Response parsed but no specific diagnosis found"
 
         return passed, diagnosis, confidence
 

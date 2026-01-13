@@ -123,31 +123,57 @@ class AnthropicProvider(AIProvider):
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": temperature,
             }
-            
+
             # Add system prompt if provided
             if system_prompt:
                 request_params["system"] = system_prompt
-            
-            # Make the API request
-            response = await self._client.messages.create(**request_params)
-            
-            latency_ms = self._measure_latency(start_time)
-            
-            # Extract content (Claude returns a list of content blocks)
-            content = ""
-            if response.content:
-                for block in response.content:
-                    if hasattr(block, 'text'):
-                        content += block.text
-            
-            # Extract usage
-            usage = TokenUsage(
-                prompt_tokens=response.usage.input_tokens if response.usage else 0,
-                completion_tokens=response.usage.output_tokens if response.usage else 0,
-            )
-            
+
+            # Sprint 11: Use streaming for large max_tokens (Opus requirement)
+            use_streaming = max_tokens > 8192
+
+            if use_streaming:
+                logger.info(f"Using streaming for large max_tokens={max_tokens}")
+                content = ""
+                input_tokens = 0
+                output_tokens = 0
+
+                async with self._client.messages.stream(**request_params) as stream:
+                    async for event in stream:
+                        if hasattr(event, 'type'):
+                            if event.type == 'content_block_delta' and hasattr(event, 'delta'):
+                                if hasattr(event.delta, 'text'):
+                                    content += event.delta.text
+
+                    # Get final message for usage stats
+                    final_message = await stream.get_final_message()
+                    if final_message and final_message.usage:
+                        input_tokens = final_message.usage.input_tokens
+                        output_tokens = final_message.usage.output_tokens
+
+                latency_ms = self._measure_latency(start_time)
+                usage = TokenUsage(
+                    prompt_tokens=input_tokens,
+                    completion_tokens=output_tokens,
+                )
+            else:
+                # Regular non-streaming request
+                response = await self._client.messages.create(**request_params)
+                latency_ms = self._measure_latency(start_time)
+
+                # Extract content (Claude returns a list of content blocks)
+                content = ""
+                if response.content:
+                    for block in response.content:
+                        if hasattr(block, 'text'):
+                            content += block.text
+
+                usage = TokenUsage(
+                    prompt_tokens=response.usage.input_tokens if response.usage else 0,
+                    completion_tokens=response.usage.output_tokens if response.usage else 0,
+                )
+
             logger.info(f"Anthropic request completed in {latency_ms:.0f}ms, tokens: {usage.total_tokens}")
-            
+
             return AIResponse(
                 content=content,
                 provider=self.provider_type,
@@ -155,7 +181,6 @@ class AnthropicProvider(AIProvider):
                 usage=usage,
                 latency_ms=latency_ms,
                 success=True,
-                raw_response=response,
             )
             
         except Exception as e:
@@ -356,34 +381,61 @@ class AnthropicProvider(AIProvider):
             else:
                 request_params["temperature"] = temperature
 
-            # Make API request
-            response = await self._client.messages.create(**request_params)
+            # Sprint 11: Use streaming for large max_tokens (Opus requirement)
+            use_streaming = max_tokens > 8192
 
-            latency_ms = self._measure_latency(start_time)
+            if use_streaming:
+                logger.info(f"Using streaming for vision with large max_tokens={max_tokens}")
+                content_text = ""
+                thinking_text = ""
+                input_tokens = 0
+                output_tokens = 0
 
-            # Extract content (handle both regular and thinking responses)
-            content_text = ""
-            thinking_text = ""
+                async with self._client.messages.stream(**request_params) as stream:
+                    async for event in stream:
+                        if hasattr(event, 'type'):
+                            if event.type == 'content_block_delta' and hasattr(event, 'delta'):
+                                if hasattr(event.delta, 'text'):
+                                    content_text += event.delta.text
 
-            if response.content:
-                for block in response.content:
-                    if hasattr(block, 'type'):
-                        if block.type == "thinking" and hasattr(block, 'thinking'):
-                            thinking_text = block.thinking
-                        elif block.type == "text" and hasattr(block, 'text'):
+                    # Get final message for usage stats
+                    final_message = await stream.get_final_message()
+                    if final_message and final_message.usage:
+                        input_tokens = final_message.usage.input_tokens
+                        output_tokens = final_message.usage.output_tokens
+
+                latency_ms = self._measure_latency(start_time)
+                usage = TokenUsage(
+                    prompt_tokens=input_tokens,
+                    completion_tokens=output_tokens,
+                )
+            else:
+                # Regular non-streaming request
+                response = await self._client.messages.create(**request_params)
+                latency_ms = self._measure_latency(start_time)
+
+                # Extract content (handle both regular and thinking responses)
+                content_text = ""
+                thinking_text = ""
+
+                if response.content:
+                    for block in response.content:
+                        if hasattr(block, 'type'):
+                            if block.type == "thinking" and hasattr(block, 'thinking'):
+                                thinking_text = block.thinking
+                            elif block.type == "text" and hasattr(block, 'text'):
+                                content_text += block.text
+                        elif hasattr(block, 'text'):
                             content_text += block.text
-                    elif hasattr(block, 'text'):
-                        content_text += block.text
 
-            # Log thinking summary if present
-            if thinking_text:
-                logger.info(f"Extended thinking used: {len(thinking_text)} chars")
+                # Log thinking summary if present
+                if thinking_text:
+                    logger.info(f"Extended thinking used: {len(thinking_text)} chars")
 
-            # Extract usage
-            usage = TokenUsage(
-                prompt_tokens=response.usage.input_tokens if response.usage else 0,
-                completion_tokens=response.usage.output_tokens if response.usage else 0,
-            )
+                usage = TokenUsage(
+                    prompt_tokens=response.usage.input_tokens if response.usage else 0,
+                    completion_tokens=response.usage.output_tokens if response.usage else 0,
+                )
 
             logger.info(
                 f"Vision request completed in {latency_ms:.0f}ms, "
