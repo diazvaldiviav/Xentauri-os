@@ -390,6 +390,7 @@ class AnthropicProvider(AIProvider):
                 thinking_text = ""
                 input_tokens = 0
                 output_tokens = 0
+                response = None  # Not used in streaming
 
                 async with self._client.messages.stream(**request_params) as stream:
                     async for event in stream:
@@ -412,6 +413,7 @@ class AnthropicProvider(AIProvider):
             else:
                 # Regular non-streaming request
                 response = await self._client.messages.create(**request_params)
+                final_message = None  # Not used in non-streaming
                 latency_ms = self._measure_latency(start_time)
 
                 # Extract content (handle both regular and thinking responses)
@@ -442,6 +444,8 @@ class AnthropicProvider(AIProvider):
                 f"tokens: {usage.total_tokens}, images: {len(images)}"
             )
 
+            # Build response - use final_message for streaming, response for non-streaming
+            raw_resp = final_message if use_streaming else response
             return AIResponse(
                 content=content_text,
                 provider=self.provider_type,
@@ -449,7 +453,7 @@ class AnthropicProvider(AIProvider):
                 usage=usage,
                 latency_ms=latency_ms,
                 success=True,
-                raw_response=response,
+                raw_response=raw_resp,
             )
 
         except Exception as e:
