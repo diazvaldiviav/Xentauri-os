@@ -8,20 +8,22 @@ Sprint 9: Two-step pipeline for better repairs:
            (uses _build_css_diagnosis logic via LLM for precise line-by-line analysis)
   - Step 2: Gemini 3 Pro repairs using Flash's structured diagnosis
 
+Sprint 11: Model role optimization:
+  - Step 1: Flash WITH THINKING for deeper technical diagnosis
+  - Step 2: Claude OPUS repairs with accumulated context
+  - Opus works with evidence (diagnosis + screenshots), not hypotheses
+
 Two-Step Pipeline Rationale:
 ============================
-Gemini 3 Pro sometimes ignores repair rules when given raw validation results.
-By having Flash pre-analyze and transcribe EXACT errors with line numbers,
-Pro receives a precise "prescription" to follow - not raw validation data.
-
-Flash is fast/cheap for analysis, Pro is powerful for code generation.
+Flash pre-analyzes and transcribes EXACT errors with line numbers,
+Opus receives a precise "prescription" with full context to follow.
 """
 
 import logging
 import re
 from typing import Optional, List, TYPE_CHECKING
 
-from .contracts import SandboxResult, FailedRepairAttempt
+from .contracts import SandboxResult, FailedRepairAttempt, PipelineContext
 from ..conversation_logger import get_current_conversation
 
 if TYPE_CHECKING:
@@ -997,9 +999,10 @@ class DirectFixer:
         user_request: str,
         max_tokens: int = 32768,
         failed_attempts: Optional[List[FailedRepairAttempt]] = None,
+        pipeline_context: Optional[PipelineContext] = None,  # Sprint 11: Full context
     ) -> Optional[str]:
         """
-        Two-step repair: Flash diagnoses, Pro repairs.
+        Two-step repair: Flash diagnoses, Opus repairs (Sprint 11).
 
         Sprint 9: Changed from single-step to two-step pipeline.
 
@@ -1030,7 +1033,6 @@ class DirectFixer:
         )
 
         try:
-            from app.ai.providers.gemini import gemini_provider
             from app.core.config import settings
 
             # ===================================================================
@@ -1045,43 +1047,53 @@ class DirectFixer:
             logger.info(f"CSS diagnosis complete ({len(css_diagnosis)} chars)")
 
             # ===================================================================
-            # STEP 2: Pro Repair (using CSS diagnosis)
+            # STEP 2: OPUS Repair (using CSS diagnosis)
+            # Sprint 11: Changed from Gemini Pro to Claude Opus
             # ===================================================================
-            logger.info("Step 2: Gemini 3 Pro repairing using CSS diagnosis...")
+            logger.info("Step 2: Opus repairing using CSS diagnosis...")
+
+            # Import Opus provider
+            from app.ai.providers.anthropic_provider import AnthropicProvider
+            opus_provider = AnthropicProvider(model=settings.ANTHROPIC_REASONING_MODEL)
 
             repair_prompt = build_pro_repair_prompt_with_diagnosis(
                 html=html,
-                flash_diagnosis=css_diagnosis,  # Programmatic diagnosis, not from Flash
+                flash_diagnosis=css_diagnosis,  # Programmatic diagnosis
                 user_request=user_request,
                 failed_attempts=failed_attempts,
             )
 
-            pro_response = await gemini_provider.generate(
+            # Add concordance diagnosis if available
+            if sandbox_result.concordance_diagnosis:
+                repair_prompt = f"""## VISUAL CONCORDANCE ISSUE
+{sandbox_result.concordance_diagnosis}
+
+---
+{repair_prompt}"""
+
+            opus_response = await opus_provider.generate(
                 prompt=repair_prompt,
                 system_prompt=REPAIR_SYSTEM_PROMPT,
                 temperature=0.2,  # Low temperature for consistent repairs
                 max_tokens=max_tokens,
-                model_override=settings.GEMINI_PRO_MODEL,
-                use_thinking=True,
-                thinking_level="HIGH",
             )
 
-            if not pro_response.success:
-                logger.warning(f"Gemini 3 Pro repair failed: {pro_response.error}")
+            if not opus_response.success:
+                logger.warning(f"Opus repair failed: {opus_response.error}")
                 return None
 
             # Clean and extract HTML
-            repaired_html = self._clean_html_response(pro_response.content)
+            repaired_html = self._clean_html_response(opus_response.content)
 
             if repaired_html:
                 logger.info(
-                    f"Two-step repair completed - "
+                    f"Two-step repair completed (Sprint 11: CSS+Opus) - "
                     f"original: {len(html)} chars, "
                     f"repaired: {len(repaired_html)} chars"
                 )
                 return repaired_html
             else:
-                logger.warning("Failed to extract valid HTML from Pro repair response")
+                logger.warning("Failed to extract valid HTML from Opus repair response")
                 return None
 
         except Exception as e:
@@ -1166,6 +1178,7 @@ class DirectFixer:
         max_tokens: int = 32768,
         thinking_budget: int = 10000,  # Kept for API compatibility, ignored
         failed_attempts: Optional[List[FailedRepairAttempt]] = None,
+        pipeline_context: Optional[PipelineContext] = None,  # Sprint 11: Full context
     ) -> Optional[str]:
         """
         Sprint 9: Two-step vision repair pipeline.
@@ -1264,8 +1277,33 @@ The layout may need: a close button, auto-dismiss, or different modal behavior.
             # Truncate user request for prompt
             user_request_preview = user_request[:500] if len(user_request) > 500 else user_request
 
-            flash_verification_prompt = f"""Verify this CSS DIAGNOSIS against the SCREENSHOTS and USER REQUEST.
+            # Sprint 11: Build context section from PipelineContext
+            context_section = ""
+            if pipeline_context:
+                context_section = f"""
+## PIPELINE CONTEXT (Previous Steps - YOU ARE STEP 3)
 
+### Step 1: HTML Generation
+- Model: {pipeline_context.generation_model}
+- HTML generated: {len(pipeline_context.generated_html) if pipeline_context.generated_html else 0} chars
+
+### Step 2: Visual Concordance Check
+"""
+                if pipeline_context.concordance_passed is not None:
+                    status = "✅ PASSED" if pipeline_context.concordance_passed else "❌ FAILED"
+                    context_section += f"""- Result: {status}
+- Confidence: {pipeline_context.concordance_confidence:.2f}
+- Diagnosis: {pipeline_context.concordance_diagnosis or 'N/A'}
+
+**IMPORTANT**: Step 2 already analyzed if the visual matches the request.
+{"Focus on WHY it failed and HOW to fix it." if not pipeline_context.concordance_passed else "Verify the technical implementation is correct."}
+"""
+                else:
+                    context_section += "- Not executed\n"
+                context_section += "\n---\n"
+
+            flash_verification_prompt = f"""You are STEP 3 in a 4-step pipeline. Work WITH the previous steps, not against them.
+{context_section}
 ## USER REQUEST (what was asked for)
 
 "{user_request_preview}"
@@ -1274,17 +1312,19 @@ The layout may need: a close button, auto-dismiss, or different modal behavior.
 
 {css_diagnosis}
 {interaction_section}
-## YOUR TASK
+## YOUR TASK (as STEP 3)
 
 1. Look at Image 0 (initial page state)
-2. Check SEMANTIC CONCORDANCE: Does the visual output match what the user requested?
+2. CONSIDER Step 2's concordance result - if it FAILED, focus on that issue
+3. Check SEMANTIC CONCORDANCE: Does the visual output match what the user requested?
    - If user asked for motion/animation, verify elements actually move between screenshots
    - If elements should orbit/rotate/spin but are static, this is an ANIMATION ISSUE
-3. For each BEFORE/AFTER pair, check what happens after click
-4. If a modal/overlay appears and BLOCKS other elements, note this as MODAL BLOCKING ISSUE
-5. Produce a FINAL diagnosis combining: CSS analysis + semantic concordance + visual observations
+4. For each BEFORE/AFTER pair, check what happens after click
+5. If a modal/overlay appears and BLOCKS other elements, note this as MODAL BLOCKING ISSUE
+6. Produce a FINAL diagnosis that BUILDS ON Step 2's findings
 
-CRITICAL: Base your diagnosis on what the USER REQUESTED, not assumptions."""
+CRITICAL: You are part of a team. Step 2 already checked visual concordance.
+Your job is to provide TECHNICAL diagnosis that Step 4 (Opus) can use to fix the code."""
 
             logger.info(
                 f"Flash receiving {len(all_images)} images "
@@ -1296,12 +1336,15 @@ CRITICAL: Base your diagnosis on what the USER REQUESTED, not assumptions."""
             if conv:
                 conv.log_flash_prompt(FLASH_ANALYZER_SYSTEM_PROMPT, flash_verification_prompt, len(all_images))
 
+            # Sprint 11: Flash WITH THINKING for deeper technical diagnosis
             flash_response = await gemini_provider.generate_with_vision(
                 prompt=flash_verification_prompt,
                 images=all_images,
                 system_prompt=FLASH_ANALYZER_SYSTEM_PROMPT,
                 max_tokens=8192,  # Max output for Flash 3 - don't truncate diagnosis
                 model_override=settings.GEMINI_REASONING_MODEL,  # Flash 3
+                use_thinking=True,  # Sprint 11: Enable thinking for better diagnosis
+                thinking_level="MEDIUM",  # Balance depth vs speed
             )
 
             if not flash_response.success:
@@ -1318,61 +1361,118 @@ CRITICAL: Base your diagnosis on what the USER REQUESTED, not assumptions."""
 
             logger.info(f"Diagnosis complete ({len(flash_diagnosis)} chars)")
 
-            # ===================================================================
-            # STEP 2: Pro Repair with Vision (using Flash's diagnosis)
-            # ===================================================================
-            logger.info("Step 2: Pro repairing using Flash diagnosis + screenshot...")
+            # Store diagnosis in pipeline context
+            if pipeline_context:
+                pipeline_context.flash_diagnosis = flash_diagnosis
+                pipeline_context.css_diagnosis = css_diagnosis
 
-            # Build repair prompt with Flash's diagnosis
+            # ===================================================================
+            # STEP 4: OPUS Repair with Vision (using FULL CONTEXT)
+            # Sprint 11: Opus receives ALL accumulated context from Steps 1-3
+            # ===================================================================
+            logger.info("Step 4: Opus repairing with FULL PIPELINE CONTEXT...")
+
+            # Import Opus provider
+            from app.ai.providers.anthropic_provider import AnthropicProvider
+            opus_provider = AnthropicProvider(model=settings.ANTHROPIC_REASONING_MODEL)
+
+            # Sprint 11: Build repair prompt with FULL pipeline context
+            context_header = ""
+            if pipeline_context:
+                concordance_status = "✅ PASSED" if pipeline_context.concordance_passed else "❌ FAILED"
+                context_header = f"""# YOU ARE STEP 4 (FINAL) - OPUS REPAIR
+
+## FULL PIPELINE CONTEXT (Steps 1-3 completed)
+
+### Step 1: HTML Generation
+- Model: {pipeline_context.generation_model}
+- Generated: {len(pipeline_context.generated_html) if pipeline_context.generated_html else 0} chars
+
+### Step 2: Visual Concordance
+- Result: {concordance_status}
+- Confidence: {pipeline_context.concordance_confidence:.2f}
+- Finding: {pipeline_context.concordance_diagnosis or 'N/A'}
+
+### Step 3: Technical Diagnosis (Flash)
+{flash_diagnosis}
+
+---
+
+## YOUR TASK (as FINAL STEP)
+
+You have the COMPLETE picture from Steps 1-3. Now FIX the HTML:
+1. Address any issues found in Step 2 (visual concordance)
+2. Apply fixes from Step 3 (technical diagnosis)
+3. Preserve what's working, fix what's broken
+
+---
+
+"""
+            else:
+                # Fallback if no pipeline context
+                context_header = f"""## FLASH DIAGNOSIS (Step 3)
+
+{flash_diagnosis}
+
+---
+
+"""
+                if sandbox_result.concordance_diagnosis:
+                    context_header = f"""## VISUAL CONCORDANCE ISSUE (Step 2)
+{sandbox_result.concordance_diagnosis}
+
+{context_header}"""
+
+            # Build full repair prompt
             repair_prompt = build_pro_repair_prompt_with_diagnosis(
                 html=html,
-                flash_diagnosis=flash_diagnosis,
+                flash_diagnosis="",  # Already in context_header
                 user_request=user_request,
                 failed_attempts=failed_attempts,
             )
+            repair_prompt = context_header + repair_prompt
 
-            # Log Pro prompt
+            # Log Opus prompt (using Pro logger for compatibility)
             if conv:
                 conv.log_pro_prompt(REPAIR_SYSTEM_PROMPT, repair_prompt, 1)
 
-            # Pro repairs with vision (can see the screenshot too)
-            pro_response = await gemini_provider.generate_with_vision(
+            # Sprint 11: Opus repairs with vision (can see the screenshot)
+            opus_response = await opus_provider.generate_with_vision(
                 prompt=repair_prompt,
                 images=[optimized_screenshot],
                 system_prompt=REPAIR_SYSTEM_PROMPT,
                 max_tokens=max_tokens,
-                model_override=settings.GEMINI_PRO_MODEL,
             )
 
-            # Log Pro response
+            # Log Opus response (using Pro logger for compatibility)
             if conv:
                 conv.log_pro_response(
-                    pro_response.content if pro_response.content else "ERROR: No content",
-                    pro_response.latency_ms,
-                    pro_response.success
+                    opus_response.content if opus_response.content else "ERROR: No content",
+                    opus_response.latency_ms,
+                    opus_response.success
                 )
 
-            if not pro_response.success:
-                logger.warning(f"Pro vision repair failed: {pro_response.error}")
+            if not opus_response.success:
+                logger.warning(f"Opus vision repair failed: {opus_response.error}")
                 if conv:
-                    conv.log_error(f"Pro vision failed: {pro_response.error}")
+                    conv.log_error(f"Opus vision failed: {opus_response.error}")
                 # Fallback to non-vision two-step repair
                 return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
 
             # Clean and extract HTML
-            repaired_html = self._clean_html_response(pro_response.content)
+            repaired_html = self._clean_html_response(opus_response.content)
 
             if repaired_html:
                 logger.info(
-                    f"Two-step vision repair completed - "
+                    f"Two-step vision repair completed (Sprint 11: Flash+Opus) - "
                     f"original: {len(html)} chars, "
                     f"repaired: {len(repaired_html)} chars, "
                     f"flash_latency: {flash_response.latency_ms:.0f}ms, "
-                    f"pro_latency: {pro_response.latency_ms:.0f}ms"
+                    f"opus_latency: {opus_response.latency_ms:.0f}ms"
                 )
                 return repaired_html
             else:
-                logger.warning("Failed to extract valid HTML from Pro vision repair")
+                logger.warning("Failed to extract valid HTML from Opus vision repair")
                 # Fallback to non-vision two-step repair
                 return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
 

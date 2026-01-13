@@ -3,6 +3,7 @@ Visual Analyzer - Phase 2: Screenshot capture and visual analysis.
 
 Sprint 6: Visual-based validation system.
 Sprint 7: Added screenshot saving for vision-based repair.
+Sprint 11: Added visual concordance check (screenshot vs user request).
 
 This module handles visual analysis:
 - Capture screenshots from Playwright page
@@ -10,6 +11,7 @@ This module handles visual analysis:
 - Detect blank/solid color pages
 - Compare before/after screenshots for visual deltas
 - Save screenshots for vision-based repair (Sprint 7)
+- Visual concordance check with Gemini Flash (Sprint 11)
 """
 
 import base64
@@ -338,6 +340,137 @@ class VisualAnalyzer:
         # Sort by difference (highest first)
         results.sort(key=lambda x: x[1], reverse=True)
         return results
+
+    async def check_visual_concordance(
+        self,
+        screenshot_bytes: bytes,
+        user_request: str,
+    ) -> Tuple[bool, str, float]:
+        """
+        Sprint 11: Check if screenshot matches user request using Gemini Flash.
+
+        Uses Gemini Flash (NO thinking) to compare the visual output
+        against what the user originally requested.
+
+        Args:
+            screenshot_bytes: PNG screenshot of rendered page
+            user_request: Original user request (what they asked for)
+
+        Returns:
+            Tuple of (passed, diagnosis, confidence):
+            - passed: True if visual matches request
+            - diagnosis: Explanation of what matches or doesn't
+            - confidence: 0.0-1.0 score
+        """
+        from app.ai.providers.gemini import gemini_provider
+        from app.core.config import settings
+
+        start_time = time.time()
+
+        # Resize screenshot for API
+        optimized_screenshot = resize_image_for_api(screenshot_bytes)
+
+        # Build concordance check prompt
+        prompt = f"""Analyze this screenshot and compare it to the user's request.
+
+## USER REQUEST
+"{user_request}"
+
+## YOUR TASK
+1. Look at the screenshot carefully
+2. Determine if the visual output matches what the user requested
+3. Check for:
+   - Correct content displayed (text, images, data)
+   - Appropriate layout for the request type
+   - Required elements present (buttons, inputs, charts, etc.)
+   - No obvious visual bugs (overlapping elements, cut-off text)
+
+## OUTPUT FORMAT
+Respond with EXACTLY this format:
+
+CONCORDANCE: [PASS/FAIL]
+CONFIDENCE: [0.0-1.0]
+DIAGNOSIS: [1-2 sentences explaining what matches or doesn't match]
+
+Examples:
+- CONCORDANCE: PASS
+  CONFIDENCE: 0.95
+  DIAGNOSIS: Screenshot shows a trivia interface with question and 4 answer options as requested.
+
+- CONCORDANCE: FAIL
+  CONFIDENCE: 0.85
+  DIAGNOSIS: User requested a solar system but only the sun is visible, planets are missing.
+"""
+
+        system_prompt = """You are a visual QA specialist. Your job is to verify that web page screenshots match user requirements.
+
+Be strict but fair:
+- PASS if the core request is satisfied even if styling differs
+- FAIL if key elements are missing, invisible, or clearly broken
+- Always explain your reasoning briefly
+
+Output ONLY the specified format, nothing else."""
+
+        try:
+            response = await gemini_provider.generate_with_vision(
+                prompt=prompt,
+                images=[optimized_screenshot],
+                system_prompt=system_prompt,
+                max_tokens=256,
+                model_override=settings.GEMINI_REASONING_MODEL,  # Flash 3
+            )
+
+            if not response.success:
+                logger.warning(f"Visual concordance check failed: {response.error}")
+                # On API failure, pass through (don't block on concordance)
+                return True, f"Concordance check unavailable: {response.error}", 0.5
+
+            # Parse response
+            content = response.content.strip()
+            passed, diagnosis, confidence = self._parse_concordance_response(content)
+
+            latency_ms = (time.time() - start_time) * 1000
+            logger.info(
+                f"Visual concordance: {'PASS' if passed else 'FAIL'} "
+                f"(confidence={confidence:.2f}, latency={latency_ms:.0f}ms)"
+            )
+
+            return passed, diagnosis, confidence
+
+        except Exception as e:
+            logger.error(f"Visual concordance error: {e}", exc_info=True)
+            # On error, pass through
+            return True, f"Concordance check error: {e}", 0.5
+
+    def _parse_concordance_response(self, content: str) -> Tuple[bool, str, float]:
+        """Parse the structured concordance response from Flash."""
+        import re
+
+        # Default values
+        passed = True
+        diagnosis = "Unable to parse concordance response"
+        confidence = 0.5
+
+        # Parse CONCORDANCE
+        concordance_match = re.search(r'CONCORDANCE:\s*(PASS|FAIL)', content, re.IGNORECASE)
+        if concordance_match:
+            passed = concordance_match.group(1).upper() == "PASS"
+
+        # Parse CONFIDENCE
+        confidence_match = re.search(r'CONFIDENCE:\s*([0-9.]+)', content)
+        if confidence_match:
+            try:
+                confidence = float(confidence_match.group(1))
+                confidence = max(0.0, min(1.0, confidence))
+            except ValueError:
+                pass
+
+        # Parse DIAGNOSIS
+        diagnosis_match = re.search(r'DIAGNOSIS:\s*(.+?)(?:\n|$)', content, re.DOTALL)
+        if diagnosis_match:
+            diagnosis = diagnosis_match.group(1).strip()
+
+        return passed, diagnosis, confidence
 
 
 # ---------------------------------------------------------------------------

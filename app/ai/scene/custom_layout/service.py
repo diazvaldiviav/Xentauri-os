@@ -67,13 +67,16 @@ from app.ai.scene.custom_layout.validation import (
     ValidationContract,
     SandboxResult,
     FailedRepairAttempt,
+    PipelineContext,  # Sprint 11: Accumulated context
     visual_validator,
+    visual_analyzer,  # Sprint 11: For concordance check
     direct_fixer,
 )
 from app.ai.scene.custom_layout.validation.fixer import extract_state_css_rules
 from app.core.config import settings
 
-# Opus 4.5 for HTML generation + Fixer for repairs (Sprint 6.1)
+# Sprint 11: Opus 4.5 now used ONLY for repairs (fixer)
+# HTML generation moved to Gemini Flash for speed/cost optimization
 opus_provider = AnthropicProvider(model=settings.ANTHROPIC_REASONING_MODEL)
 
 
@@ -214,21 +217,23 @@ class CustomLayoutService:
             )
             
             # =========================================================
-            # GPT-5.2 HTML Generation (Sprint 5.2)
-            # Single pass - GPT-5.2 generates working CSS interactivity
+            # Sprint 11: Gemini Flash HTML Generation (NO thinking)
+            # Fast/cheap generation, Opus reserved for repairs
             # =========================================================
 
-            logger.info("Generating HTML layout with Opus 4.5")
+            logger.info("Generating HTML layout with Gemini Flash (no thinking)")
 
-            response = await opus_provider.generate(
+            response = await gemini_provider.generate(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=0.7,
                 max_tokens=16384,
+                model_override=settings.GEMINI_REASONING_MODEL,  # Flash 3
+                use_thinking=False,  # NO thinking for generation
             )
 
             if not response.success:
-                logger.error(f"Opus 4.5 generation failed: {response.error}")
+                logger.error(f"Flash generation failed: {response.error}")
                 return CustomLayoutResult(
                     html=None,
                     success=False,
@@ -237,7 +242,7 @@ class CustomLayoutService:
                 )
 
             html = self._clean_html_response(response.content)
-            logger.info(f"Opus 4.5 completed in {response.latency_ms:.0f}ms")
+            logger.info(f"Flash completed in {response.latency_ms:.0f}ms")
 
             latency_ms = (time.time() - start_time) * 1000
 
@@ -355,17 +360,21 @@ class CustomLayoutService:
             # Start conversation logging
             request_id = str(uuid.uuid4())
             conv = start_conversation(request_id, user_request)
-            conv.log_opus_prompt(system_prompt, prompt)
 
-            # Generate with Opus 4.5
-            response = await opus_provider.generate(
+            # Sprint 11: Generate with Gemini Flash (NO thinking) - fast/cheap
+            # Opus moved to fixer role only
+            logger.info("Generating HTML with Gemini Flash (no thinking)")
+
+            response = await gemini_provider.generate(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=0.7,
                 max_tokens=16384,
+                model_override=settings.GEMINI_REASONING_MODEL,  # Flash 3
+                use_thinking=False,  # NO thinking for generation
             )
 
-            # Log Opus response
+            # Log response (reusing Opus logger format for compatibility)
             conv.log_opus_response(
                 response.content if response.content else "ERROR: No content",
                 response.latency_ms,
@@ -373,8 +382,8 @@ class CustomLayoutService:
             )
 
             if not response.success:
-                logger.error(f"Opus generation failed: {response.error}")
-                conv.log_error(f"Opus failed: {response.error}")
+                logger.error(f"Flash generation failed: {response.error}")
+                conv.log_error(f"Flash failed: {response.error}")
                 return CustomLayoutResult(
                     html=None,
                     success=False,
@@ -383,7 +392,7 @@ class CustomLayoutService:
                 )
 
             html = self._clean_html_response(response.content)
-            logger.info(f"Opus completed in {response.latency_ms:.0f}ms")
+            logger.info(f"Flash completed in {response.latency_ms:.0f}ms")
 
             if not html or not self._is_valid_html_structure(html):
                 logger.warning("Invalid HTML structure from direct generation")
@@ -482,161 +491,101 @@ class CustomLayoutService:
 
         validation_result = await visual_validator.validate(contract)
 
-        if validation_result.valid:
+        # =====================================================================
+        # Sprint 11: FULL PIPELINE with ACCUMULATED CONTEXT
+        # All 3 models work as ONE - each step builds on previous context
+        # =====================================================================
+
+        # Create PipelineContext - this is the "shared memory"
+        pipeline_ctx = PipelineContext(
+            user_request=user_request,
+            content_data=content_data,
+            generated_html=html,
+            generation_model="gemini-3-flash",
+            generation_latency_ms=result.latency_ms,
+            validation_result=validation_result,
+        )
+
+        # Step 2: Visual Concordance Check (Flash NO thinking)
+        if validation_result.page_screenshot:
+            logger.info("Sprint 11 Step 2: Visual concordance check (Flash NO thinking)")
+            concordance_passed, concordance_diagnosis, concordance_confidence = \
+                await visual_analyzer.check_visual_concordance(
+                    screenshot_bytes=validation_result.page_screenshot,
+                    user_request=user_request,
+                )
+
+            # ACCUMULATE in context
+            pipeline_ctx.concordance_passed = concordance_passed
+            pipeline_ctx.concordance_diagnosis = concordance_diagnosis
+            pipeline_ctx.concordance_confidence = concordance_confidence
+            pipeline_ctx.screenshot_bytes = validation_result.page_screenshot
+
+            # Also store in validation_result for backward compatibility
+            validation_result.concordance_diagnosis = concordance_diagnosis
+
+            if concordance_passed:
+                logger.info(
+                    f"Visual concordance PASSED: {concordance_diagnosis} "
+                    f"(confidence={concordance_confidence:.2f})"
+                )
+            else:
+                logger.warning(
+                    f"Visual concordance FAILED: {concordance_diagnosis} "
+                    f"(confidence={concordance_confidence:.2f})"
+                )
+
+        # Step 3 & 4: Technical Diagnosis (Flash WITH thinking) + Opus Repair
+        # Pass FULL CONTEXT so models work as ONE
+        logger.info("Sprint 11 Step 3-4: Flash diagnosis + Opus repair (with FULL CONTEXT)")
+
+        if validation_result.page_screenshot:
+            # Full pipeline with vision AND accumulated context
+            final_html = await direct_fixer.repair_with_vision(
+                html=html,
+                sandbox_result=validation_result,
+                user_request=user_request,
+                screenshot=validation_result.page_screenshot,
+                failed_attempts=[],
+                pipeline_context=pipeline_ctx,  # Sprint 11: Pass full context
+            )
+        else:
+            # Fallback to text-only repair (no screenshot available)
+            logger.warning("No screenshot available, using text-only repair")
+            final_html = await direct_fixer.repair(
+                html=html,
+                sandbox_result=validation_result,
+                user_request=user_request,
+                failed_attempts=[],
+                pipeline_context=pipeline_ctx,  # Sprint 11: Pass full context
+            )
+
+        # Update context with final result
+        pipeline_ctx.repaired_html = final_html
+
+        # Return result - use Opus output if available, otherwise original
+        if final_html:
+            save_html_for_debug(final_html, suffix="sprint11_final")
             logger.info(
-                f"Visual validation passed (direct flow) - "
-                f"inputs={validation_result.inputs_responsive}/{validation_result.inputs_tested}, "
-                f"confidence={validation_result.confidence:.2f}"
+                f"Sprint 11 pipeline complete - "
+                f"concordance={'PASS' if pipeline_ctx.concordance_passed else 'FAIL'}, "
+                f"original_len={len(html)}, final_len={len(final_html)}"
             )
             return CustomLayoutResult(
-                html=html,
+                html=final_html,
                 success=True,
                 error=None,
                 latency_ms=(time.time() - start_time) * 1000,
             )
-
-        # Step 3: Validation failed - attempt repair
-        logger.warning(
-            f"Visual validation failed (direct flow): {validation_result.failure_summary}"
-        )
-
-        max_repair_attempts = getattr(settings, 'VALIDATION_REPAIR_MAX_RETRIES', 2)
-
-        # Sprint 7: Check if vision repair is enabled
-        use_vision_repair = getattr(settings, 'VISION_REPAIR_ENABLED', True)
-
-        # Track original HTML and validation for consistent repair attempts
-        # IMPORTANT: Always repair from original, not from failed repair attempts
-        original_html = html
-        original_validation_result = validation_result
-        original_inputs_tested = validation_result.inputs_tested
-        original_inputs_responsive = validation_result.inputs_responsive
-
-        # Track best repair attempt (in case all fail, return the best one)
-        best_repaired_html = None
-        best_responsive_count = 0
-
-        # Sprint 8: Track failed repair attempts to avoid repeating mistakes
-        failed_attempts: list[FailedRepairAttempt] = []
-
-        for attempt in range(max_repair_attempts):
-            logger.info(f"Visual repair attempt {attempt + 1}/{max_repair_attempts} (direct flow)")
-
-            # Sprint 7: Use vision repair if screenshot is available
-            # ALWAYS repair from ORIGINAL HTML to avoid accumulating errors
-            # Sprint 8: Pass failed_attempts so fixer learns from previous failures
-            if use_vision_repair and original_validation_result.page_screenshot:
-                logger.info("Using vision-enhanced repair with screenshot")
-                repaired_html = await direct_fixer.repair_with_vision(
-                    html=original_html,
-                    sandbox_result=original_validation_result,
-                    user_request=user_request,
-                    screenshot=original_validation_result.page_screenshot,
-                    failed_attempts=failed_attempts,
-                )
-            else:
-                # Fallback to text-only repair
-                repaired_html = await direct_fixer.repair(
-                    html=original_html,
-                    sandbox_result=original_validation_result,
-                    user_request=user_request,
-                    failed_attempts=failed_attempts,
-                )
-
-            if not repaired_html:
-                logger.warning(f"Repair attempt {attempt + 1} failed to produce HTML")
-                # Sprint 8: Record failed attempt
-                failed_attempts.append(FailedRepairAttempt(
-                    attempt_number=attempt + 1,
-                    failure_reason="no_html",
-                    inputs_before=original_inputs_tested,
-                    inputs_after=0,
-                    responsive_before=original_inputs_responsive,
-                    responsive_after=0,
-                ))
-                continue
-
-            # Save repaired HTML for debugging
-            save_html_for_debug(repaired_html, suffix=f"direct_repaired_{attempt + 1}")
-
-            # Step 4: Re-validate repaired HTML
-            repair_contract = ValidationContract(
-                html=repaired_html,
-                layout_type=detected_type,
-                visual_change_threshold=getattr(settings, 'VISUAL_CHANGE_THRESHOLD', 0.05),
-                blank_page_threshold=getattr(settings, 'BLANK_PAGE_THRESHOLD', 0.95),
-                max_inputs_to_test=getattr(settings, 'MAX_INPUTS_TO_TEST', 10),
-                stabilization_ms=getattr(settings, 'INTERACTION_STABILIZATION_MS', 150),
+        else:
+            # Opus repair failed, return original HTML
+            logger.warning("Opus repair failed, returning original HTML")
+            return CustomLayoutResult(
+                html=html,
+                success=True,
+                error="Opus repair failed, returning original",
+                latency_ms=(time.time() - start_time) * 1000,
             )
-
-            repair_validation = await visual_validator.validate(repair_contract)
-
-            # Check for destructive repair: did we lose interactive elements?
-            if repair_validation.inputs_tested < original_inputs_tested:
-                logger.warning(
-                    f"Repair attempt {attempt + 1} REJECTED: destructive repair detected. "
-                    f"Original had {original_inputs_tested} inputs, repair has {repair_validation.inputs_tested}. "
-                    f"Fixer removed/hid interactive elements instead of fixing them."
-                )
-                # Sprint 8: Record destructive attempt with CSS rules tried
-                css_rules_tried = extract_state_css_rules(repaired_html)
-                failed_attempts.append(FailedRepairAttempt(
-                    attempt_number=attempt + 1,
-                    failure_reason="destructive",
-                    inputs_before=original_inputs_tested,
-                    inputs_after=repair_validation.inputs_tested,
-                    responsive_before=original_inputs_responsive,
-                    responsive_after=repair_validation.inputs_responsive,
-                    key_changes_attempted=css_rules_tried,
-                ))
-                continue
-
-            # Track best attempt (most responsive inputs)
-            if repair_validation.inputs_responsive > best_responsive_count:
-                best_repaired_html = repaired_html
-                best_responsive_count = repair_validation.inputs_responsive
-
-            if repair_validation.valid:
-                logger.info(
-                    f"Repair successful after {attempt + 1} attempts (direct flow) - "
-                    f"inputs={repair_validation.inputs_responsive}/{repair_validation.inputs_tested}"
-                )
-                return CustomLayoutResult(
-                    html=repaired_html,
-                    success=True,
-                    error=None,
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-
-            logger.warning(
-                f"Repair attempt {attempt + 1} improved but not enough: "
-                f"{repair_validation.inputs_responsive}/{repair_validation.inputs_tested} responsive"
-            )
-            # Sprint 8: Record insufficient attempt with CSS rules tried
-            css_rules_tried = extract_state_css_rules(repaired_html)
-            failed_attempts.append(FailedRepairAttempt(
-                attempt_number=attempt + 1,
-                failure_reason="insufficient",
-                inputs_before=original_inputs_tested,
-                inputs_after=repair_validation.inputs_tested,
-                responsive_before=original_inputs_responsive,
-                responsive_after=repair_validation.inputs_responsive,
-                key_changes_attempted=css_rules_tried,
-            ))
-
-        # All repair attempts failed - return best effort
-        final_html = best_repaired_html or original_html
-        logger.warning(
-            f"All repair attempts failed (direct flow). Returning best HTML. "
-            f"Best responsive count: {best_responsive_count}/{original_inputs_tested}"
-        )
-
-        return CustomLayoutResult(
-            html=final_html,
-            success=True,  # Return HTML anyway, let user see it
-            error=f"Validation incomplete: {original_validation_result.failure_summary}",
-            latency_ms=(time.time() - start_time) * 1000,
-        )
 
     def _clean_html_response(self, content: str) -> Optional[str]:
         """

@@ -52,6 +52,8 @@ from .contracts import (
     InteractionResult,
     # Sprint 8: Repair history
     FailedRepairAttempt,
+    # Sprint 11: Pipeline context (accumulated memory)
+    PipelineContext,
 )
 from .sandbox import sandbox_renderer, RenderContext
 from .visual_analyzer import visual_analyzer, save_screenshot
@@ -390,6 +392,8 @@ __all__ = [
     "InteractionResult",
     # Sprint 8: Repair history
     "FailedRepairAttempt",
+    # Sprint 11: Pipeline context
+    "PipelineContext",
     # Render context
     "RenderContext",
     # Individual components (for advanced usage)

@@ -656,6 +656,8 @@ class SandboxResult:
     screenshot_path: Optional[str] = None    # Path where screenshot was saved
     # Sprint 7: Count of invisible elements
     invisible_elements_count: int = 0
+    # Sprint 11: Visual concordance diagnosis (Flash's analysis)
+    concordance_diagnosis: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization/logging."""
@@ -723,3 +725,136 @@ class SandboxResult:
     def get_unresponsive_inputs(self) -> List[InteractionResult]:
         """Get inputs that didn't respond to interaction."""
         return [ir for ir in self.interaction_results if not ir.responsive]
+
+
+# ---------------------------------------------------------------------------
+# SPRINT 11: PIPELINE CONTEXT (Accumulated Memory)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PipelineContext:
+    """
+    Sprint 11: Accumulated context that flows through all pipeline steps.
+
+    This is the "shared memory" that allows all 3 models to work as ONE.
+    Each step adds to this context, and subsequent steps see ALL previous context.
+
+    Flow:
+    - Step 1 (Flash generate): Creates HTML → adds to context
+    - Step 2 (Flash concordance): Checks visual match → adds result to context
+    - Step 3 (Flash diagnosis): Analyzes with FULL context → adds diagnosis
+    - Step 4 (Opus repair): Repairs with FULL context → produces final HTML
+    """
+    # Original inputs
+    user_request: str
+    content_data: Optional[Dict[str, Any]] = None
+
+    # Step 1: HTML Generation
+    generated_html: Optional[str] = None
+    generation_model: str = "gemini-3-flash"
+    generation_latency_ms: float = 0.0
+
+    # Step 2: Visual Concordance
+    concordance_passed: Optional[bool] = None
+    concordance_diagnosis: Optional[str] = None
+    concordance_confidence: float = 0.0
+    screenshot_bytes: Optional[bytes] = None
+
+    # Step 3: Technical Diagnosis
+    css_diagnosis: Optional[str] = None  # Programmatic analysis
+    flash_diagnosis: Optional[str] = None  # Flash's full diagnosis
+    interaction_screenshots: List[Tuple[bytes, bytes]] = field(default_factory=list)  # Before/after pairs
+
+    # Step 4: Repair
+    repaired_html: Optional[str] = None
+    repair_model: str = "claude-opus-4"
+    repair_latency_ms: float = 0.0
+
+    # Validation results (from VisualValidator)
+    validation_result: Optional["SandboxResult"] = None
+
+    def to_flash_diagnosis_prompt(self) -> str:
+        """
+        Build context summary for Flash (Step 3) diagnosis.
+
+        Flash needs to know EVERYTHING that happened before:
+        - What user requested
+        - What HTML was generated
+        - What concordance check said (PASS/FAIL and why)
+        - Screenshots for visual analysis
+        """
+        lines = [
+            "# PIPELINE CONTEXT (Previous Steps)",
+            "",
+            "## STEP 1: HTML Generation",
+            f"- Model: {self.generation_model}",
+            f"- Latency: {self.generation_latency_ms:.0f}ms",
+            f"- HTML Length: {len(self.generated_html) if self.generated_html else 0} chars",
+            "",
+            "## STEP 2: Visual Concordance Check",
+        ]
+
+        if self.concordance_passed is not None:
+            status = "✅ PASSED" if self.concordance_passed else "❌ FAILED"
+            lines.append(f"- Result: {status}")
+            lines.append(f"- Confidence: {self.concordance_confidence:.2f}")
+            if self.concordance_diagnosis:
+                lines.append(f"- Diagnosis: {self.concordance_diagnosis}")
+        else:
+            lines.append("- Result: Not yet executed")
+
+        lines.extend([
+            "",
+            "## USER REQUEST (Original)",
+            f'"{self.user_request[:500]}"' if len(self.user_request) > 500 else f'"{self.user_request}"',
+            "",
+            "---",
+            "",
+        ])
+
+        return "\n".join(lines)
+
+    def to_opus_repair_prompt(self) -> str:
+        """
+        Build full context summary for Opus (Step 4) repair.
+
+        Opus needs the COMPLETE picture:
+        - User request
+        - Concordance result (what visual check found)
+        - Flash diagnosis (technical analysis)
+        - HTML to repair
+        """
+        lines = [
+            "# FULL PIPELINE CONTEXT",
+            "",
+            "## ORIGINAL USER REQUEST",
+            f'"{self.user_request[:500]}"' if len(self.user_request) > 500 else f'"{self.user_request}"',
+            "",
+            "## STEP 2: Visual Concordance Result",
+        ]
+
+        if self.concordance_passed is not None:
+            status = "✅ PASSED" if self.concordance_passed else "❌ FAILED"
+            lines.append(f"**{status}** (confidence: {self.concordance_confidence:.2f})")
+            if self.concordance_diagnosis:
+                lines.append(f"Diagnosis: {self.concordance_diagnosis}")
+        else:
+            lines.append("Not executed")
+
+        lines.extend([
+            "",
+            "## STEP 3: Technical Diagnosis (Flash)",
+        ])
+
+        if self.flash_diagnosis:
+            lines.append(self.flash_diagnosis)
+        else:
+            lines.append("Not yet executed")
+
+        lines.extend([
+            "",
+            "---",
+            "",
+        ])
+
+        return "\n".join(lines)
