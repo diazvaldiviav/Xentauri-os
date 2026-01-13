@@ -30,12 +30,18 @@ Usage:
 import logging
 import time
 import os
+import uuid
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
 from app.ai.providers.gemini import gemini_provider
 from app.ai.providers.anthropic_provider import AnthropicProvider
+from app.ai.scene.custom_layout.conversation_logger import (
+    start_conversation,
+    get_current_conversation,
+    end_conversation,
+)
 from app.ai.scene.custom_layout.prompts import (
     build_custom_layout_prompt,
     build_data_to_html_prompt,
@@ -346,6 +352,11 @@ class CustomLayoutService:
 
             logger.info(f"Generating HTML from data (type={detected_type})")
 
+            # Start conversation logging
+            request_id = str(uuid.uuid4())
+            conv = start_conversation(request_id, user_request)
+            conv.log_opus_prompt(system_prompt, prompt)
+
             # Generate with Opus 4.5
             response = await opus_provider.generate(
                 prompt=prompt,
@@ -354,8 +365,16 @@ class CustomLayoutService:
                 max_tokens=16384,
             )
 
+            # Log Opus response
+            conv.log_opus_response(
+                response.content if response.content else "ERROR: No content",
+                response.latency_ms,
+                response.usage.total_tokens if response.usage else 0
+            )
+
             if not response.success:
                 logger.error(f"Opus generation failed: {response.error}")
+                conv.log_error(f"Opus failed: {response.error}")
                 return CustomLayoutResult(
                     html=None,
                     success=False,

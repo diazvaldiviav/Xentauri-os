@@ -59,7 +59,7 @@ class ValidationContract:
     visual_change_threshold: float = 0.02  # 2% pixel difference = change detected
     blank_page_threshold: float = 0.95     # 95% uniform color = blank page
     max_inputs_to_test: int = 10
-    stabilization_ms: int = 1000  # Wait after click for animations (1s for flips, transitions)
+    stabilization_ms: int = 600  # Wait after click for animations (0.6s - optimized for speed)
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ import re
 from typing import Optional, List, TYPE_CHECKING
 
 from .contracts import SandboxResult, FailedRepairAttempt
+from ..conversation_logger import get_current_conversation
 
 if TYPE_CHECKING:
     pass  # Future type hints
@@ -1282,6 +1283,11 @@ CRITICAL: Base your diagnosis on what the USER REQUESTED, not assumptions."""
                 f"(1 initial + {len(interaction_screenshots)} interaction screenshots)"
             )
 
+            # Log Flash prompt
+            conv = get_current_conversation()
+            if conv:
+                conv.log_flash_prompt(FLASH_ANALYZER_SYSTEM_PROMPT, flash_verification_prompt, len(all_images))
+
             flash_response = await gemini_provider.generate_with_vision(
                 prompt=flash_verification_prompt,
                 images=all_images,
@@ -1292,10 +1298,15 @@ CRITICAL: Base your diagnosis on what the USER REQUESTED, not assumptions."""
 
             if not flash_response.success:
                 logger.warning(f"Flash vision verification failed: {flash_response.error}")
+                if conv:
+                    conv.log_error(f"Flash failed: {flash_response.error}")
                 # Fallback: use CSS diagnosis directly without Flash verification
                 flash_diagnosis = css_diagnosis
             else:
                 flash_diagnosis = flash_response.content.strip()
+                # Log Flash response
+                if conv:
+                    conv.log_flash_response(flash_diagnosis, flash_response.latency_ms)
 
             logger.info(f"Diagnosis complete ({len(flash_diagnosis)} chars)")
 
@@ -1312,6 +1323,10 @@ CRITICAL: Base your diagnosis on what the USER REQUESTED, not assumptions."""
                 failed_attempts=failed_attempts,
             )
 
+            # Log Pro prompt
+            if conv:
+                conv.log_pro_prompt(REPAIR_SYSTEM_PROMPT, repair_prompt, 1)
+
             # Pro repairs with vision (can see the screenshot too)
             pro_response = await gemini_provider.generate_with_vision(
                 prompt=repair_prompt,
@@ -1321,8 +1336,18 @@ CRITICAL: Base your diagnosis on what the USER REQUESTED, not assumptions."""
                 model_override=settings.GEMINI_PRO_MODEL,
             )
 
+            # Log Pro response
+            if conv:
+                conv.log_pro_response(
+                    pro_response.content if pro_response.content else "ERROR: No content",
+                    pro_response.latency_ms,
+                    pro_response.success
+                )
+
             if not pro_response.success:
                 logger.warning(f"Pro vision repair failed: {pro_response.error}")
+                if conv:
+                    conv.log_error(f"Pro vision failed: {pro_response.error}")
                 # Fallback to non-vision two-step repair
                 return await self.repair(html, sandbox_result, user_request, max_tokens, failed_attempts)
 
