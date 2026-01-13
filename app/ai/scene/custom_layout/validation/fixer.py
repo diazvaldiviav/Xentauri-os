@@ -1,15 +1,20 @@
 """
-Direct Fixer - Phase 7: Send full context to Gemini 3 Pro for repair.
+Direct Fixer - Phase 7: Two-step repair pipeline.
 
 Sprint 6: Visual-based validation system.
 Sprint 7: Vision-enhanced repair with screenshots.
-Sprint 9: Migrated from Sonnet 4.5 to Gemini 3 Pro for cost optimization.
+Sprint 9: Two-step pipeline for better repairs:
+  - Step 1: Gemini 3 Flash analyzes HTML and creates structured diagnosis
+           (uses _build_css_diagnosis logic via LLM for precise line-by-line analysis)
+  - Step 2: Gemini 3 Pro repairs using Flash's structured diagnosis
 
-Key difference from old system:
-- NO separate diagnosis step
-- Send ALL phase failures directly to Gemini 3 Pro
-- Full context = better repairs
-- Sprint 7: Screenshot analysis for invisible element detection
+Two-Step Pipeline Rationale:
+============================
+Gemini 3 Pro sometimes ignores repair rules when given raw validation results.
+By having Flash pre-analyze and transcribe EXACT errors with line numbers,
+Pro receives a precise "prescription" to follow - not raw validation data.
+
+Flash is fast/cheap for analysis, Pro is powerful for code generation.
 """
 
 import logging
@@ -169,6 +174,185 @@ REPAIR_SYSTEM_PROMPT = f"""You are an HTML repair specialist for interactive web
 ## OUTPUT
 
 Return ONLY the fixed HTML from <!DOCTYPE html> to </html>.
+No markdown, no explanations, no code blocks."""
+
+
+# ---------------------------------------------------------------------------
+# SPRINT 9: TWO-STEP PIPELINE - FLASH ANALYZER PROMPT
+# ---------------------------------------------------------------------------
+
+FLASH_ANALYZER_SYSTEM_PROMPT = """You are an HTML/CSS diagnostic specialist. Your job is to analyze
+validation failures and produce a PRECISE, LINE-BY-LINE diagnosis for the repair model.
+
+## YOUR OUTPUT FORMAT
+
+For each failing element, provide:
+1. The EXACT line number(s) in the HTML where the problem is
+2. The EXACT CSS selector that needs modification
+3. The SPECIFIC property that's missing or wrong
+4. The CONCRETE fix needed (with actual values, not variables)
+
+## CRITICAL RULES
+
+1. Be EXTREMELY SPECIFIC - line numbers, selectors, property names
+2. Use CONCRETE values (#ffffff, rgba(0,255,0,0.3)) - NEVER var()
+3. Focus on background-color for visual feedback - it's MANDATORY
+4. If no background-color change exists for a state, that's THE bug
+
+## OUTPUT STRUCTURE
+
+```
+ELEMENT 1: [selector]
+- Line: [exact line number]
+- Problem: [precise description]
+- Fix: Add/Change [property]: [concrete value]
+
+ELEMENT 2: [selector]
+- Line: [exact line number]
+- Problem: [precise description]
+- Fix: Add/Change [property]: [concrete value]
+```
+
+Be concise but complete. The repair model will use your diagnosis verbatim."""
+
+
+def build_flash_diagnosis_prompt(
+    html: str,
+    sandbox_result: "SandboxResult",
+    threshold: float = 0.02,
+) -> str:
+    """
+    Sprint 9: Build prompt for Gemini 3 Flash to analyze validation failures.
+
+    Flash analyzes the HTML and sandbox_result to produce a structured diagnosis
+    that Gemini 3 Pro can follow precisely.
+
+    Args:
+        html: The HTML that failed validation
+        sandbox_result: Full validation result with interaction results
+        threshold: Pixel change threshold for failure detection
+
+    Returns:
+        Prompt for Flash diagnosis
+    """
+    # Get failing elements info
+    failing_elements = []
+    for ir in sandbox_result.interaction_results:
+        ctx = ir.get_repair_context(threshold=threshold)
+        if ctx["failure_type"] != "passed":
+            failing_elements.append({
+                "selector": ctx["selector"],
+                "failure_type": ctx["failure_type"],
+                "pixel_diff_pct": ctx["pixel_diff_pct"],
+                "threshold": ctx["threshold"],
+                "element": ctx.get("element", {}),
+            })
+
+    # Build failing elements summary
+    failing_summary = []
+    for i, elem in enumerate(failing_elements, 1):
+        tag = elem["element"].get("tag", "unknown")
+        classes = elem["element"].get("key_attributes", {}).get("class", "")
+        text = elem["element"].get("text_content", "")[:30]
+        failing_summary.append(
+            f"{i}. `{elem['selector']}` ({tag}, classes: {classes})\n"
+            f"   - Failure: {elem['failure_type']}\n"
+            f"   - Pixel change: {elem['pixel_diff_pct']} (need {elem['threshold']})\n"
+            f"   - Text: \"{text}\""
+        )
+
+    # Truncate HTML for Flash (it doesn't need full HTML, just enough to find lines)
+    # But we need line numbers, so keep structure
+    html_with_lines = ""
+    for i, line in enumerate(html.split('\n'), 1):
+        if len(html_with_lines) < 15000:  # Limit for Flash
+            html_with_lines += f"{i:4d}| {line}\n"
+        else:
+            html_with_lines += f"... [truncated at line {i}] ...\n"
+            break
+
+    return f"""Analyze this HTML that failed visual validation and produce a PRECISE diagnosis.
+
+## FAILING ELEMENTS ({len(failing_elements)} total)
+
+{chr(10).join(failing_summary)}
+
+## HTML (with line numbers)
+
+```html
+{html_with_lines}
+```
+
+## YOUR TASK
+
+For EACH failing element above:
+1. Find the CSS rules that apply to its state (.selected, .active, :hover, etc.)
+2. Check if those rules have background-color changes (REQUIRED for visual detection)
+3. Identify the EXACT line number and the SPECIFIC fix needed
+
+Remember: The validation uses SCREENSHOT COMPARISON. Without background-color change,
+clicks produce no visible pixel difference → validation fails.
+
+Produce your diagnosis now:"""
+
+
+def build_pro_repair_prompt_with_diagnosis(
+    html: str,
+    flash_diagnosis: str,
+    user_request: str,
+    failed_attempts: Optional[List["FailedRepairAttempt"]] = None,
+) -> str:
+    """
+    Sprint 9: Build repair prompt for Gemini 3 Pro using Flash's diagnosis.
+
+    This is the second step of the two-step pipeline. Pro receives:
+    1. Flash's precise diagnosis (line numbers, exact fixes)
+    2. Original HTML
+    3. User request for context
+
+    Args:
+        html: The HTML that failed validation
+        flash_diagnosis: Structured diagnosis from Gemini 3 Flash
+        user_request: Original user request
+        failed_attempts: Previous failed repair attempts
+
+    Returns:
+        Prompt for Pro repair
+    """
+    # Build repair history section if applicable
+    repair_history_section = _build_repair_history_section(failed_attempts or [])
+
+    # Truncate user request
+    request_preview = user_request[:300] if len(user_request) > 300 else user_request
+
+    return f"""Fix this HTML using the PRECISE DIAGNOSIS below.
+
+## FLASH DIAGNOSIS (follow this EXACTLY)
+
+{flash_diagnosis}
+
+---
+{repair_history_section}
+## ORIGINAL USER REQUEST
+
+"{request_preview}"
+
+## HTML TO FIX
+
+```html
+{html}
+```
+
+## INSTRUCTIONS
+
+1. Apply EACH fix from the Flash Diagnosis above
+2. Use the EXACT line numbers and property values specified
+3. Do NOT remove or hide any interactive elements
+4. Preserve all existing functionality that works
+
+## OUTPUT
+
+Return ONLY the corrected HTML from <!DOCTYPE html> to </html>.
 No markdown, no explanations, no code blocks."""
 
 
@@ -827,10 +1011,14 @@ Return ONLY the corrected HTML from <!DOCTYPE html> to </html>.
 
 class DirectFixer:
     """
-    Phase 7: Send full phase report to Gemini 3 Pro for repair.
+    Phase 7: Two-step repair pipeline using Gemini Flash + Pro.
 
-    Sprint 9: Migrated from Sonnet 4.5 to Gemini 3 Pro for cost optimization.
-    Gemini 3 Pro has strong reasoning for CSS/JS fixes with concrete pixel guidance.
+    Sprint 9: Two-step pipeline for better repairs:
+    - Step 1: Gemini 3 Flash analyzes and creates structured diagnosis
+    - Step 2: Gemini 3 Pro repairs using the diagnosis
+
+    This approach improves repair accuracy because Pro receives precise
+    line-by-line instructions instead of raw validation data.
     """
 
     async def repair(
@@ -842,7 +1030,15 @@ class DirectFixer:
         failed_attempts: Optional[List[FailedRepairAttempt]] = None,
     ) -> Optional[str]:
         """
-        Send all phase failures directly to Gemini 3 Pro for repair.
+        Two-step repair: Flash diagnoses, Pro repairs.
+
+        Sprint 9: Changed from single-step to two-step pipeline.
+
+        Step 1: Gemini 3 Flash analyzes the HTML and validation results
+                to produce a precise, line-by-line diagnosis.
+
+        Step 2: Gemini 3 Pro receives the diagnosis and repairs the HTML
+                following the exact instructions from Flash.
 
         Args:
             html: HTML that failed validation
@@ -859,7 +1055,7 @@ class DirectFixer:
             return html
 
         logger.info(
-            f"Starting Gemini 3 Pro repair - "
+            f"Starting two-step repair pipeline - "
             f"failures: {sandbox_result.failure_summary}, "
             f"previous_attempts: {len(failed_attempts) if failed_attempts else 0}"
         )
@@ -868,12 +1064,45 @@ class DirectFixer:
             from app.ai.providers.gemini import gemini_provider
             from app.core.config import settings
 
-            # Build prompt with full context (Sprint 8: includes repair history)
-            prompt = build_repair_prompt(html, sandbox_result, user_request, failed_attempts)
+            # ===================================================================
+            # STEP 1: Flash Analysis (fast, cheap)
+            # ===================================================================
+            logger.info("Step 1: Gemini 3 Flash analyzing HTML for precise diagnosis...")
 
-            # Call Gemini 3 Pro with thinking mode for deeper reasoning
-            response = await gemini_provider.generate(
-                prompt=prompt,
+            diagnosis_prompt = build_flash_diagnosis_prompt(html, sandbox_result)
+
+            flash_response = await gemini_provider.generate(
+                prompt=diagnosis_prompt,
+                system_prompt=FLASH_ANALYZER_SYSTEM_PROMPT,
+                temperature=0.1,  # Very low for consistent analysis
+                max_tokens=2048,  # Diagnosis should be concise
+                # Uses default Flash model (no override needed)
+            )
+
+            if not flash_response.success:
+                logger.warning(f"Flash diagnosis failed: {flash_response.error}")
+                # Fallback to legacy single-step repair
+                return await self._legacy_repair(
+                    html, sandbox_result, user_request, max_tokens, failed_attempts
+                )
+
+            flash_diagnosis = flash_response.content.strip()
+            logger.info(f"Flash diagnosis complete ({len(flash_diagnosis)} chars)")
+
+            # ===================================================================
+            # STEP 2: Pro Repair (using Flash's diagnosis)
+            # ===================================================================
+            logger.info("Step 2: Gemini 3 Pro repairing using Flash diagnosis...")
+
+            repair_prompt = build_pro_repair_prompt_with_diagnosis(
+                html=html,
+                flash_diagnosis=flash_diagnosis,
+                user_request=user_request,
+                failed_attempts=failed_attempts,
+            )
+
+            pro_response = await gemini_provider.generate(
+                prompt=repair_prompt,
                 system_prompt=REPAIR_SYSTEM_PROMPT,
                 temperature=0.2,  # Low temperature for consistent repairs
                 max_tokens=max_tokens,
@@ -882,26 +1111,69 @@ class DirectFixer:
                 thinking_level="HIGH",
             )
 
-            if not response.success:
-                logger.warning(f"Gemini 3 Pro repair failed: {response.error}")
+            if not pro_response.success:
+                logger.warning(f"Gemini 3 Pro repair failed: {pro_response.error}")
                 return None
 
             # Clean and extract HTML
-            repaired_html = self._clean_html_response(response.content)
+            repaired_html = self._clean_html_response(pro_response.content)
 
             if repaired_html:
                 logger.info(
-                    f"Repair completed - "
+                    f"Two-step repair completed - "
                     f"original: {len(html)} chars, "
                     f"repaired: {len(repaired_html)} chars"
                 )
                 return repaired_html
             else:
-                logger.warning("Failed to extract valid HTML from repair response")
+                logger.warning("Failed to extract valid HTML from Pro repair response")
                 return None
 
         except Exception as e:
-            logger.error(f"Direct repair error: {e}", exc_info=True)
+            logger.error(f"Two-step repair error: {e}", exc_info=True)
+            return None
+
+    async def _legacy_repair(
+        self,
+        html: str,
+        sandbox_result: SandboxResult,
+        user_request: str,
+        max_tokens: int = 16384,
+        failed_attempts: Optional[List[FailedRepairAttempt]] = None,
+    ) -> Optional[str]:
+        """
+        Legacy single-step repair (fallback if Flash diagnosis fails).
+
+        Uses the old approach of sending all context directly to Pro.
+        """
+        logger.info("Using legacy single-step repair (Flash diagnosis failed)")
+
+        try:
+            from app.ai.providers.gemini import gemini_provider
+            from app.core.config import settings
+
+            # Build prompt with full context (Sprint 8: includes repair history)
+            prompt = build_repair_prompt(html, sandbox_result, user_request, failed_attempts)
+
+            # Call Gemini 3 Pro with thinking mode
+            response = await gemini_provider.generate(
+                prompt=prompt,
+                system_prompt=REPAIR_SYSTEM_PROMPT,
+                temperature=0.2,
+                max_tokens=max_tokens,
+                model_override=settings.GEMINI_PRO_MODEL,
+                use_thinking=True,
+                thinking_level="HIGH",
+            )
+
+            if not response.success:
+                logger.warning(f"Legacy repair failed: {response.error}")
+                return None
+
+            return self._clean_html_response(response.content)
+
+        except Exception as e:
+            logger.error(f"Legacy repair error: {e}", exc_info=True)
             return None
 
     async def repair_with_reasoning(
@@ -942,12 +1214,15 @@ class DirectFixer:
     ) -> Optional[str]:
         """
         Sprint 7: Repair using vision (screenshot analysis).
-        Sprint 9: Migrated to Gemini 3 Pro.
+        Sprint 9: Uses Gemini 3 Pro with vision, falls back to two-step pipeline.
 
         This is the most powerful repair method. It:
         1. Shows Gemini the actual rendered screenshot
         2. Compares what user requested vs what's visible
         3. Identifies invisible elements and fixes them
+
+        If vision repair fails, falls back to the two-step pipeline
+        (Flash diagnosis → Pro repair).
 
         Args:
             html: HTML that failed validation
