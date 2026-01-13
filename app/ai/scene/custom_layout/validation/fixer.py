@@ -257,9 +257,10 @@ def build_flash_diagnosis_prompt(
     # Build failing elements summary
     failing_summary = []
     for i, elem in enumerate(failing_elements, 1):
-        tag = elem["element"].get("tag", "unknown")
-        classes = elem["element"].get("key_attributes", {}).get("class", "")
-        text = elem["element"].get("text_content", "")[:30]
+        tag = elem["element"].get("tag", "unknown") or "unknown"
+        classes = elem["element"].get("key_attributes", {}).get("class", "") or ""
+        text_content = elem["element"].get("text_content") or ""
+        text = text_content[:30] if text_content else ""
         failing_summary.append(
             f"{i}. `{elem['selector']}` ({tag}, classes: {classes})\n"
             f"   - Failure: {elem['failure_type']}\n"
