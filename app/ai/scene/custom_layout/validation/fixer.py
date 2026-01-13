@@ -693,139 +693,174 @@ def _build_phase_summary(sandbox_result) -> str:
 
 def _build_css_diagnosis(html: str, interaction_results: list, threshold: float = 0.02) -> str:
     """
-    Sprint 6.5: Build detailed CSS diagnosis for each failing element.
-    Sprint 11: Also includes WORKING elements so Flash can compare.
+    Sprint 11: Build OBSERVATIONAL diagnosis for Flash analysis.
+    Sprint 12: Added cascade/modal context information.
 
-    This is the critical section that tells Sonnet EXACTLY what CSS to fix.
+    This function reports FACTS ONLY - no solutions or recommendations.
+    Flash (with thinking) will analyze these facts + screenshots to determine
+    the actual cause. Opus will then determine the fix.
+
+    Philosophy: "Report what you see, let the LLM reason about it."
     """
     lines = []
 
-    # Sprint 11: First show elements that WORK (for comparison)
+    # Sprint 12: Separate by cascade level
+    original_results = [ir for ir in interaction_results if ir.cascade_level == 0]
+    cascade_results = [ir for ir in interaction_results if ir.cascade_level > 0]
+
+    # Separate working and failing elements
     working_elements = [ir for ir in interaction_results if ir.get_repair_context(threshold=threshold)["failure_type"] == "passed"]
     failing_elements = [ir for ir in interaction_results if ir.get_repair_context(threshold=threshold)["failure_type"] != "passed"]
 
-    # Summary for Flash
     total = len(interaction_results)
     working = len(working_elements)
     failing = len(failing_elements)
 
-    if working > 0 and failing > 0:
-        lines.append(f"## ⚠️ PARTIAL SUCCESS: {working}/{total} elements work, {failing}/{total} fail\n")
-        lines.append("**CRITICAL**: Compare WORKING vs FAILING elements to find the pattern!\n")
+    # Summary
+    lines.append(f"## INTERACTION TEST RESULTS: {working}/{total} responsive\n")
 
-        # Show working elements first
-        lines.append("## ✅ WORKING ELEMENTS (use these as reference)\n")
-        for ir in working_elements[:3]:  # Limit to 3
+    # Sprint 12: Show cascade structure if present
+    if cascade_results:
+        original_working = len([ir for ir in original_results if ir.responsive])
+        cascade_working = len([ir for ir in cascade_results if ir.responsive])
+
+        lines.append("### 📊 TEST STRUCTURE\n")
+        lines.append(f"- **Original Page Elements:** {original_working}/{len(original_results)} responsive")
+        lines.append(f"- **Modal/Overlay Elements:** {cascade_working}/{len(cascade_results)} responsive")
+
+        # Group cascade by trigger
+        triggers = {}
+        for ir in cascade_results:
+            trigger = ir.cascade_trigger or "unknown"
+            if trigger not in triggers:
+                triggers[trigger] = []
+            triggers[trigger].append(ir)
+
+        if triggers:
+            lines.append("\n**Modal Triggers Observed:**")
+            for trigger, results in triggers.items():
+                responsive = len([r for r in results if r.responsive])
+                lines.append(f"  - Clicking `{trigger}` opened modal → {responsive}/{len(results)} modal buttons responsive")
+        lines.append("")
+
+    # Show working elements (for pattern comparison)
+    if working > 0:
+        lines.append("### ✅ WORKING ELEMENTS\n")
+        for ir in working_elements[:5]:
             ctx = ir.get_repair_context(threshold=threshold)
             selector = ctx["selector"]
             elem = ctx.get("element", {})
             tag = elem.get("tag", "div")
-            text = elem.get("text_content", "")[:30] if elem.get("text_content") else ""
+            text = elem.get("text_content", "")[:40] if elem.get("text_content") else ""
+            key_attrs = elem.get("key_attributes", {})
+
+            # Sprint 12: Show cascade context
+            cascade_info = ""
+            if ir.cascade_level > 0:
+                cascade_info = f" [MODAL, triggered by {ir.cascade_trigger}]"
+
+            lines.append(f"- `{selector}`{cascade_info}")
+            lines.append(f"  - Tag: `<{tag}>`, Pixel Change: {ctx['pixel_diff_pct']}")
+            if text:
+                lines.append(f"  - Text: \"{text}\"")
+            if key_attrs.get("onclick") or key_attrs.get("data-action"):
+                lines.append(f"  - Has: onclick/data-action handler")
+            lines.append("")
+
+    # Show failing elements with observations only
+    if failing > 0:
+        lines.append("### ❌ FAILING ELEMENTS\n")
+
+        for ir in failing_elements:
+            ctx = ir.get_repair_context(threshold=threshold)
+            selector = ctx["selector"]
+            elem = ctx.get("element", {})
+
             key_attrs = elem.get("key_attributes", {})
             class_attr = key_attrs.get("class", "")
             element_id = key_attrs.get("id", "")
+            tag = elem.get("tag", "div")
+            text = elem.get("text_content", "")
 
-            lines.append(f"### ✅ `{selector}`")
-            lines.append(f"- Tag: `<{tag}>`, Classes: `{class_attr}`, ID: `{element_id}`")
+            # Extract classes
+            classes = class_attr.split() if class_attr else []
+            selector_classes = re.findall(r'\.([a-zA-Z][\w-]*)', selector)
+            for cls in selector_classes:
+                if cls not in classes:
+                    classes.append(cls)
+
+            # Sprint 12: Show cascade context
+            cascade_header = ""
+            if ir.cascade_level > 0:
+                cascade_header = f" [MODAL ELEMENT, triggered by {ir.cascade_trigger}]"
+
+            lines.append(f"#### `{selector}`{cascade_header}\n")
+
+            # Basic info
+            lines.append(f"- **Tag:** `<{tag}>`")
+            if classes:
+                lines.append(f"- **Classes:** `{', '.join(classes)}`")
+            if element_id:
+                lines.append(f"- **ID:** `{element_id}`")
             if text:
-                lines.append(f"- Text: \"{text}\"")
-            lines.append(f"- Pixel Change: {ctx['pixel_diff_pct']} ✓")
+                lines.append(f"- **Text:** \"{text[:60]}\"")
+
+            # Sprint 12: Cascade level observation
+            if ir.cascade_level > 0:
+                lines.append(f"- **Location:** Inside modal (cascade level {ir.cascade_level})")
+                lines.append(f"- **Modal Trigger:** `{ir.cascade_trigger}`")
+
+            # Failure observations
+            lines.append(f"- **Failure Type:** `{ctx['failure_type']}`")
+            lines.append(f"- **Pixel Change:** {ctx['pixel_diff_pct']} (threshold: {ctx['threshold']})")
+
+            # JS error if present
+            if ir.error:
+                lines.append(f"- **Error:** `{ir.error[:100]}`")
+
+            # CSS observations (facts only, no recommendations)
+            css_info = _observe_css_for_element(html, classes)
+            if css_info["rules_found"]:
+                lines.append(f"- **CSS Rules Found:**")
+                for rule in css_info["rules_found"][:3]:
+                    lines.append(f"  - `{rule['selector']}` → {rule['properties'][:80]}")
+            else:
+                lines.append(f"- **CSS Rules Found:** None for these classes")
+
+            # JS handler observations
+            js_handlers = []
+            if key_attrs.get("onclick"):
+                js_handlers.append("onclick")
+            if key_attrs.get("data-action"):
+                js_handlers.append("data-action")
+            if key_attrs.get("data-submit"):
+                js_handlers.append("data-submit")
+            if js_handlers:
+                lines.append(f"- **JS Handlers:** {', '.join(js_handlers)}")
+
             lines.append("")
 
-        lines.append("---\n")
+    if failing == 0:
+        lines.append("All elements responded correctly.\n")
 
-    lines.append("## 🔧 CSS DIAGNOSIS FOR FAILING ELEMENTS\n")
-
-    failing_count = 0
-
-    for ir in interaction_results:
-        ctx = ir.get_repair_context(threshold=threshold)
-        
-        if ctx["failure_type"] == "passed":
-            continue
-        
-        failing_count += 1
-        selector = ctx["selector"]
-        elem = ctx.get("element", {})
-        
-        # Get element classes from key_attributes (now includes 'class' and 'id')
-        key_attrs = elem.get("key_attributes", {})
-        class_attr = key_attrs.get("class", "")
-        element_id = key_attrs.get("id", "")
-
-        # Also try to extract from selector
-        classes = []
-        if class_attr:
-            classes.extend(class_attr.split())
-
-        # Extract classes from selector (e.g., ".celestial-body" -> "celestial-body")
-        selector_classes = re.findall(r'\.([a-zA-Z][\w-]*)', selector)
-        for cls in selector_classes:
-            if cls not in classes and cls not in ('selected', 'active'):
-                classes.append(cls)
-
-        # If still no classes, try to infer from ID (e.g., "planet-venus" -> "planet")
-        if not classes and element_id:
-            # Extract base class from ID pattern like "planet-venus" -> "planet"
-            id_parts = element_id.split('-')
-            if len(id_parts) >= 2 and id_parts[0] not in ('container', 'orbit'):
-                classes.append(id_parts[0])
-
-        if not classes:
-            classes = ["unknown"]
-        
-        lines.append(f"### ❌ Input {failing_count}: `{selector}`\n")
-        
-        # Element info
-        tag = elem.get("tag", "div")
-        text = elem.get("text_content", "")
-        lines.append(f"**Element:** `<{tag}>` with classes: `{', '.join(classes)}`")
-        if text:
-            lines.append(f"**Text:** \"{text[:50]}\"")
-        
-        # Failure info
-        lines.append(f"**Failure Type:** {ctx['failure_type']}")
-        lines.append(f"**Pixel Change:** {ctx['pixel_diff_pct']} (need {ctx['threshold']})")
-        
-        # CSS Diagnosis
-        css_analysis = analyze_css_for_element(html, classes)
-        
-        lines.append(f"\n**CSS Diagnosis:**")
-        lines.append(f"- {css_analysis['diagnosis']}")
-        
-        if css_analysis["problematic_rule"]:
-            lines.append(f"\n**Current CSS Rule:**")
-            lines.append(f"```css")
-            lines.append(css_analysis["problematic_rule"])
-            lines.append(f"```")
-        
-        lines.append(f"\n**🎯 REQUIRED ACTION:**")
-        lines.append(f"{css_analysis['fix_action']}")
-        
-        if not css_analysis["has_background"]:
-            # Show the exact fix needed
-            rule_selector = css_analysis["rules_found"][0]["selector"] if css_analysis["rules_found"] else f".{classes[0]}.selected"
-            old_props = css_analysis["rules_found"][0]["properties"] if css_analysis["rules_found"] else ""
-            
-            lines.append(f"\n**✅ CORRECTED CSS:**")
-            lines.append(f"```css")
-            lines.append(f"{rule_selector} {{")
-            lines.append(f"    background-color: rgba(0, 200, 255, 0.3);  /* ADD THIS */")
-            if old_props:
-                # Show existing properties
-                for prop in old_props.split(';'):
-                    prop = prop.strip()
-                    if prop:
-                        lines.append(f"    {prop};")
-            lines.append(f"}}")
-            lines.append(f"```")
-        
-        lines.append("")
-    
-    if failing_count == 0:
-        lines.append("No failing elements detected.\n")
-    
     return "\n".join(lines)
+
+
+def _observe_css_for_element(html: str, element_classes: list) -> dict:
+    """
+    Sprint 11: Observe CSS rules for element WITHOUT proposing fixes.
+
+    Returns facts only - what rules exist and what properties they have.
+    """
+    css = _extract_css_from_html(html)
+    rules = _find_css_rules_for_classes(css, element_classes)
+
+    return {
+        "rules_found": rules,
+        "has_hover": any(":hover" in r["selector"] for r in rules),
+        "has_active": any(":active" in r["selector"] or ".active" in r["selector"] for r in rules),
+        "has_selected": any(".selected" in r["selector"] for r in rules),
+    }
 
 
 def _format_element_context(elem: dict, pixels: dict = None, strategy: str = None) -> str:
@@ -1058,9 +1093,8 @@ class DirectFixer:
         Returns:
             Repaired HTML or None if repair failed
         """
-        if sandbox_result.valid:
-            # No repair needed
-            return html
+        # Sprint 11: Removed early return - Opus ALWAYS processes the HTML
+        # The re-validation loop in service.py handles the exit condition
 
         logger.info(
             f"Starting two-step repair pipeline - "
@@ -1239,8 +1273,9 @@ class DirectFixer:
         Returns:
             Repaired HTML or None if repair failed
         """
-        if sandbox_result.valid:
-            return html
+        # Sprint 11: Removed early return - Steps 3-4 ALWAYS run
+        # Even if validation passes, Opus may improve the HTML
+        # The re-validation loop in service.py handles the exit condition
 
         logger.info(
             f"Starting two-step vision repair - "
@@ -1272,6 +1307,26 @@ class DirectFixer:
             interaction_screenshots = []
             interaction_descriptions = []
             MAX_INTERACTION_SCREENSHOTS = 3
+
+            # Sprint 11: Debug logging for screenshot collection
+            total_results = len(sandbox_result.interaction_results)
+            unresponsive = [ir for ir in sandbox_result.interaction_results if not ir.responsive]
+            with_screenshots = [ir for ir in unresponsive if ir.screenshot_before and ir.screenshot_after]
+
+            logger.info(
+                f"Sprint 11 Debug: {total_results} interaction results, "
+                f"{len(unresponsive)} unresponsive, "
+                f"{len(with_screenshots)} have screenshots"
+            )
+
+            # Log why screenshots might be missing
+            for i, ir in enumerate(unresponsive[:3]):
+                has_before = ir.screenshot_before is not None
+                has_after = ir.screenshot_after is not None
+                logger.debug(
+                    f"  Unresponsive {i}: selector={ir.input.selector[:50]}, "
+                    f"before={has_before}, after={has_after}, error={ir.error}"
+                )
 
             failed_interactions = [
                 ir for ir in sandbox_result.interaction_results

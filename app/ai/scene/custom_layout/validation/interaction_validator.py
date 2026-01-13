@@ -3,6 +3,7 @@ Interaction Validator - Phase 5: Core visual delta testing.
 
 Sprint 6: Visual-based validation system.
 Sprint 7: Added JS error detection after clicks.
+Sprint 12: Cascading validation for modal/overlay content.
 
 This is the CORE module that eliminates false positives:
 - Takes screenshot BEFORE click
@@ -11,6 +12,7 @@ This is the CORE module that eliminates false positives:
 - Takes screenshot AFTER click
 - Compares visual delta
 - Checks for JS errors that occurred during interaction
+- Sprint 12: If click opens modal, re-scan and test modal's elements
 
 If no visual change detected OR JS errors occurred, the input is considered broken.
 """
@@ -18,7 +20,7 @@ If no visual change detected OR JS errors occurred, the input is considered brok
 import asyncio
 import logging
 import time
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import List, Optional, Tuple, Set, TYPE_CHECKING
 
 from .contracts import (
     InputCandidate,
@@ -38,6 +40,20 @@ if TYPE_CHECKING:
     from .sandbox import RenderContext
 
 logger = logging.getLogger("jarvis.ai.scene.custom_layout.validation.interaction")
+
+
+# ---------------------------------------------------------------------------
+# SPRINT 12: CASCADING VALIDATION CONSTANTS
+# ---------------------------------------------------------------------------
+
+# Threshold for detecting modal/overlay opening (% of viewport changed)
+MODAL_OPEN_THRESHOLD = 0.15  # 15% of viewport = likely modal opened
+
+# Maximum cascade depth (avoid infinite loops)
+MAX_CASCADE_DEPTH = 2
+
+# Maximum elements to test per cascade level
+MAX_CASCADE_ELEMENTS = 4
 
 
 # ---------------------------------------------------------------------------
@@ -618,6 +634,368 @@ class InteractionValidator:
                     return True
 
         return False
+
+    # -------------------------------------------------------------------------
+    # SPRINT 12: CASCADING VALIDATION METHODS
+    # -------------------------------------------------------------------------
+
+    def _modal_likely_opened(
+        self,
+        result: InteractionResult,
+        before_scene: ObservedSceneGraph,
+        after_scene: ObservedSceneGraph,
+    ) -> bool:
+        """
+        Sprint 12: Detect if a modal/overlay likely opened after a click.
+
+        Indicators:
+        1. Large visual change (>15% of viewport)
+        2. New container nodes appeared
+        3. Scene graph shows significant new visible elements
+        """
+        if not result.responsive:
+            return False
+
+        # Check 1: Large visual change
+        if result.visual_delta:
+            if result.visual_delta.pixel_diff_ratio >= MODAL_OPEN_THRESHOLD:
+                logger.debug(
+                    f"Sprint 12: Large visual change detected ({result.visual_delta.pixel_diff_ratio:.1%}), "
+                    "likely modal opened"
+                )
+                return True
+
+        # Check 2: Significant scene graph change
+        if before_scene and after_scene:
+            before_count = len(before_scene.visible_nodes())
+            after_count = len(after_scene.visible_nodes())
+
+            # If many new nodes appeared, likely a modal/panel
+            if after_count - before_count >= 5:
+                logger.debug(
+                    f"Sprint 12: {after_count - before_count} new nodes appeared, "
+                    "likely modal opened"
+                )
+                return True
+
+        return False
+
+    async def _find_new_interactive_elements(
+        self,
+        page: "Page",
+        already_tested: Set[str],
+        contract: ValidationContract,
+    ) -> List[InputCandidate]:
+        """
+        Sprint 12: Find NEW interactive elements that weren't in the original set.
+
+        This is used after a modal opens to find buttons/inputs inside it.
+        """
+        from .input_detector import input_detector
+
+        # Re-run input detection on current page state
+        try:
+            # First extract fresh scene graph (modal content is now visible)
+            new_scene_graph = await scene_graph_extractor.extract_quick(page)
+
+            # Then detect inputs using the new scene graph
+            _, new_inputs = await input_detector.detect(page, new_scene_graph, contract)
+
+            # Filter to only NEW elements (not already tested)
+            new_elements = [
+                inp for inp in new_inputs
+                if inp.selector not in already_tested and inp.testable
+            ]
+
+            if new_elements:
+                logger.info(
+                    f"Sprint 12: Found {len(new_elements)} NEW interactive elements "
+                    f"after modal opened (from {len(new_inputs)} total)"
+                )
+
+            return new_elements
+
+        except Exception as e:
+            logger.warning(f"Sprint 12: Failed to re-scan for elements: {e}")
+            return []
+
+    async def _reset_page_state(
+        self,
+        page: "Page",
+        html_content: str,
+    ) -> bool:
+        """
+        Sprint 12: Reset page to initial state after testing modal content.
+
+        Strategy:
+        1. Try to find and click a "close" button
+        2. Try pressing Escape key
+        3. If all else fails, reload the HTML
+        """
+        # Strategy 1: Look for close button
+        close_selectors = [
+            'button:has-text("close")',
+            'button:has-text("cerrar")',
+            'button:has-text("×")',
+            'button:has-text("x")',
+            '[class*="close"]',
+            '[class*="back"]',
+            'button:has-text("regresar")',
+            'button:has-text("volver")',
+            'button:has-text("return")',
+        ]
+
+        for selector in close_selectors:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() > 0 and await locator.is_visible():
+                    await locator.click(timeout=1000)
+                    await asyncio.sleep(0.3)  # Wait for animation
+                    logger.debug(f"Sprint 12: Closed modal via {selector}")
+                    return True
+            except Exception:
+                continue
+
+        # Strategy 2: Press Escape
+        try:
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
+            logger.debug("Sprint 12: Attempted to close modal via Escape key")
+            # Check if modal closed by looking for overlay
+            overlay = page.locator('[class*="overlay"]:visible, [class*="modal"]:visible').first
+            if await overlay.count() == 0:
+                return True
+        except Exception:
+            pass
+
+        # Strategy 3: Reload HTML
+        try:
+            await page.set_content(html_content, wait_until="networkidle")
+            await asyncio.sleep(0.5)  # Wait for JS to initialize
+            logger.debug("Sprint 12: Reset page by reloading HTML")
+            return True
+        except Exception as e:
+            logger.warning(f"Sprint 12: Failed to reset page: {e}")
+            return False
+
+    async def validate_with_cascade(
+        self,
+        page: "Page",
+        inputs: List[InputCandidate],
+        contract: ValidationContract,
+        render_ctx: Optional["RenderContext"] = None,
+        html_content: Optional[str] = None,
+    ) -> Tuple[PhaseResult, List[InteractionResult]]:
+        """
+        Sprint 12: Enhanced validation with cascading support.
+
+        When a click opens a modal/overlay:
+        1. Detect the modal opened (large visual change)
+        2. Re-scan for new interactive elements inside the modal
+        3. Test those new elements
+        4. Reset page state before testing next original element
+
+        Args:
+            page: Playwright page with HTML loaded
+            inputs: List of input candidates from Phase 4
+            contract: Validation contract with thresholds
+            render_ctx: Optional render context with JS error tracking
+            html_content: Original HTML for page reset (optional)
+
+        Returns:
+            (PhaseResult, List[InteractionResult])
+        """
+        start_time = time.time()
+        results: List[InteractionResult] = []
+        tested_selectors: Set[str] = set()
+
+        # Sprint 7: Track JS errors count before interactions
+        js_errors_before = len(render_ctx.js_errors) if render_ctx else 0
+
+        if not inputs:
+            return PhaseResult(
+                phase=5,
+                phase_name="interaction",
+                passed=True,
+                details={"tested": 0, "responsive": 0, "note": "No inputs to test"},
+                duration_ms=(time.time() - start_time) * 1000,
+            ), []
+
+        # Filter testable inputs
+        testable_inputs = [inp for inp in inputs if inp.testable]
+        navigation_count = sum(1 for inp in inputs if inp.interaction_category.value == "navigation")
+        display_only_count = sum(1 for inp in inputs if inp.is_display_only())
+
+        if len(inputs) - len(testable_inputs) > 0:
+            logger.info(
+                f"Phase 5: Skipping {len(inputs) - len(testable_inputs)} non-testable element(s)"
+            )
+
+        # Counters
+        MAX_UNITS_TO_TEST = 12  # Sprint 12: Increased for cascade
+        EARLY_STOP_RESPONSIVE = 8
+        units_tested = 0
+        responsive_count = 0
+        cascade_responsive = 0  # Track cascade-level responses
+
+        for input_candidate in testable_inputs:
+            if units_tested >= MAX_UNITS_TO_TEST:
+                break
+            if responsive_count >= EARLY_STOP_RESPONSIVE:
+                logger.info(f"Early stopping: found {responsive_count} responsive units")
+                break
+
+            # Track this selector as tested
+            tested_selectors.add(input_candidate.selector)
+
+            # Capture before state for modal detection
+            before_scene = await scene_graph_extractor.extract_quick(page)
+
+            # Test the element
+            if input_candidate.interaction_units:
+                # Test first unit only for modal detection
+                unit = input_candidate.interaction_units[0]
+                result = await self._test_interaction_unit(page, input_candidate, unit, contract)
+                tested_selectors.add(unit.selector)
+            else:
+                result = await self._test_single_input(page, input_candidate, contract)
+
+            results.append(result)
+            units_tested += 1
+
+            if result.responsive:
+                responsive_count += 1
+
+                # Sprint 12: Check if modal opened
+                after_scene = result.scene_after
+                if self._modal_likely_opened(result, before_scene, after_scene):
+                    logger.info(
+                        f"Sprint 12: Modal detected after clicking {input_candidate.selector}, "
+                        "starting cascade validation"
+                    )
+
+                    # Find and test new elements inside modal
+                    cascade_results, cascade_count = await self._cascade_validate(
+                        page=page,
+                        validation_contract=contract,
+                        tested_selectors=tested_selectors,
+                        depth=1,
+                        trigger_selector=input_candidate.selector,
+                    )
+                    results.extend(cascade_results)
+                    cascade_responsive += cascade_count
+                    units_tested += len(cascade_results)
+
+                    # Reset page state before testing next original element
+                    if html_content and len(testable_inputs) > 1:
+                        await self._reset_page_state(page, html_content)
+                        await asyncio.sleep(0.3)  # Wait for reset
+            else:
+                # Log non-responsive
+                delta = result.visual_delta.pixel_diff_ratio if result.visual_delta else 0
+                logger.debug(
+                    f"  {input_candidate.selector}: NO RESPONSE (delta={delta:.3f})"
+                )
+
+        total_duration_ms = (time.time() - start_time) * 1000
+
+        # Sprint 7: Check for JS errors
+        js_errors_during_interaction = []
+        if render_ctx:
+            js_errors_during_interaction = render_ctx.js_errors[js_errors_before:]
+
+        # Phase passes if sufficient inputs are responsive
+        total_responsive = responsive_count + cascade_responsive
+        passed = total_responsive > 0 and not js_errors_during_interaction
+
+        logger.info(
+            f"Phase 5 (interaction) {'passed' if passed else 'FAILED'} - "
+            f"{responsive_count} original + {cascade_responsive} cascade = "
+            f"{total_responsive}/{units_tested} responsive"
+        )
+
+        return PhaseResult(
+            phase=5,
+            phase_name="interaction",
+            passed=passed,
+            error=js_errors_during_interaction[0] if js_errors_during_interaction else None,
+            details={
+                "tested": units_tested,
+                "responsive": total_responsive,
+                "original_responsive": responsive_count,
+                "cascade_responsive": cascade_responsive,
+                "navigation_excluded": navigation_count,
+                "display_only_excluded": display_only_count,
+                "js_errors_during_interaction": js_errors_during_interaction,
+            },
+            duration_ms=total_duration_ms,
+        ), results
+
+    async def _cascade_validate(
+        self,
+        page: "Page",
+        validation_contract: ValidationContract,
+        tested_selectors: Set[str],
+        depth: int,
+        trigger_selector: str = "",
+    ) -> Tuple[List[InteractionResult], int]:
+        """
+        Sprint 12: Recursively validate elements inside opened modals.
+
+        Args:
+            page: Current page state (with modal open)
+            validation_contract: Validation contract for input detection
+            tested_selectors: Set of already tested selectors
+            depth: Current cascade depth
+            trigger_selector: What element triggered this cascade (e.g., "#mercury")
+
+        Returns:
+            (results, responsive_count)
+        """
+        if depth > MAX_CASCADE_DEPTH:
+            logger.debug(f"Sprint 12: Max cascade depth ({MAX_CASCADE_DEPTH}) reached")
+            return [], 0
+
+        # Find new interactive elements
+        new_elements = await self._find_new_interactive_elements(
+            page, tested_selectors, validation_contract
+        )
+
+        if not new_elements:
+            logger.debug("Sprint 12: No new elements found in modal")
+            return [], 0
+
+        results: List[InteractionResult] = []
+        responsive_count = 0
+
+        # Test up to MAX_CASCADE_ELEMENTS new elements
+        for element in new_elements[:MAX_CASCADE_ELEMENTS]:
+            tested_selectors.add(element.selector)
+
+            result = await self._test_single_input(page, element, validation_contract)
+
+            # Sprint 12: Mark this result as coming from cascade
+            result.cascade_level = depth
+            result.cascade_trigger = trigger_selector
+
+            results.append(result)
+
+            if result.responsive:
+                responsive_count += 1
+                logger.debug(
+                    f"Sprint 12 (depth={depth}): {element.selector} RESPONSIVE"
+                )
+            else:
+                logger.debug(
+                    f"Sprint 12 (depth={depth}): {element.selector} no response"
+                )
+
+        logger.info(
+            f"Sprint 12: Cascade level {depth} complete - "
+            f"{responsive_count}/{len(results)} responsive"
+        )
+
+        return results, responsive_count
 
 
 # ---------------------------------------------------------------------------

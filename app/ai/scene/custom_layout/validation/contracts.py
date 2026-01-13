@@ -387,6 +387,7 @@ class InteractionResult:
     Contains before/after state and whether the input responded.
 
     Sprint 7: Now includes screenshots for vision-based repair.
+    Sprint 12: Added cascade_level for modal content tracking.
     """
     input: InputCandidate
     action: str  # click|hover|focus
@@ -399,6 +400,10 @@ class InteractionResult:
     # Sprint 7: Screenshots for vision repair
     screenshot_before: Optional[bytes] = None  # PNG before click
     screenshot_after: Optional[bytes] = None   # PNG after click
+    # Sprint 12: Cascade level (0=original page, 1+=inside modal)
+    cascade_level: int = 0
+    # Sprint 12: What triggered this cascade (e.g., "clicked #mercury")
+    cascade_trigger: Optional[str] = None
 
     def get_failure_type(self, threshold: float = 0.02) -> str:
         """

@@ -3,6 +3,7 @@ Visual Validation Module - Eliminate false positives with screenshot comparison.
 
 Sprint 6: Visual-based validation system.
 Sprint 7: Vision-enhanced repair with invisible element detection.
+Sprint 12: Cascading validation for modal/overlay content.
 
 This module provides a 7-phase validation pipeline:
 1. Sandbox (Render check)
@@ -182,9 +183,14 @@ class VisualValidator:
                 )
                 interaction_results = []
             else:
-                # Sprint 7: Pass render_ctx to capture JS errors during interaction
-                phase5_result, interaction_results = await interaction_validator.validate(
-                    page, inputs, contract, render_ctx
+                # Sprint 12: Use cascading validation for modal/overlay support
+                # Pass HTML content for page reset between tests
+                phase5_result, interaction_results = await interaction_validator.validate_with_cascade(
+                    page=page,
+                    inputs=inputs,
+                    contract=contract,
+                    render_ctx=render_ctx,
+                    html_content=contract.html,  # For page reset after modal tests
                 )
             phases.append(phase5_result)
 
