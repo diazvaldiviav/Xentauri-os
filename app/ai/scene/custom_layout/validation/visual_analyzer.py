@@ -446,8 +446,8 @@ Output ONLY the specified format, nothing else."""
         """Parse the structured concordance response from Flash."""
         import re
 
-        # Log raw response for debugging
-        logger.debug(f"Parsing concordance response: {content[:500]}...")
+        # Log raw response for debugging (use INFO to see it in logs)
+        logger.info(f"Concordance raw response: {content[:300]}...")
 
         # Default values
         passed = True
@@ -470,10 +470,19 @@ Output ONLY the specified format, nothing else."""
             except ValueError:
                 pass
 
-        # Parse DIAGNOSIS
-        diagnosis_match = re.search(r'DIAGNOSIS:\s*(.+?)(?:\n\n|\n[A-Z]|$)', content, re.DOTALL)
+        # Parse DIAGNOSIS - try multiple patterns
+        # Pattern 1: DIAGNOSIS: followed by content until double newline or end
+        diagnosis_match = re.search(r'DIAGNOSIS:\s*(.+?)(?:\n\n|$)', content, re.DOTALL)
         if diagnosis_match:
             diagnosis = diagnosis_match.group(1).strip()
+
+        # Pattern 2: If still empty, try simpler approach - everything after DIAGNOSIS:
+        if not diagnosis:
+            diagnosis_match2 = re.search(r'DIAGNOSIS:\s*(.+)', content, re.DOTALL)
+            if diagnosis_match2:
+                diagnosis = diagnosis_match2.group(1).strip()
+                # Clean up: remove trailing CONFIDENCE/CONCORDANCE lines if captured
+                diagnosis = re.split(r'\n(?:CONFIDENCE|CONCORDANCE):', diagnosis)[0].strip()
 
         # Fallback: Try to infer from content if structured format not found
         if not parsed_successfully:
@@ -495,10 +504,13 @@ Output ONLY the specified format, nothing else."""
                 if len(content) > 200:
                     diagnosis += "..."
 
-        # Final fallback
+        # Final fallback - use full content if still no diagnosis
         if not diagnosis:
-            diagnosis = "Response parsed but no specific diagnosis found"
+            diagnosis = content.strip()[:200] if content.strip() else "No response content"
+            if len(content.strip()) > 200:
+                diagnosis += "..."
 
+        logger.info(f"Concordance parsed: passed={passed}, confidence={confidence}, diagnosis={diagnosis[:100]}...")
         return passed, diagnosis, confidence
 
 
