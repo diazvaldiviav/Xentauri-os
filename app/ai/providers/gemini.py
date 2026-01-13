@@ -173,11 +173,12 @@ class GeminiProvider(AIProvider):
             return self._error("API Key missing", start_time)
 
         try:
+            # Sprint 9: Increased max_tokens to avoid truncation in routing
             response = await self.generate(
                 prompt=f"{prompt}\n\nIMPORTANT: Respond ONLY with valid JSON.",
                 system_prompt=system_prompt,
                 temperature=0.2,
-                max_tokens=1024,
+                max_tokens=kwargs.get("max_tokens", 2048),  # Allow override, default 2048
                 response_mime_type="application/json",
             )
 
