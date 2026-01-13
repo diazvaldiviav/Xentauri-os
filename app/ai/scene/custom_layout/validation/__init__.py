@@ -159,22 +159,10 @@ class VisualValidator:
             phase4_result, inputs = await input_detector.detect(page, scene_graph, contract)
             phases.append(phase4_result)
 
-            # Sprint 7: Check visibility of detected inputs
-            invisible_count = 0
-            if inputs:
-                inputs, invisible_count = await input_detector.check_elements_visibility(
-                    page, inputs
-                )
-                if invisible_count > 0:
-                    logger.warning(
-                        f"Sprint 7: {invisible_count}/{len(inputs)} inputs are INVISIBLE "
-                        "(exist in DOM but have no visible pixels)"
-                    )
-                    # Update Phase 4 details with visibility info
-                    phase4_result.details["invisible_count"] = invisible_count
-                    phase4_result.details["visibility_checked"] = True
-
-            # Phase 4 always passes (no inputs = static content)
+            # Sprint 11: Removed visibility check - redundant with:
+            # - Phase 2 (concordance) detects visual issues
+            # - Phase 5 (interaction) tests if elements respond
+            # - Flash diagnosis analyzes why elements failed
 
             # Detect layout type early for optimization
             layout_type = contract.layout_type or self._detect_layout_type(scene_graph)
@@ -214,10 +202,9 @@ class VisualValidator:
             # Update total duration
             result.total_duration_ms = (time.time() - start_time) * 1000
 
-            # Sprint 7: Attach screenshot and invisible count for vision repair
+            # Attach screenshot for vision repair
             result.page_screenshot = page_screenshot_bytes
             result.screenshot_path = screenshot_path
-            result.invisible_elements_count = invisible_count
 
             return result
 
