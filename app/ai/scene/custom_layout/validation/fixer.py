@@ -710,21 +710,29 @@ def _build_css_diagnosis(html: str, interaction_results: list, threshold: float 
         selector = ctx["selector"]
         elem = ctx.get("element", {})
         
-        # Get element classes
+        # Get element classes from key_attributes (now includes 'class' and 'id')
         key_attrs = elem.get("key_attributes", {})
         class_attr = key_attrs.get("class", "")
-        
+        element_id = key_attrs.get("id", "")
+
         # Also try to extract from selector
         classes = []
         if class_attr:
             classes.extend(class_attr.split())
-        
+
         # Extract classes from selector (e.g., ".celestial-body" -> "celestial-body")
         selector_classes = re.findall(r'\.([a-zA-Z][\w-]*)', selector)
         for cls in selector_classes:
             if cls not in classes and cls not in ('selected', 'active'):
                 classes.append(cls)
-        
+
+        # If still no classes, try to infer from ID (e.g., "planet-venus" -> "planet")
+        if not classes and element_id:
+            # Extract base class from ID pattern like "planet-venus" -> "planet"
+            id_parts = element_id.split('-')
+            if len(id_parts) >= 2 and id_parts[0] not in ('container', 'orbit'):
+                classes.append(id_parts[0])
+
         if not classes:
             classes = ["unknown"]
         

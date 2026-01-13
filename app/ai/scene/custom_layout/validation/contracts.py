@@ -504,11 +504,11 @@ class InteractionResult:
         # Extract semantic information from the node
         text_content = node.text_content[:50] if node.text_content else None
 
-        # Extract key attributes (data-*, role, aria-*, onclick presence)
+        # Extract key attributes (data-*, role, aria-*, onclick presence, class, id)
         key_attrs = {}
         for attr, val in node.attributes.items():
-            if attr.startswith("data-") or attr.startswith("aria-") or attr in ("role", "type", "value"):
-                key_attrs[attr] = val[:50] if isinstance(val, str) and len(val) > 50 else val
+            if attr.startswith("data-") or attr.startswith("aria-") or attr in ("role", "type", "value", "class", "id"):
+                key_attrs[attr] = val[:100] if isinstance(val, str) and len(val) > 100 else val
             elif attr == "onclick":
                 key_attrs["onclick"] = "present"
 
