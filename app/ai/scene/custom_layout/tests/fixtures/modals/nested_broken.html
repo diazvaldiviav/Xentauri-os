@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Nested Modals - BROKEN</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-8">
+
+  <!--
+    BUG: Nested Modals - Z-index hierarchy broken
+
+    ERRORS:
+    1. Second modal has same z-index as first (z-50)
+    2. Second modal backdrop covers first modal's buttons
+    3. Close buttons have no z-index boost
+    4. Inner modal appears behind outer modal content
+
+    RESULT: Cannot interact with either modal properly
+            Second modal's backdrop blocks first modal
+            Validator sees chaotic click responses
+
+    FIX: Use z-[60] for nested modal, z-[70] for its content
+         Ensure backdrops have pointer-events handling
+  -->
+
+  <div class="max-w-md mx-auto text-center">
+    <h1 class="text-3xl font-bold mb-8">Nested Modal Demo</h1>
+
+    <button id="open-first"
+            class="relative z-10 px-6 py-3 bg-blue-600 rounded-lg
+                   hover:bg-blue-500 active:scale-95 transition-all"
+            onclick="openModal('modal-1')">
+      Open First Modal
+    </button>
+  </div>
+
+  <!-- First Modal - z-50 -->
+  <div id="modal-1" class="fixed inset-0 z-50 hidden items-center justify-center">
+    <!-- BUG: Backdrop blocks everything including second modal -->
+    <div class="absolute inset-0 bg-black/70" onclick="closeModal('modal-1')"></div>
+
+    <div class="relative z-50 bg-gray-800 rounded-xl p-8 max-w-lg w-full mx-4">
+      <!-- BUG: Close button has no extra z-index -->
+      <button class="absolute top-4 right-4 text-gray-400 hover:text-white"
+              onclick="closeModal('modal-1')">
+        ✕
+      </button>
+
+      <h2 class="text-2xl font-bold mb-4">First Modal</h2>
+      <p class="text-gray-300 mb-6">
+        This is the first modal. Click the button below to open a nested modal.
+      </p>
+
+      <div class="flex gap-4">
+        <button class="px-4 py-2 bg-gray-700 rounded-lg
+                       hover:bg-gray-600 transition-colors"
+                onclick="closeModal('modal-1')">
+          Cancel
+        </button>
+
+        <!-- BUG: This button opens second modal at same z-level -->
+        <button class="px-4 py-2 bg-blue-600 rounded-lg
+                       hover:bg-blue-500 transition-colors"
+                onclick="openModal('modal-2')">
+          Open Nested Modal
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Second Modal - BUG: Same z-50 as first, should be higher -->
+  <div id="modal-2" class="fixed inset-0 z-50 hidden items-center justify-center">
+    <!-- BUG: This backdrop is at same level as first modal content -->
+    <div class="absolute inset-0 bg-black/70" onclick="closeModal('modal-2')"></div>
+
+    <!-- BUG: z-50 same as first modal, content may appear behind -->
+    <div class="relative z-50 bg-gray-700 rounded-xl p-6 max-w-sm w-full mx-4">
+      <button class="absolute top-3 right-3 text-gray-400 hover:text-white"
+              onclick="closeModal('modal-2')">
+        ✕
+      </button>
+
+      <h3 class="text-xl font-bold mb-3">Nested Modal</h3>
+      <p class="text-gray-300 mb-4">
+        This is a nested modal. It should appear above the first modal.
+      </p>
+
+      <button class="w-full px-4 py-2 bg-green-600 rounded-lg
+                     hover:bg-green-500 transition-colors"
+              onclick="closeModal('modal-2')">
+        Confirm
+      </button>
+    </div>
+  </div>
+
+  <script>
+    function openModal(id) {
+      const modal = document.getElementById(id);
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeModal(id) {
+      const modal = document.getElementById(id);
+      modal.classList.remove('flex');
+      modal.classList.add('hidden');
+    }
+  </script>
+
+</body>
+</html>

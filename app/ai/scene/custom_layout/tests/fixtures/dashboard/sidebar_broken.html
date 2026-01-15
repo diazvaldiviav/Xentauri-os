@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Dashboard Sidebar - BROKEN</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+
+  <!--
+    BUG: Dashboard with Sidebar - Overlay blocks sidebar clicks
+
+    ERRORS:
+    1. Decorative gradient overlay covers entire viewport
+    2. Overlay has no pointer-events-none
+    3. Sidebar buttons have no z-index
+    4. Content area overlay intercepts all clicks
+
+    RESULT: Sidebar navigation buttons cannot be clicked
+            Validator sees 0/5 responsive
+
+    FIX: Add pointer-events-none to overlays, z-index to interactive elements
+  -->
+
+  <div data-dashboard="container" class="flex h-screen">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-gray-800 p-4">
+      <h2 class="text-xl font-bold mb-6">Dashboard</h2>
+
+      <nav class="space-y-2">
+        <!-- BUG: No z-index, will be covered by overlay -->
+        <button data-filter
+                class="w-full p-3 rounded-lg text-left bg-blue-600
+                       hover:bg-blue-500 transition-colors"
+                onclick="selectNav(this, 'overview')">
+          Overview
+        </button>
+
+        <button data-filter
+                class="w-full p-3 rounded-lg text-left bg-gray-700
+                       hover:bg-gray-600 transition-colors"
+                onclick="selectNav(this, 'analytics')">
+          Analytics
+        </button>
+
+        <button data-filter
+                class="w-full p-3 rounded-lg text-left bg-gray-700
+                       hover:bg-gray-600 transition-colors"
+                onclick="selectNav(this, 'reports')">
+          Reports
+        </button>
+
+        <button data-filter
+                class="w-full p-3 rounded-lg text-left bg-gray-700
+                       hover:bg-gray-600 transition-colors"
+                onclick="selectNav(this, 'settings')">
+          Settings
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8 relative">
+      <!-- BUG: Decorative overlay without pointer-events-none -->
+      <div class="absolute inset-0 bg-gradient-to-br from-purple-900/10 to-blue-900/10"></div>
+
+      <!-- BUG: Another overlay without pointer-events-none -->
+      <div class="absolute top-0 right-0 w-1/2 h-1/2 bg-gradient-radial from-blue-500/5 to-transparent"></div>
+
+      <div class="relative">
+        <h1 class="text-2xl font-bold mb-6" id="page-title">Overview</h1>
+
+        <div class="grid grid-cols-3 gap-6">
+          <div data-metric class="bg-gray-800 rounded-xl p-6">
+            <p class="text-gray-400 text-sm">Total Users</p>
+            <p class="text-3xl font-bold">12,345</p>
+          </div>
+
+          <div data-metric class="bg-gray-800 rounded-xl p-6">
+            <p class="text-gray-400 text-sm">Revenue</p>
+            <p class="text-3xl font-bold">$54,321</p>
+          </div>
+
+          <div data-metric class="bg-gray-800 rounded-xl p-6">
+            <p class="text-gray-400 text-sm">Conversion</p>
+            <p class="text-3xl font-bold">3.2%</p>
+          </div>
+        </div>
+
+        <div data-chart class="mt-8 bg-gray-800 rounded-xl p-6 h-64">
+          <p class="text-gray-400">Chart placeholder</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    function selectNav(button, page) {
+      // Clear selection
+      document.querySelectorAll('[data-filter]').forEach(btn => {
+        btn.classList.remove('bg-blue-600');
+        btn.classList.add('bg-gray-700');
+      });
+
+      // Mark selected
+      button.classList.remove('bg-gray-700');
+      button.classList.add('bg-blue-600');
+
+      // Update title
+      document.getElementById('page-title').textContent =
+        page.charAt(0).toUpperCase() + page.slice(1);
+    }
+  </script>
+
+</body>
+</html>

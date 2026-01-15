@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Quiz Modal - BROKEN</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-8">
+
+  <!--
+    BUG: Quiz with Modal Feedback - Modal blocks other elements
+
+    ERRORS:
+    1. Modal shows but never auto-dismisses
+    2. Modal has no close button
+    3. Modal backdrop blocks all clicks permanently
+    4. No way to continue after seeing feedback
+
+    RESULT: After first answer, all other buttons become unclickable
+            Validator sees 1/4 responsive (only first click works)
+
+    FIX: Add auto-dismiss setTimeout OR close button, proper z-index
+  -->
+
+  <div data-trivia="container" class="max-w-2xl mx-auto">
+    <h1 class="text-3xl font-bold mb-8 text-center">Science Quiz</h1>
+
+    <div data-question="1" class="bg-gray-800 rounded-xl p-8">
+      <h2 class="text-xl mb-6">Which planet is known as the Red Planet?</h2>
+
+      <div class="grid grid-cols-2 gap-4">
+        <button data-option
+                class="relative z-10 p-4 bg-gray-700 rounded-lg
+                       hover:bg-gray-600 active:scale-95 transition-all"
+                onclick="checkAnswer(this, false)">
+          Venus
+        </button>
+
+        <button data-option
+                class="relative z-10 p-4 bg-gray-700 rounded-lg
+                       hover:bg-gray-600 active:scale-95 transition-all"
+                onclick="checkAnswer(this, true)">
+          Mars
+        </button>
+
+        <button data-option
+                class="relative z-10 p-4 bg-gray-700 rounded-lg
+                       hover:bg-gray-600 active:scale-95 transition-all"
+                onclick="checkAnswer(this, false)">
+          Jupiter
+        </button>
+
+        <button data-option
+                class="relative z-10 p-4 bg-gray-700 rounded-lg
+                       hover:bg-gray-600 active:scale-95 transition-all"
+                onclick="checkAnswer(this, false)">
+          Saturn
+        </button>
+      </div>
+    </div>
+
+    <div data-score class="mt-8 text-center text-xl">Score: 0</div>
+  </div>
+
+  <!-- BUG: Modal that blocks everything permanently -->
+  <div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center">
+    <!-- BUG: Backdrop with no onclick to close -->
+    <div class="absolute inset-0 bg-black/70"></div>
+
+    <!-- BUG: No close button, no auto-dismiss -->
+    <div class="relative bg-gray-800 rounded-xl p-8 max-w-md text-center">
+      <div id="modal-icon" class="text-6xl mb-4"></div>
+      <h3 id="modal-title" class="text-2xl font-bold mb-2"></h3>
+      <p id="modal-text" class="text-gray-300"></p>
+      <!-- BUG: No continue/close button -->
+    </div>
+  </div>
+
+  <script>
+    let score = 0;
+
+    function checkAnswer(button, isCorrect) {
+      const modal = document.getElementById('modal');
+      const icon = document.getElementById('modal-icon');
+      const title = document.getElementById('modal-title');
+      const text = document.getElementById('modal-text');
+
+      if (isCorrect) {
+        icon.textContent = '✅';
+        title.textContent = 'Correct!';
+        text.textContent = 'Mars is indeed the Red Planet.';
+        score++;
+      } else {
+        icon.textContent = '❌';
+        title.textContent = 'Incorrect';
+        text.textContent = 'The correct answer is Mars.';
+      }
+
+      // BUG: Modal shows but never hides - blocks all subsequent clicks
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+
+      document.querySelector('[data-score]').textContent = `Score: ${score}`;
+
+      // BUG: No setTimeout to auto-dismiss
+      // BUG: No way for user to close the modal
+    }
+  </script>
+
+</body>
+</html>

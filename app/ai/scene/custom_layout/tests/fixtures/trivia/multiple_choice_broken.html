@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Multiple Choice - BROKEN</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-8">
+
+  <!--
+    BUG: Multiple Choice Quiz - Z-index and feedback issues
+
+    ERRORS:
+    1. Buttons have no z-index (may be covered by decorative elements)
+    2. No active:* feedback states
+    3. Decorative overlay blocks clicks
+    4. Hover-only feedback (no active state)
+
+    RESULT: Buttons may not respond to clicks, no visual feedback on click
+
+    FIX: Add relative z-10 to buttons, add active states, fix overlay
+  -->
+
+  <div data-trivia="container" class="max-w-2xl mx-auto">
+    <h1 class="text-3xl font-bold mb-8 text-center">Geography Quiz</h1>
+
+    <div data-question="1" class="bg-gray-800 rounded-xl p-8 relative">
+
+      <!-- BUG: Decorative overlay without pointer-events-none -->
+      <div class="absolute inset-0 bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-xl">
+      </div>
+
+      <h2 class="text-xl mb-6">What is the largest ocean on Earth?</h2>
+
+      <div class="space-y-4">
+        <!-- BUG: No relative, no z-index, no active feedback -->
+        <button data-option
+                class="w-full p-4 bg-gray-700 rounded-lg text-left
+                       hover:bg-gray-600 transition-colors"
+                onclick="selectOption(this, false)">
+          A) Atlantic Ocean
+        </button>
+
+        <button data-option
+                class="w-full p-4 bg-gray-700 rounded-lg text-left
+                       hover:bg-gray-600 transition-colors"
+                onclick="selectOption(this, true)">
+          B) Pacific Ocean
+        </button>
+
+        <button data-option
+                class="w-full p-4 bg-gray-700 rounded-lg text-left
+                       hover:bg-gray-600 transition-colors"
+                onclick="selectOption(this, false)">
+          C) Indian Ocean
+        </button>
+
+        <button data-option
+                class="w-full p-4 bg-gray-700 rounded-lg text-left
+                       hover:bg-gray-600 transition-colors"
+                onclick="selectOption(this, false)">
+          D) Arctic Ocean
+        </button>
+      </div>
+
+      <div data-feedback class="mt-6 p-4 rounded-lg hidden"></div>
+    </div>
+
+    <div class="mt-8 text-center">
+      <div data-score class="text-xl">Score: 0 / 1</div>
+    </div>
+  </div>
+
+  <script>
+    let score = 0;
+
+    function selectOption(button, isCorrect) {
+      // Clear previous selection
+      document.querySelectorAll('[data-option]').forEach(btn => {
+        btn.classList.remove('bg-blue-600', 'bg-green-600', 'bg-red-600');
+        btn.classList.add('bg-gray-700');
+      });
+
+      // Mark selection
+      button.classList.remove('bg-gray-700');
+      button.classList.add('bg-blue-600');
+
+      // Show feedback
+      const feedback = document.querySelector('[data-feedback]');
+      feedback.classList.remove('hidden');
+
+      if (isCorrect) {
+        feedback.textContent = 'Correct! The Pacific Ocean is the largest.';
+        feedback.className = 'mt-6 p-4 rounded-lg bg-green-600/20 text-green-400';
+        score = 1;
+      } else {
+        feedback.textContent = 'Incorrect. The correct answer is Pacific Ocean.';
+        feedback.className = 'mt-6 p-4 rounded-lg bg-red-600/20 text-red-400';
+        score = 0;
+      }
+
+      document.querySelector('[data-score]').textContent = `Score: ${score} / 1`;
+    }
+  </script>
+
+</body>
+</html>

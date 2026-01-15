@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Flashcard 3D - EXPECTED (Fixed)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center">
+
+  <!--
+    FIXED VERSION: 3D Card Flip with all required properties
+
+    FIXES APPLIED:
+    1. Added [perspective:1000px] to parent
+    2. Added [transform-style:preserve-3d] to card
+    3. Added [backface-visibility:hidden] to both faces
+    4. Added [transform:rotateY(180deg)] to back face
+
+    RESULT: Proper 3D flip animation, only one face visible at a time
+  -->
+
+  <div data-trivia="container" class="text-center">
+    <h1 class="text-3xl font-bold mb-8">Flashcard Quiz</h1>
+
+    <!-- FIX: Added [perspective:1000px] -->
+    <div class="mx-auto [perspective:1000px]">
+      <!-- FIX: Added [transform-style:preserve-3d] -->
+      <div id="card" class="relative w-96 h-64 cursor-pointer transition-transform duration-700
+                           [transform-style:preserve-3d]"
+           onclick="flipCard()">
+
+        <!-- FIX: Added [backface-visibility:hidden] -->
+        <div class="absolute inset-0 bg-blue-600 rounded-xl flex items-center justify-center p-6
+                    shadow-xl [backface-visibility:hidden]">
+          <p class="text-2xl font-semibold" data-question="1">
+            What is the capital of France?
+          </p>
+        </div>
+
+        <!-- FIX: Added [backface-visibility:hidden] and [transform:rotateY(180deg)] -->
+        <div class="absolute inset-0 bg-green-600 rounded-xl flex items-center justify-center p-6
+                    shadow-xl [backface-visibility:hidden] [transform:rotateY(180deg)]">
+          <p class="text-2xl font-semibold" data-feedback>
+            Paris
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <p class="mt-8 text-gray-400">Click the card to flip</p>
+
+    <div class="mt-4" data-score>Cards reviewed: 0</div>
+  </div>
+
+  <script>
+    let flipped = false;
+    let count = 0;
+
+    function flipCard() {
+      const card = document.getElementById('card');
+      flipped = !flipped;
+
+      // Works correctly with preserve-3d
+      if (flipped) {
+        card.style.transform = 'rotateY(180deg)';
+      } else {
+        card.style.transform = 'rotateY(0deg)';
+      }
+
+      count++;
+      document.querySelector('[data-score]').textContent = `Cards reviewed: ${count}`;
+    }
+  </script>
+
+</body>
+</html>

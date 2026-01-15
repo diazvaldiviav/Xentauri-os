@@ -506,107 +506,219 @@ class CustomLayoutService:
             validation_result=validation_result,
         )
 
-        # Step 2: Visual Concordance Check (Flash NO thinking)
+        # =====================================================================
+        # Sprint 11: MAIN LOOP
+        # Each cycle: Step 2 (concordance) → Step 3 (diagnosis) → Step 4 (Opus)
+        #             → Re-validate → If pass return, else continue with context
+        # =====================================================================
+
+        max_repair_attempts = getattr(settings, 'VALIDATION_REPAIR_MAX_RETRIES', 2)
+        failed_attempts: list[FailedRepairAttempt] = []
+
+        # Track current state for the loop
+        current_html = html  # Start with Flash's HTML
+        current_validation_result = validation_result
+        original_inputs_tested = validation_result.inputs_tested
+        original_inputs_responsive = validation_result.inputs_responsive
+
+        # Track best repair attempt
+        best_repaired_html = None
+        best_responsive_count = 0
+
         conv = get_current_conversation()
-        if validation_result.page_screenshot:
-            logger.info("Sprint 11 Step 2: Visual concordance check (Flash NO thinking)")
 
-            # Log concordance prompt
-            concordance_prompt = f"Compare screenshot to user request: {user_request}"
-            if conv:
-                conv.log_flash_concordance_prompt(concordance_prompt, has_screenshot=True)
+        for attempt in range(max_repair_attempts):
+            cycle_num = attempt + 1
+            logger.info(
+                f"Sprint 11 Cycle {cycle_num}/{max_repair_attempts}: "
+                f"Starting (state: {current_validation_result.inputs_responsive}/{current_validation_result.inputs_tested})"
+            )
 
-            import time as _time
-            concordance_start = _time.time()
+            # Update pipeline context with current state
+            pipeline_ctx.validation_result = current_validation_result
+            pipeline_ctx.generated_html = current_html
 
-            concordance_passed, concordance_diagnosis, concordance_confidence = \
-                await visual_analyzer.check_visual_concordance(
-                    screenshot_bytes=validation_result.page_screenshot,
+            # Get screenshot for this cycle
+            screenshot = current_validation_result.page_screenshot or validation_result.page_screenshot
+
+            # =================================================================
+            # STEP 2: Visual Concordance Check (Flash NO thinking)
+            # =================================================================
+            if screenshot:
+                logger.info(f"Cycle {cycle_num} Step 2: Visual concordance check (Flash NO thinking)")
+
+                concordance_prompt = f"Compare screenshot to user request: {user_request}"
+                if conv:
+                    conv.log_flash_concordance_prompt(concordance_prompt, has_screenshot=True)
+
+                import time as _time
+                concordance_start = _time.time()
+
+                concordance_passed, concordance_diagnosis, concordance_confidence = \
+                    await visual_analyzer.check_visual_concordance(
+                        screenshot_bytes=screenshot,
+                        user_request=user_request,
+                    )
+
+                concordance_latency = (_time.time() - concordance_start) * 1000
+
+                if conv:
+                    conv.log_flash_concordance_response(
+                        response=concordance_diagnosis,
+                        passed=concordance_passed,
+                        confidence=concordance_confidence,
+                        latency_ms=concordance_latency,
+                    )
+
+                # ACCUMULATE in context
+                pipeline_ctx.concordance_passed = concordance_passed
+                pipeline_ctx.concordance_diagnosis = concordance_diagnosis
+                pipeline_ctx.concordance_confidence = concordance_confidence
+                pipeline_ctx.screenshot_bytes = screenshot
+
+                # Also store in validation_result for backward compatibility
+                current_validation_result.concordance_diagnosis = concordance_diagnosis
+
+                if concordance_passed:
+                    logger.info(
+                        f"Cycle {cycle_num} concordance PASSED: {concordance_diagnosis} "
+                        f"(confidence={concordance_confidence:.2f})"
+                    )
+                else:
+                    logger.warning(
+                        f"Cycle {cycle_num} concordance FAILED: {concordance_diagnosis} "
+                        f"(confidence={concordance_confidence:.2f})"
+                    )
+
+            # =================================================================
+            # STEP 3 & 4: Flash Diagnosis (WITH thinking) + Opus Repair
+            # =================================================================
+            logger.info(f"Cycle {cycle_num} Steps 3-4: Flash diagnosis + Opus repair")
+
+            if screenshot:
+                # Full pipeline with vision AND accumulated context
+                repaired_html = await direct_fixer.repair_with_vision(
+                    html=current_html,
+                    sandbox_result=current_validation_result,
                     user_request=user_request,
-                )
-
-            concordance_latency = (_time.time() - concordance_start) * 1000
-
-            # Log concordance response
-            if conv:
-                conv.log_flash_concordance_response(
-                    response=concordance_diagnosis,
-                    passed=concordance_passed,
-                    confidence=concordance_confidence,
-                    latency_ms=concordance_latency,
-                )
-
-            # ACCUMULATE in context
-            pipeline_ctx.concordance_passed = concordance_passed
-            pipeline_ctx.concordance_diagnosis = concordance_diagnosis
-            pipeline_ctx.concordance_confidence = concordance_confidence
-            pipeline_ctx.screenshot_bytes = validation_result.page_screenshot
-
-            # Also store in validation_result for backward compatibility
-            validation_result.concordance_diagnosis = concordance_diagnosis
-
-            if concordance_passed:
-                logger.info(
-                    f"Visual concordance PASSED: {concordance_diagnosis} "
-                    f"(confidence={concordance_confidence:.2f})"
+                    screenshot=screenshot,
+                    failed_attempts=failed_attempts,
+                    pipeline_context=pipeline_ctx,
                 )
             else:
-                logger.warning(
-                    f"Visual concordance FAILED: {concordance_diagnosis} "
-                    f"(confidence={concordance_confidence:.2f})"
+                # Fallback to text-only repair (no screenshot available)
+                logger.warning("No screenshot available, using text-only repair")
+                repaired_html = await direct_fixer.repair(
+                    html=current_html,
+                    sandbox_result=current_validation_result,
+                    user_request=user_request,
+                    failed_attempts=failed_attempts,
+                    pipeline_context=pipeline_ctx,
                 )
 
-        # Step 3 & 4: Technical Diagnosis (Flash WITH thinking) + Opus Repair
-        # Pass FULL CONTEXT so models work as ONE
-        logger.info("Sprint 11 Step 3-4: Flash diagnosis + Opus repair (with FULL CONTEXT)")
+            if not repaired_html:
+                logger.warning(f"Cycle {cycle_num}: Opus failed to produce HTML")
+                failed_attempts.append(FailedRepairAttempt(
+                    attempt_number=cycle_num,
+                    failure_reason="no_html",
+                    inputs_before=current_validation_result.inputs_tested,
+                    inputs_after=0,
+                    responsive_before=current_validation_result.inputs_responsive,
+                    responsive_after=0,
+                ))
+                continue
 
-        if validation_result.page_screenshot:
-            # Full pipeline with vision AND accumulated context
-            final_html = await direct_fixer.repair_with_vision(
-                html=html,
-                sandbox_result=validation_result,
-                user_request=user_request,
-                screenshot=validation_result.page_screenshot,
-                failed_attempts=[],
-                pipeline_context=pipeline_ctx,  # Sprint 11: Pass full context
-            )
-        else:
-            # Fallback to text-only repair (no screenshot available)
-            logger.warning("No screenshot available, using text-only repair")
-            final_html = await direct_fixer.repair(
-                html=html,
-                sandbox_result=validation_result,
-                user_request=user_request,
-                failed_attempts=[],
-                pipeline_context=pipeline_ctx,  # Sprint 11: Pass full context
+            # Save repaired HTML for debugging
+            save_html_for_debug(repaired_html, suffix=f"sprint11_cycle{cycle_num}")
+
+            # RE-VALIDATE repaired HTML
+            logger.info(f"Cycle {cycle_num}: Re-validating repaired HTML...")
+            repair_contract = ValidationContract(
+                html=repaired_html,
+                layout_type=detected_type,
+                visual_change_threshold=contract.visual_change_threshold,
+                blank_page_threshold=contract.blank_page_threshold,
+                max_inputs_to_test=contract.max_inputs_to_test,
+                stabilization_ms=contract.stabilization_ms,
             )
 
-        # Update context with final result
+            repair_validation = await visual_validator.validate(repair_contract)
+
+            # Check for destructive repair
+            if repair_validation.inputs_tested < original_inputs_tested:
+                logger.warning(
+                    f"Cycle {cycle_num} REJECTED: destructive repair. "
+                    f"Original: {original_inputs_tested} inputs, Repair: {repair_validation.inputs_tested}"
+                )
+                failed_attempts.append(FailedRepairAttempt(
+                    attempt_number=cycle_num,
+                    failure_reason="destructive",
+                    inputs_before=original_inputs_tested,
+                    inputs_after=repair_validation.inputs_tested,
+                    responsive_before=original_inputs_responsive,
+                    responsive_after=repair_validation.inputs_responsive,
+                ))
+                continue
+
+            # Track best attempt
+            if repair_validation.inputs_responsive > best_responsive_count:
+                best_repaired_html = repaired_html
+                best_responsive_count = repair_validation.inputs_responsive
+
+            # Check if valid
+            if repair_validation.valid:
+                logger.info(
+                    f"Sprint 11 SUCCESS on cycle {cycle_num}: "
+                    f"{repair_validation.inputs_responsive}/{repair_validation.inputs_tested} responsive"
+                )
+                pipeline_ctx.repaired_html = repaired_html
+                return CustomLayoutResult(
+                    html=repaired_html,
+                    success=True,
+                    error=None,
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            # Not valid yet - log and prepare for next cycle
+            logger.warning(
+                f"Cycle {cycle_num}: Improved but not enough - "
+                f"{repair_validation.inputs_responsive}/{repair_validation.inputs_tested} responsive"
+            )
+            failed_attempts.append(FailedRepairAttempt(
+                attempt_number=cycle_num,
+                failure_reason="insufficient",
+                inputs_before=current_validation_result.inputs_tested,
+                inputs_after=repair_validation.inputs_tested,
+                responsive_before=current_validation_result.inputs_responsive,
+                responsive_after=repair_validation.inputs_responsive,
+            ))
+
+            # Sprint 11: Update for next cycle
+            # 1. Use NEW validation results (Flash sees current state)
+            # 2. Use REPAIRED HTML as base (Opus builds incrementally)
+            current_validation_result = repair_validation
+            current_html = repaired_html
+            logger.info(
+                f"Sprint 11: Cycle {cycle_num + 1} will build on Opus's HTML "
+                f"({repair_validation.inputs_responsive}/{repair_validation.inputs_tested} responsive)"
+            )
+
+        # All cycles exhausted - return best effort or original
+        logger.error(
+            f"Sprint 11: All {max_repair_attempts} cycles failed. "
+            f"Best: {best_responsive_count}/{original_inputs_tested} responsive"
+        )
+
+        # Return best attempt if we have one, otherwise original
+        final_html = best_repaired_html or html
         pipeline_ctx.repaired_html = final_html
 
-        # Return result - use Opus output if available, otherwise original
-        if final_html:
-            save_html_for_debug(final_html, suffix="sprint11_final")
-            logger.info(
-                f"Sprint 11 pipeline complete - "
-                f"concordance={'PASS' if pipeline_ctx.concordance_passed else 'FAIL'}, "
-                f"original_len={len(html)}, final_len={len(final_html)}"
-            )
-            return CustomLayoutResult(
-                html=final_html,
-                success=True,
-                error=None,
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-        else:
-            # Opus repair failed, return original HTML
-            logger.warning("Opus repair failed, returning original HTML")
-            return CustomLayoutResult(
-                html=html,
-                success=True,
-                error="Opus repair failed, returning original",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
+        return CustomLayoutResult(
+            html=final_html,
+            success=True,  # Still return HTML, just not fully validated
+            error=f"Validation incomplete: {best_responsive_count}/{original_inputs_tested} responsive",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
 
     def _clean_html_response(self, content: str) -> Optional[str]:
         """

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Sequential Quiz - BROKEN</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-8">
+
+  <!--
+    BUG: Sequential Quiz - Weak visual feedback
+
+    ERRORS:
+    1. Only border change on selection (too subtle)
+    2. No background color change
+    3. No scale/transform feedback
+    4. Border-only change affects <3% of element pixels
+
+    RESULT: Validator detects clicks but pixel diff is below threshold
+            Elements appear "unresponsive" even though JS works
+
+    FIX: Add background color change on selection, not just border
+  -->
+
+  <div data-trivia="container" class="max-w-3xl mx-auto">
+    <h1 class="text-3xl font-bold mb-4 text-center">History Quiz</h1>
+
+    <div class="flex justify-between items-center mb-8">
+      <span class="text-gray-400">Question 1 of 3</span>
+      <div data-score class="text-xl">Score: 0</div>
+    </div>
+
+    <div data-question="1" class="bg-gray-800 rounded-xl p-8">
+      <h2 class="text-xl mb-6">In which year did World War II end?</h2>
+
+      <div class="space-y-3">
+        <!-- BUG: Only border changes, no background change -->
+        <button data-option
+                class="w-full p-4 bg-gray-700 rounded-lg text-left
+                       border-2 border-transparent
+                       hover:border-blue-500 transition-all"
+                onclick="selectAnswer(this, false)">
+          1943
+        </button>
+
+        <button data-option
+                class="w-full p-4 bg-gray-700 rounded-lg text-left
+                       border-2 border-transparent
+                       hover:border-blue-500 transition-all"
+                onclick="selectAnswer(this, true)">
+          1945
+        </button>
+
+        <button data-option
+                class="w-full p-4 bg-gray-700 rounded-lg text-left
+                       border-2 border-transparent
+                       hover:border-blue-500 transition-all"
+                onclick="selectAnswer(this, false)">
+          1947
+        </button>
+
+        <button data-option
+                class="w-full p-4 bg-gray-700 rounded-lg text-left
+                       border-2 border-transparent
+                       hover:border-blue-500 transition-all"
+                onclick="selectAnswer(this, false)">
+          1950
+        </button>
+      </div>
+
+      <div data-feedback class="mt-6 text-center hidden">
+        <p id="feedback-text" class="mb-4"></p>
+        <button data-submit
+                class="px-6 py-2 bg-blue-600 rounded-lg
+                       hover:bg-blue-500 transition-colors">
+          Next Question
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let score = 0;
+    let selectedButton = null;
+
+    function selectAnswer(button, isCorrect) {
+      // Clear previous selection
+      document.querySelectorAll('[data-option]').forEach(btn => {
+        // BUG: Only removes border, doesn't change background
+        btn.classList.remove('border-blue-500');
+        btn.classList.add('border-transparent');
+      });
+
+      // Mark selection - BUG: Only border change, too subtle
+      button.classList.remove('border-transparent');
+      button.classList.add('border-blue-500');
+      // BUG: Should also change background: btn.classList.add('bg-blue-600');
+
+      selectedButton = button;
+
+      // Show feedback
+      const feedback = document.querySelector('[data-feedback]');
+      const feedbackText = document.getElementById('feedback-text');
+
+      feedback.classList.remove('hidden');
+
+      if (isCorrect) {
+        feedbackText.textContent = '✅ Correct! World War II ended in 1945.';
+        feedbackText.className = 'mb-4 text-green-400';
+        score++;
+      } else {
+        feedbackText.textContent = '❌ Incorrect. The correct answer is 1945.';
+        feedbackText.className = 'mb-4 text-red-400';
+      }
+
+      document.querySelector('[data-score]').textContent = `Score: ${score}`;
+    }
+  </script>
+
+</body>
+</html>

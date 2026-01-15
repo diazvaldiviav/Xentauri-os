@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Dashboard Data Table - BROKEN</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-8">
+
+  <!--
+    BUG: Dashboard Data Table - Row hover/click feedback issues
+
+    ERRORS:
+    1. Table rows have no explicit click feedback
+    2. Hover state uses opacity change (too subtle)
+    3. No active/focus states
+    4. Row selection only adds text color change (fails pixel threshold)
+
+    RESULT: Rows are clickable but visual feedback is insufficient
+            Validator sees clicks but <2% pixel change
+
+    FIX: Add background color change on selection/hover, not opacity
+  -->
+
+  <div data-dashboard="container">
+    <div class="flex justify-between items-center mb-8">
+      <h1 class="text-3xl font-bold">User Management</h1>
+      <button class="relative z-10 px-4 py-2 bg-blue-600 rounded-lg
+                     hover:bg-blue-500 active:scale-95 transition-all">
+        Add User
+      </button>
+    </div>
+
+    <div class="bg-gray-800 rounded-xl overflow-hidden">
+      <table class="w-full">
+        <thead class="bg-gray-700">
+          <tr>
+            <th class="p-4 text-left">Name</th>
+            <th class="p-4 text-left">Email</th>
+            <th class="p-4 text-left">Role</th>
+            <th class="p-4 text-left">Status</th>
+            <th class="p-4 text-left">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- BUG: Hover uses opacity which is too subtle -->
+          <tr data-metric
+              class="border-t border-gray-700 cursor-pointer
+                     hover:opacity-80 transition-opacity"
+              onclick="selectRow(this, 'user-1')">
+            <td class="p-4">John Doe</td>
+            <td class="p-4">john@example.com</td>
+            <td class="p-4">Admin</td>
+            <td class="p-4"><span class="text-green-400">Active</span></td>
+            <td class="p-4">
+              <!-- BUG: Button inside row, may have z-index issues -->
+              <button class="text-blue-400 hover:text-blue-300"
+                      onclick="event.stopPropagation(); editUser('user-1')">
+                Edit
+              </button>
+            </td>
+          </tr>
+
+          <tr data-metric
+              class="border-t border-gray-700 cursor-pointer
+                     hover:opacity-80 transition-opacity"
+              onclick="selectRow(this, 'user-2')">
+            <td class="p-4">Jane Smith</td>
+            <td class="p-4">jane@example.com</td>
+            <td class="p-4">Editor</td>
+            <td class="p-4"><span class="text-green-400">Active</span></td>
+            <td class="p-4">
+              <button class="text-blue-400 hover:text-blue-300"
+                      onclick="event.stopPropagation(); editUser('user-2')">
+                Edit
+              </button>
+            </td>
+          </tr>
+
+          <tr data-metric
+              class="border-t border-gray-700 cursor-pointer
+                     hover:opacity-80 transition-opacity"
+              onclick="selectRow(this, 'user-3')">
+            <td class="p-4">Bob Wilson</td>
+            <td class="p-4">bob@example.com</td>
+            <td class="p-4">Viewer</td>
+            <td class="p-4"><span class="text-yellow-400">Pending</span></td>
+            <td class="p-4">
+              <button class="text-blue-400 hover:text-blue-300"
+                      onclick="event.stopPropagation(); editUser('user-3')">
+                Edit
+              </button>
+            </td>
+          </tr>
+
+          <tr data-metric
+              class="border-t border-gray-700 cursor-pointer
+                     hover:opacity-80 transition-opacity"
+              onclick="selectRow(this, 'user-4')">
+            <td class="p-4">Alice Brown</td>
+            <td class="p-4">alice@example.com</td>
+            <td class="p-4">Admin</td>
+            <td class="p-4"><span class="text-red-400">Inactive</span></td>
+            <td class="p-4">
+              <button class="text-blue-400 hover:text-blue-300"
+                      onclick="event.stopPropagation(); editUser('user-4')">
+                Edit
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div id="selection-info" class="mt-4 p-4 bg-gray-800 rounded-lg hidden">
+      Selected user: <span id="selected-user" class="font-bold"></span>
+    </div>
+  </div>
+
+  <script>
+    function selectRow(row, userId) {
+      // Clear previous selection - BUG: Only changes text color
+      document.querySelectorAll('[data-metric]').forEach(r => {
+        r.classList.remove('text-blue-400');
+        // BUG: Should also remove/add background: r.classList.remove('bg-blue-900/30');
+      });
+
+      // Mark selected - BUG: Text color change is too subtle
+      row.classList.add('text-blue-400');
+      // BUG: Should add background: row.classList.add('bg-blue-900/30');
+
+      // Show selection
+      document.getElementById('selection-info').classList.remove('hidden');
+      document.getElementById('selected-user').textContent = userId;
+    }
+
+    function editUser(userId) {
+      alert(`Editing ${userId}`);
+    }
+  </script>
+
+</body>
+</html>

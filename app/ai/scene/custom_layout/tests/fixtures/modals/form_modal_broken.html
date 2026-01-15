@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>Form Modal - BROKEN</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-8">
+
+  <!--
+    BUG: Form Modal - Input fields blocked by backdrop
+
+    ERRORS:
+    1. Modal content has lower z-index than backdrop visual layer
+    2. Inputs inside modal cannot receive focus
+    3. Backdrop intercepts all pointer events including form inputs
+    4. Submit button is also blocked
+
+    RESULT: Modal appears but form cannot be filled out
+            Inputs don't receive focus/clicks
+            Validator sees 0/4 responsive (form elements)
+
+    FIX: Modal content needs higher z-index than backdrop
+         Inputs need pointer-events-auto if parent has pointer-events-none
+  -->
+
+  <div class="max-w-md mx-auto text-center">
+    <h1 class="text-3xl font-bold mb-8">Contact Form</h1>
+
+    <button id="open-form"
+            class="relative z-10 px-6 py-3 bg-blue-600 rounded-lg
+                   hover:bg-blue-500 active:scale-95 transition-all"
+            onclick="openModal()">
+      Open Contact Form
+    </button>
+  </div>
+
+  <!-- Form Modal -->
+  <div id="form-modal" class="fixed inset-0 z-40 hidden items-center justify-center">
+    <!-- BUG: Backdrop at z-40, but content also at z-40 (should be z-50) -->
+    <div class="absolute inset-0 bg-black/70 z-40"></div>
+
+    <!-- BUG: Content at z-40, same as backdrop - may be behind -->
+    <div class="relative z-40 bg-gray-800 rounded-xl p-8 max-w-md w-full mx-4">
+      <button class="absolute top-4 right-4 text-gray-400 hover:text-white"
+              onclick="closeModal()">
+        ✕
+      </button>
+
+      <h2 class="text-2xl font-bold mb-6">Contact Us</h2>
+
+      <form onsubmit="submitForm(event)" class="space-y-4">
+        <!-- BUG: Inputs may not receive focus due to z-index -->
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Name</label>
+          <input type="text" id="name" required
+                 class="w-full p-3 bg-gray-700 rounded-lg border border-gray-600
+                        focus:border-blue-500 focus:outline-none transition-colors">
+        </div>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Email</label>
+          <input type="email" id="email" required
+                 class="w-full p-3 bg-gray-700 rounded-lg border border-gray-600
+                        focus:border-blue-500 focus:outline-none transition-colors">
+        </div>
+
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Message</label>
+          <textarea id="message" rows="4" required
+                    class="w-full p-3 bg-gray-700 rounded-lg border border-gray-600
+                           focus:border-blue-500 focus:outline-none transition-colors resize-none"></textarea>
+        </div>
+
+        <div class="flex gap-4 pt-4">
+          <button type="button"
+                  class="flex-1 px-4 py-3 bg-gray-700 rounded-lg
+                         hover:bg-gray-600 transition-colors"
+                  onclick="closeModal()">
+            Cancel
+          </button>
+
+          <!-- BUG: Submit button may not be clickable -->
+          <button type="submit" data-submit
+                  class="flex-1 px-4 py-3 bg-blue-600 rounded-lg
+                         hover:bg-blue-500 transition-colors">
+            Send Message
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Success Toast - Also has z-index issues -->
+  <div id="success-toast"
+       class="fixed bottom-8 right-8 z-30 bg-green-600 text-white px-6 py-4 rounded-lg
+              shadow-lg hidden">
+    Message sent successfully!
+  </div>
+
+  <script>
+    function openModal() {
+      const modal = document.getElementById('form-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+
+      // BUG: Focus won't work if input is blocked
+      document.getElementById('name').focus();
+    }
+
+    function closeModal() {
+      const modal = document.getElementById('form-modal');
+      modal.classList.remove('flex');
+      modal.classList.add('hidden');
+
+      // Clear form
+      document.getElementById('name').value = '';
+      document.getElementById('email').value = '';
+      document.getElementById('message').value = '';
+    }
+
+    function submitForm(event) {
+      event.preventDefault();
+
+      // Simulate send
+      closeModal();
+
+      // Show toast - BUG: Toast at z-30 may be behind other elements
+      const toast = document.getElementById('success-toast');
+      toast.classList.remove('hidden');
+
+      setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 3000);
+    }
+  </script>
+
+</body>
+</html>
