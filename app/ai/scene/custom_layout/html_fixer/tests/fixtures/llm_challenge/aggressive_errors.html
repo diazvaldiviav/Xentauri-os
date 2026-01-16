@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LLM Challenge - Aggressive Errors</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Overlay that blocks everything */
+        .blocking-overlay {
+            position: fixed;
+            inset: 0;
+            background: transparent;
+            z-index: 999;
+        }
+
+        /* 3D transform that hides content */
+        .flipped-card {
+            transform: rotateY(180deg);
+            backface-visibility: hidden;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-8">
+
+    <!-- PROBLEM 1: Invisible overlay blocks all clicks -->
+    <div class="blocking-overlay" id="ghost-overlay"></div>
+
+    <!-- PROBLEM 2: Buttons with missing onclick functions -->
+    <div class="mb-8">
+        <h2 class="text-xl mb-4">1. Missing JS Functions</h2>
+        <div class="flex gap-4">
+            <button
+                onclick="handleSubmit()"
+                class="px-4 py-2 bg-blue-600 rounded"
+            >
+                Submit (function missing)
+            </button>
+            <button
+                onclick="processPayment(this, 'premium')"
+                class="px-4 py-2 bg-green-600 rounded"
+            >
+                Pay Now (function missing)
+            </button>
+            <button
+                onclick="deleteItem(event, 123)"
+                class="px-4 py-2 bg-red-600 rounded"
+            >
+                Delete (function missing)
+            </button>
+        </div>
+    </div>
+
+    <!-- PROBLEM 3: JS with syntax errors -->
+    <div class="mb-8">
+        <h2 class="text-xl mb-4">2. JS Syntax Errors</h2>
+        <button
+            id="broken-btn"
+            onclick="brokenFunction()"
+            class="px-4 py-2 bg-purple-600 rounded"
+        >
+            Broken JS
+        </button>
+    </div>
+
+    <script>
+        // SYNTAX ERROR: Missing closing brace
+        function brokenFunction() {
+            const data = {
+                name: "test",
+                value: 42
+            // Missing closing brace for object
+
+            console.log(data);
+        }
+
+        // SYNTAX ERROR: Unexpected token
+        function anotherBroken() {
+            if (true) {
+                console.log("yes"
+            } // Missing closing parenthesis above
+        }
+    </script>
+
+    <!-- PROBLEM 4: Buttons with NO visual feedback (no hover/active states) -->
+    <div class="mb-8">
+        <h2 class="text-xl mb-4">3. Missing Visual Feedback</h2>
+        <div class="flex gap-4">
+            <button
+                class="px-4 py-2 bg-gray-600 rounded"
+                onclick="alert('clicked')"
+            >
+                No Hover State
+            </button>
+            <button
+                class="px-4 py-2 bg-gray-600 rounded"
+                onclick="alert('clicked')"
+            >
+                No Active State
+            </button>
+            <a
+                href="#section"
+                class="px-4 py-2 bg-gray-600 rounded inline-block"
+            >
+                Link No Feedback
+            </a>
+        </div>
+    </div>
+
+    <!-- PROBLEM 5: Z-index chaos - multiple overlapping elements -->
+    <div class="mb-8 relative h-48">
+        <h2 class="text-xl mb-4">4. Z-Index Chaos</h2>
+        <div class="absolute inset-0 mt-8">
+            <!-- Element that should be clickable but is behind others -->
+            <button
+                class="absolute top-4 left-4 px-4 py-2 bg-blue-600 rounded z-10"
+                onclick="alert('blue')"
+            >
+                Blue (z-10)
+            </button>
+
+            <!-- Transparent blocker with higher z-index -->
+            <div class="absolute top-0 left-0 w-48 h-24 bg-transparent z-20"></div>
+
+            <!-- Another button partially covered -->
+            <button
+                class="absolute top-4 left-32 px-4 py-2 bg-green-600 rounded z-5"
+                onclick="alert('green')"
+            >
+                Green (z-5)
+            </button>
+
+            <!-- Decorative overlay covering buttons -->
+            <div class="absolute top-0 left-0 w-64 h-32 bg-white/5 z-30 rounded"></div>
+        </div>
+    </div>
+
+    <!-- PROBLEM 6: References to non-existent DOM elements -->
+    <div class="mb-8">
+        <h2 class="text-xl mb-4">5. Missing DOM References</h2>
+        <button
+            onclick="updateCounter()"
+            class="px-4 py-2 bg-yellow-600 rounded"
+        >
+            Update Counter
+        </button>
+        <span id="wrong-counter-id">0</span>
+    </div>
+
+    <script>
+        // References wrong ID - should be 'wrong-counter-id' but uses 'counter'
+        function updateCounter() {
+            const el = document.getElementById('counter');
+            el.textContent = parseInt(el.textContent) + 1;
+        }
+    </script>
+
+    <!-- PROBLEM 7: Elements with opacity:0 -->
+    <div class="mb-8">
+        <h2 class="text-xl mb-4">6. Invisible Elements</h2>
+        <button
+            class="px-4 py-2 bg-pink-600 rounded opacity-0"
+            onclick="alert('invisible click')"
+        >
+            Invisible Button
+        </button>
+        <button
+            class="px-4 py-2 bg-pink-600 rounded"
+            style="opacity: 0.05"
+            onclick="alert('nearly invisible')"
+        >
+            Nearly Invisible
+        </button>
+    </div>
+
+    <!-- PROBLEM 8: 3D transformed (flipped) buttons -->
+    <div class="mb-8">
+        <h2 class="text-xl mb-4">7. 3D Transform Issues</h2>
+        <button
+            class="px-4 py-2 bg-indigo-600 rounded flipped-card"
+            onclick="alert('flipped')"
+        >
+            Flipped Button
+        </button>
+    </div>
+
+    <!-- PROBLEM 9: Pointer events disabled -->
+    <div class="mb-8">
+        <h2 class="text-xl mb-4">8. Pointer Events Disabled</h2>
+        <div class="pointer-events-none">
+            <button
+                class="px-4 py-2 bg-teal-600 rounded"
+                onclick="alert('should not click')"
+            >
+                Inside pointer-events-none
+            </button>
+        </div>
+    </div>
+
+    <!-- PROBLEM 10: Complex nested issues -->
+    <div class="mb-8 relative">
+        <h2 class="text-xl mb-4">9. Complex Nested Issues</h2>
+        <div class="relative">
+            <!-- Modal-like overlay -->
+            <div class="absolute inset-0 bg-black/50 z-40"></div>
+
+            <!-- Content that should be above overlay but isn't -->
+            <div class="relative z-30 p-4 bg-gray-800 rounded">
+                <button
+                    onclick="closeModal()"
+                    class="px-4 py-2 bg-red-600 rounded"
+                >
+                    Close (blocked by overlay)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Function exists but modal reference is wrong
+        function closeModal() {
+            const modal = document.querySelector('.modal-container');
+            if (modal) modal.style.display = 'none';
+        }
+    </script>
+
+</body>
+</html>

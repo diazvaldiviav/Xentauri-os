@@ -20,6 +20,8 @@ from typing import Dict, List, Optional, Any
 
 from bs4 import BeautifulSoup, Tag, NavigableString
 
+from ..core.selector import SelectorService
+
 
 class DOMParser:
     """
@@ -254,80 +256,58 @@ class DOMParser:
 
     def generate_selector(self, element: Tag) -> str:
         """
-        Generate a CSS selector for an element.
+        Generate a CSS selector for an element using SelectorService.
 
         Priority:
         1. ID if present
         2. data-* attribute if present
-        3. Tag + classes + nth-child
+        3. Tag + escaped classes + nth-child
 
         Args:
             element: Target element
 
         Returns:
-            CSS selector string
+            Valid CSS selector string with properly escaped Tailwind classes
         """
-        # Try ID first
-        if element.get("id"):
-            return f"#{element['id']}"
-
-        # Try data-* attributes
-        for attr in element.attrs:
-            if attr.startswith("data-"):
-                value = element[attr]
-                if value is True or value == "":
-                    return f"[{attr}]"
-                return f'[{attr}="{value}"]'
-
-        # Build tag + classes selector
-        selector = element.name
-
+        element_id = element.get("id")
         classes = element.get("class", [])
-        if classes:
-            # Filter out classes with special characters (like Tailwind's hover:, focus:, etc.)
-            # These can't be used directly in CSS selectors without escaping
-            safe_classes = [c for c in classes if not self._has_special_chars(c)]
-            if safe_classes:
-                # Limit to 3 classes to keep selector manageable
-                selector += "." + ".".join(safe_classes[:3])
 
-        # Add nth-child for uniqueness if needed
-        if element.parent:
+        # Extract data-* attributes
+        data_attrs = {
+            k: v for k, v in element.attrs.items()
+            if k.startswith("data-")
+        }
+
+        # Calculate nth-child if needed for uniqueness
+        nth_child = None
+        if not element_id and not data_attrs and element.parent:
             same_tag_siblings = [
                 sib for sib in element.parent.children
                 if isinstance(sib, Tag) and sib.name == element.name
             ]
             if len(same_tag_siblings) > 1:
-                index = same_tag_siblings.index(element) + 1
-                selector += f":nth-child({index})"
+                nth_child = same_tag_siblings.index(element) + 1
 
-        return selector
-
-    def _has_special_chars(self, class_name: str) -> bool:
-        """
-        Check if class name has characters that need escaping in CSS selectors.
-
-        Tailwind uses colons for variants (hover:, focus:, etc.) and brackets
-        for arbitrary values ([color:red]).
-
-        Args:
-            class_name: CSS class name to check
-
-        Returns:
-            True if class contains special characters
-        """
-        special_chars = ":[]()/\\@#"
-        return any(c in class_name for c in special_chars)
+        return SelectorService.build_selector(
+            tag=element.name,
+            element_id=element_id,
+            classes=classes,
+            nth_child=nth_child,
+            data_attrs=data_attrs if data_attrs else None,
+            escape_classes=True,
+        )
 
     def generate_unique_selector(self, element: Tag) -> str:
         """
         Generate a unique CSS selector using parent context.
 
+        Uses SelectorService for proper escaping of Tailwind variant classes.
+
         Args:
             element: Target element
 
         Returns:
-            Unique CSS selector string
+            Unique CSS selector string with escaped classes
         """
         # If ID exists, it should be unique
         if element.get("id"):
@@ -345,10 +325,14 @@ class DOMParser:
                 parts.append(f"#{current['id']}")
                 break
 
-            selector = current.name
+            # Use SelectorService to escape classes properly
             classes = current.get("class", [])
-            if classes:
-                selector += "." + ".".join(classes[:2])  # Limit classes
+            selector = SelectorService.build_selector(
+                tag=current.name,
+                classes=classes,
+                max_classes=2,
+                escape_classes=True,
+            )
 
             parts.append(selector)
             current = current.parent

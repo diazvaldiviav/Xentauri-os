@@ -1,0 +1,176 @@
+<!--
+  Fixture: dynamic_content
+  Sprint: 8
+  Error Types: INVISIBLE_DISPLAY
+  Description: Content that dynamically changes size/visibility but elements remain hidden
+               due to incorrect display or visibility states after transitions.
+  Expected Fix: Restore visibility with display:block or visibility:visible.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Content Visibility</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto space-y-8">
+        <h1 class="text-3xl font-bold text-gray-800">Dynamic Content Edge Cases</h1>
+
+        <!-- Accordion with hidden content -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <h2 class="text-xl font-semibold p-4 border-b">Accordion (Content Hidden)</h2>
+
+            <div class="accordion-item border-b">
+                <button class="accordion-header w-full p-4 text-left flex justify-between items-center hover:bg-gray-50">
+                    <span>Section 1</span>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+                <!-- Hidden content that should be shown -->
+                <div class="accordion-content hidden p-4 bg-gray-50">
+                    <p class="text-gray-600 mb-4">This content is hidden by default.</p>
+                    <button
+                        id="accordion-btn-1"
+                        onclick="this.textContent = 'Clicked!'"
+                        class="accordion-action px-4 py-2 bg-blue-500 text-white rounded-lg"
+                    >
+                        Hidden Action Button
+                    </button>
+                </div>
+            </div>
+
+            <div class="accordion-item border-b">
+                <button class="accordion-header w-full p-4 text-left flex justify-between items-center hover:bg-gray-50">
+                    <span>Section 2</span>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+                <div class="accordion-content-2 hidden p-4 bg-gray-50">
+                    <button
+                        id="accordion-btn-2"
+                        onclick="this.textContent = 'Success!'"
+                        class="accordion-action-2 px-4 py-2 bg-green-500 text-white rounded-lg"
+                    >
+                        Another Hidden Button
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Expandable card with display:none content -->
+        <div class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Expandable Card</h2>
+            <p class="text-gray-600 mb-4">Click to expand and reveal hidden controls.</p>
+
+            <button
+                id="expand-trigger"
+                onclick="document.getElementById('expandable-content').classList.toggle('hidden')"
+                class="expand-trigger px-4 py-2 border-2 border-blue-500 text-blue-500 rounded-lg mb-4"
+            >
+                Toggle Content
+            </button>
+
+            <!-- Content that stays hidden due to bug -->
+            <div id="expandable-content" class="expandable-panel hidden mt-4 p-4 bg-blue-50 rounded-lg">
+                <h3 class="font-semibold mb-2">Expanded Content</h3>
+                <p class="text-gray-600 mb-4">This panel has buttons that won't work while hidden.</p>
+                <div class="flex gap-2">
+                    <button
+                        id="expand-btn-1"
+                        onclick="this.textContent = 'Option 1 Selected'"
+                        class="expand-option px-4 py-2 bg-blue-500 text-white rounded-lg"
+                    >
+                        Option 1
+                    </button>
+                    <button
+                        id="expand-btn-2"
+                        onclick="this.textContent = 'Option 2 Selected'"
+                        class="expand-option px-4 py-2 bg-blue-500 text-white rounded-lg"
+                    >
+                        Option 2
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab panel with display:none tabs -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <div class="flex border-b">
+                <button class="tab-btn px-6 py-3 border-b-2 border-blue-500 text-blue-500 font-medium">Tab 1</button>
+                <button class="tab-btn px-6 py-3 text-gray-500 hover:text-gray-700">Tab 2</button>
+                <button class="tab-btn px-6 py-3 text-gray-500 hover:text-gray-700">Tab 3</button>
+            </div>
+
+            <div class="p-6">
+                <!-- Active tab (visible) -->
+                <div class="tab-panel" id="tab-1">
+                    <h3 class="font-semibold mb-2">Tab 1 Content</h3>
+                    <button
+                        id="tab1-btn"
+                        onclick="this.textContent = 'Tab 1 Action!'"
+                        class="tab-action px-4 py-2 bg-indigo-500 text-white rounded-lg"
+                    >
+                        Tab 1 Action
+                    </button>
+                </div>
+
+                <!-- Hidden tabs (display:none) -->
+                <div class="tab-panel hidden" id="tab-2">
+                    <h3 class="font-semibold mb-2">Tab 2 Content</h3>
+                    <button
+                        id="tab2-btn"
+                        onclick="this.textContent = 'Tab 2 Action!'"
+                        class="tab-action-hidden px-4 py-2 bg-purple-500 text-white rounded-lg"
+                    >
+                        Tab 2 Action (Hidden)
+                    </button>
+                </div>
+
+                <div class="tab-panel hidden" id="tab-3">
+                    <h3 class="font-semibold mb-2">Tab 3 Content</h3>
+                    <button
+                        id="tab3-btn"
+                        onclick="this.textContent = 'Tab 3 Action!'"
+                        class="tab-action-hidden px-4 py-2 bg-pink-500 text-white rounded-lg"
+                    >
+                        Tab 3 Action (Hidden)
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Collapsed sidebar with hidden navigation -->
+        <div class="flex bg-white rounded-xl shadow-lg overflow-hidden">
+            <!-- Collapsed sidebar -->
+            <div class="sidebar w-16 bg-gray-800 p-4">
+                <div class="collapsed-nav hidden">
+                    <button
+                        id="nav-home"
+                        onclick="this.classList.add('bg-gray-700')"
+                        class="nav-hidden-btn w-full p-2 text-white rounded mb-2"
+                    >
+                        Home
+                    </button>
+                    <button
+                        id="nav-settings"
+                        onclick="this.classList.add('bg-gray-700')"
+                        class="nav-hidden-btn w-full p-2 text-white rounded mb-2"
+                    >
+                        Settings
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main content -->
+            <div class="flex-1 p-6">
+                <h3 class="font-semibold mb-2">Main Content Area</h3>
+                <p class="text-gray-600">Sidebar navigation is collapsed and hidden.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

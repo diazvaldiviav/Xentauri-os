@@ -1,0 +1,171 @@
+<!--
+  Fixture: iframe_embedded
+  Sprint: 8
+  Error Types: POINTER_BLOCKED
+  Description: Interactive elements near or overlapping with iframes that block pointer events.
+               Overlay decorations intercept clicks intended for buttons near iframes.
+  Expected Fix: Add pointer-events-none to blocking overlays, pointer-events-auto to buttons.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iframe Embedded Edge Case</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-5xl mx-auto space-y-8">
+        <h1 class="text-3xl font-bold text-gray-800">Iframe Embedded Components</h1>
+
+        <!-- Video player with overlay blocking controls -->
+        <div class="relative bg-black rounded-xl overflow-hidden">
+            <h2 class="absolute top-4 left-4 text-white text-xl font-semibold z-10">Video Player</h2>
+
+            <!-- Simulated video area (would be iframe in real use) -->
+            <div class="aspect-video bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
+                <div class="text-gray-500 text-6xl">▶</div>
+            </div>
+
+            <!-- Control bar -->
+            <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
+                <div class="flex items-center gap-4">
+                    <button
+                        id="video-play-btn"
+                        onclick="this.textContent = '⏸'; this.classList.add('bg-white/30')"
+                        class="video-play p-2 text-white hover:bg-white/20 rounded-full"
+                    >
+                        ▶
+                    </button>
+
+                    <!-- Progress bar -->
+                    <div class="flex-1 h-1 bg-white/30 rounded-full overflow-hidden">
+                        <div class="h-full w-1/3 bg-red-500"></div>
+                    </div>
+
+                    <button
+                        id="video-fullscreen-btn"
+                        onclick="this.textContent = '⛶'; this.classList.add('bg-white/30')"
+                        class="video-fullscreen p-2 text-white hover:bg-white/20 rounded-full"
+                    >
+                        ⛶
+                    </button>
+                </div>
+            </div>
+
+            <!-- Overlay that blocks video controls -->
+            <div class="video-overlay absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-transparent z-20"></div>
+        </div>
+
+        <!-- Map embed with blocked controls -->
+        <div class="relative bg-white rounded-xl shadow-lg overflow-hidden">
+            <h2 class="text-xl font-semibold p-4 border-b">Interactive Map</h2>
+
+            <div class="relative">
+                <!-- Simulated map iframe -->
+                <div class="h-80 bg-gradient-to-br from-green-200 via-blue-200 to-green-300 flex items-center justify-center">
+                    <div class="text-gray-600 text-center">
+                        <div class="text-4xl mb-2">🗺️</div>
+                        <p>Map Embed Area</p>
+                    </div>
+                </div>
+
+                <!-- Map controls (blocked by overlay) -->
+                <div class="absolute top-4 right-4 flex flex-col gap-2">
+                    <button
+                        id="map-zoom-in"
+                        onclick="this.classList.add('bg-blue-500', 'text-white')"
+                        class="map-zoom p-2 bg-white shadow-lg rounded-lg hover:bg-gray-50"
+                    >
+                        +
+                    </button>
+                    <button
+                        id="map-zoom-out"
+                        onclick="this.classList.add('bg-blue-500', 'text-white')"
+                        class="map-zoom p-2 bg-white shadow-lg rounded-lg hover:bg-gray-50"
+                    >
+                        -
+                    </button>
+                </div>
+
+                <!-- Location marker button -->
+                <button
+                    id="map-location-btn"
+                    onclick="this.textContent = 'Located!'; this.classList.replace('bg-blue-500', 'bg-green-500')"
+                    class="map-location absolute bottom-4 left-4 px-4 py-2 bg-blue-500 text-white rounded-lg shadow-lg"
+                >
+                    My Location
+                </button>
+
+                <!-- Decorative overlay blocking map controls -->
+                <div class="map-overlay absolute inset-0 bg-gradient-to-br from-white/10 to-transparent z-10"></div>
+            </div>
+
+            <!-- Action bar below map -->
+            <div class="p-4 border-t flex gap-2">
+                <button
+                    id="map-directions-btn"
+                    onclick="this.textContent = 'Getting directions...'"
+                    class="map-action flex-1 py-2 bg-blue-500 text-white rounded-lg"
+                >
+                    Get Directions
+                </button>
+                <button
+                    id="map-share-btn"
+                    onclick="this.textContent = 'Shared!'"
+                    class="map-action flex-1 py-2 border-2 border-blue-500 text-blue-500 rounded-lg"
+                >
+                    Share Location
+                </button>
+            </div>
+        </div>
+
+        <!-- Social media embed with blocked interaction -->
+        <div class="relative bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Social Feed Embed</h2>
+
+            <!-- Simulated social embed -->
+            <div class="relative border rounded-lg overflow-hidden">
+                <div class="h-64 bg-gradient-to-b from-blue-50 to-white p-4">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="w-10 h-10 bg-blue-500 rounded-full"></div>
+                        <div>
+                            <p class="font-semibold">@username</p>
+                            <p class="text-sm text-gray-500">2 hours ago</p>
+                        </div>
+                    </div>
+                    <p class="text-gray-700 mb-4">This is a sample social media post embedded in the page.</p>
+
+                    <!-- Interaction buttons blocked by overlay -->
+                    <div class="flex gap-4">
+                        <button
+                            id="social-like-btn"
+                            onclick="this.textContent = '❤️ Liked'"
+                            class="social-btn text-gray-500 hover:text-red-500"
+                        >
+                            ♡ Like
+                        </button>
+                        <button
+                            id="social-comment-btn"
+                            onclick="this.textContent = '💬 Commented'"
+                            class="social-btn text-gray-500 hover:text-blue-500"
+                        >
+                            💬 Comment
+                        </button>
+                        <button
+                            id="social-share-btn"
+                            onclick="this.textContent = '↗️ Shared'"
+                            class="social-btn text-gray-500 hover:text-green-500"
+                        >
+                            ↗️ Share
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Overlay blocking social buttons -->
+                <div class="social-overlay absolute inset-0 bg-white/5 z-10"></div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

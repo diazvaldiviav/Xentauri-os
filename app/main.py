@@ -14,6 +14,7 @@ from app.routers import intent  # AI Intent processing router (Sprint 3)
 from app.routers import google_auth  # Google OAuth router (Sprint 3.5)
 from app.routers import cloud  # Cloud content router (Sprint 3.5)
 from app.routers import simulator  # Display Simulator for development (Sprint 3.5)
+from app.routers import feedback  # Human Feedback for layout validation (Sprint 4)
 
 # ---------------------------------------------------------------------------
 # CREATE FASTAPI APPLICATION
@@ -81,6 +82,7 @@ app.include_router(intent.router)
 app.include_router(google_auth.router)
 app.include_router(cloud.router)
 app.include_router(simulator.router)
+app.include_router(feedback.router)  # Human feedback validation
 
 
 # ---------------------------------------------------------------------------

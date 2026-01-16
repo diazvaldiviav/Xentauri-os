@@ -3,7 +3,12 @@ JavaScript Evaluators - Code snippets for Playwright page.evaluate().
 
 All JavaScript code is designed to return serializable dictionaries
 (no DOM nodes, functions, or circular references).
+
+Uses SelectorService helpers for proper CSS selector escaping with
+Tailwind variant classes (hover:, focus:, etc.).
 """
+
+from ..core.selector import SelectorService
 
 
 class JSEvaluators:
@@ -12,7 +17,37 @@ class JSEvaluators:
 
     Each constant is a JavaScript function body that can be passed
     to page.evaluate(). All return plain objects suitable for JSON.
+
+    Note: Evaluators that generate CSS selectors should use the
+    generateSelector() helper function from SelectorService to
+    properly escape Tailwind variant classes (hover:, focus:, etc.).
     """
+
+    @classmethod
+    def get_selector_helpers(cls) -> str:
+        """
+        Get JavaScript helper code for selector generation.
+
+        Returns:
+            JavaScript code defining escapeClass, isSafeClass, and generateSelector functions.
+        """
+        return SelectorService.get_js_helper_code()
+
+    @classmethod
+    def with_helpers(cls, code: str) -> str:
+        """
+        Wrap JavaScript code with selector helper functions.
+
+        Use this when the code needs to generate CSS selectors.
+
+        Args:
+            code: JavaScript code to wrap
+
+        Returns:
+            JavaScript code with selector helpers prepended
+        """
+        helpers = SelectorService.get_js_helper_code()
+        return f"{helpers}\n{code}"
 
     # =========================================================================
     # MAIN DIAGNOSTIC (T2-01)
@@ -78,16 +113,11 @@ class JSEvaluators:
             const intStyle = window.getComputedStyle(elementAtPoint);
             const intRect = elementAtPoint.getBoundingClientRect();
 
-            // Generate selector for interceptor
-            let intSelector = elementAtPoint.tagName.toLowerCase();
-            if (elementAtPoint.id) {
-                intSelector = '#' + elementAtPoint.id;
-            } else if (elementAtPoint.className && typeof elementAtPoint.className === 'string') {
-                const classes = elementAtPoint.className.split(' ').filter(c => c).slice(0, 3);
-                if (classes.length) {
-                    intSelector += '.' + classes.join('.');
-                }
-            }
+            // Generate selector for interceptor using generateSelector helper
+            // NOTE: Requires SelectorService helpers to be injected via JSEvaluators.with_helpers()
+            const intSelector = (typeof generateSelector === 'function')
+                ? generateSelector(elementAtPoint, { escapeClasses: true })
+                : (elementAtPoint.id ? '#' + elementAtPoint.id : elementAtPoint.tagName.toLowerCase());
 
             interceptor = {
                 selector: intSelector,
@@ -136,25 +166,29 @@ class JSEvaluators:
         const style = window.getComputedStyle(element);
         const rect = element.getBoundingClientRect();
 
-        // Generate unique selector
-        let selector = element.tagName.toLowerCase();
-        if (element.id) {
-            selector = '#' + element.id;
+        // Generate unique selector using generateSelector helper if available
+        // NOTE: Requires SelectorService helpers to be injected via JSEvaluators.with_helpers()
+        let selector;
+        if (typeof generateSelector === 'function') {
+            selector = generateSelector(element, { escapeClasses: true });
         } else {
-            // Build path from nearest ID or use classes
-            const classes = element.className && typeof element.className === 'string' ?
-                element.className.split(' ').filter(c => c).slice(0, 3) : [];
-            if (classes.length) {
-                selector += '.' + classes.join('.');
-            }
-
-            // Add nth-child for uniqueness
-            if (element.parentElement) {
-                const siblings = Array.from(element.parentElement.children)
-                    .filter(el => el.tagName === element.tagName);
-                if (siblings.length > 1) {
-                    const index = siblings.indexOf(element) + 1;
-                    selector += ':nth-child(' + index + ')';
+            // Fallback: basic selector without escaping
+            selector = element.tagName.toLowerCase();
+            if (element.id) {
+                selector = '#' + element.id;
+            } else {
+                const classes = element.className && typeof element.className === 'string' ?
+                    element.className.split(' ').filter(c => c).slice(0, 3) : [];
+                if (classes.length) {
+                    selector += '.' + classes.join('.');
+                }
+                if (element.parentElement) {
+                    const siblings = Array.from(element.parentElement.children)
+                        .filter(el => el.tagName === element.tagName);
+                    if (siblings.length > 1) {
+                        const index = siblings.indexOf(element) + 1;
+                        selector += ':nth-child(' + index + ')';
+                    }
                 }
             }
         }
@@ -378,6 +412,13 @@ class JSEvaluators:
         const element = document.querySelector(selector);
         if (!element) return null;
 
+        // Use generateSelector helper if available for proper escaping
+        // NOTE: Requires SelectorService helpers to be injected via JSEvaluators.with_helpers()
+        if (typeof generateSelector === 'function') {
+            return generateSelector(element, { escapeClasses: true });
+        }
+
+        // Fallback: manual selector generation
         if (element.id) {
             return '#' + element.id;
         }

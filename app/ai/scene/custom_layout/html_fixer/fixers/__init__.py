@@ -7,8 +7,8 @@ Contains:
 - TailwindInjector: Applies patches to HTML
 
 Usage:
-    from html_fixer.fixers import TailwindInjector, create_default_engine
-    from html_fixer.contracts.patches import PatchSet
+    from ..fixers import TailwindInjector, create_default_engine
+    from ..contracts.patches import PatchSet
 
     # Create engine and generate patches
     engine = create_default_engine()

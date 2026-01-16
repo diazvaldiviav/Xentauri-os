@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=1920, height=1080, initial-scale=1.0" name="viewport"/>
+<title>Quiz de Historia Mundial</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    animation: {
+                        'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        /* Custom scrollbar hide */
+        ::-webkit-scrollbar { display: none; }
+        body { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white w-full h-screen overflow-hidden select-none flex flex-col items-center justify-center relative">
+
+<!-- Background Elements (Z-0) -->
+<div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+<div class="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-gray-900 via-gray-800 to-slate-900"></div>
+<div class="absolute top-[-10%] right-[-10%] w-[800px] h-[800px] bg-blue-900/20 rounded-full blur-3xl"></div>
+<div class="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] bg-indigo-900/20 rounded-full blur-3xl"></div>
+</div>
+<!-- START SCREEN -->
+<div class="relative z-10 flex flex-col items-center justify-center text-center space-y-12 transition-opacity duration-500" data-game="start" id="start-screen">
+<div class="space-y-4">
+<h1 class="text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-300 drop-shadow-lg">
+                Historia Mundial
+            </h1>
+<p class="text-3xl text-gray-400">Pon a prueba tus conocimientos históricos</p>
+</div>
+<div class="p-8 bg-gray-800/50 backdrop-blur-md rounded-2xl border border-gray-700 shadow-2xl max-w-2xl">
+<ul class="text-left text-xl space-y-4 text-gray-300">
+<li class="flex items-center"><span class="mr-3 text-blue-400">✓</span> 5 Preguntas desafiantes</li>
+<li class="flex items-center"><span class="mr-3 text-blue-400">✓</span> 15 Segundos por pregunta</li>
+<li class="flex items-center"><span class="mr-3 text-blue-400">✓</span> Puntuación en tiempo real</li>
+</ul>
+</div>
+
+<button class="relative px-12 py-6 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 active:scale-95 text-3xl font-bold rounded-xl shadow-lg shadow-blue-900/50 transition-all duration-150 group pointer-events-auto z-50" data-start="" onclick="startGame()">
+<span class="group-hover:translate-x-1 transition-transform inline-block">Comenzar Quiz</span>
+</button>
+</div>
+<!-- GAME CONTAINER (Hidden by default) -->
+<div class="relative z-10 w-full max-w-6xl h-full flex-col hidden opacity-0 transition-opacity duration-500" data-trivia="container" id="game-container">
+<!-- Header -->
+<header class="w-full flex justify-between items-center py-8 px-4 border-b border-gray-700/50 mb-8">
+<div class="flex flex-col">
+<span class="text-gray-400 text-lg uppercase tracking-wider">Pregunta</span>
+<span class="text-4xl font-bold" data-counter="" id="question-counter">1 / 5</span>
+</div>
+<!-- Timer -->
+<div class="relative w-32 h-32 flex items-center justify-center">
+<svg class="w-full h-full transform -rotate-90">
+<circle class="text-gray-800" cx="64" cy="64" fill="transparent" r="56" stroke="currentColor" stroke-width="8"></circle>
+<circle class="text-blue-500 transition-all duration-1000 ease-linear" cx="64" cy="64" fill="transparent" id="timer-circle" r="56" stroke="currentColor" stroke-dasharray="351.86" stroke-dashoffset="0" stroke-width="8"></circle>
+</svg>
+<span class="absolute text-3xl font-bold" id="timer-text">15</span>
+</div>
+<div class="flex flex-col items-end">
+<span class="text-gray-400 text-lg uppercase tracking-wider">Puntuación</span>
+<span class="text-4xl font-bold text-yellow-400" data-score="" id="score-display">0</span>
+</div>
+</header>
+<!-- Question Area -->
+<main class="flex-grow flex flex-col justify-center items-center space-y-12 pb-12">
+<!-- Question Text -->
+<div class="w-full text-center px-8">
+<h2 class="text-5xl font-bold leading-tight text-white drop-shadow-md" data-question="" id="question-text">
+                    Cargando pregunta...
+                </h2>
+</div>
+<!-- Options Grid -->
+<div class="grid grid-cols-2 gap-8 w-full px-8" id="options-grid">
+<!-- Buttons injected via JS -->
+</div>
+</main>
+</div>
+<!-- FEEDBACK OVERLAY (Modal) -->
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-300" data-feedback="" id="feedback-overlay">
+<div class="transform scale-90 transition-transform duration-300" id="feedback-content">
+<div class="text-9xl mb-6 text-center" id="feedback-icon"></div>
+<h2 class="text-6xl font-bold text-center mb-4" id="feedback-title"></h2>
+<p class="text-3xl text-gray-300 text-center" id="feedback-message"></p>
+</div>
+</div>
+<!-- END SCREEN -->
+<div class="fixed inset-0 z-40 hidden flex-col items-center justify-center bg-gray-900/95 transition-opacity duration-500 pointer-events-none" id="end-screen">
+<div class="text-center space-y-8 p-12 bg-gray-800 rounded-3xl border border-gray-700 shadow-2xl max-w-3xl w-full mx-4">
+<h2 class="text-6xl font-bold text-white">¡Quiz Completado!</h2>
+<div class="py-8">
+<span class="text-2xl text-gray-400 uppercase tracking-widest">Puntuación Final</span>
+<div class="text-9xl font-bold text-yellow-400 mt-2" id="final-score">0</div>
+<div class="text-xl text-gray-400 mt-4" id="final-message"></div>
+</div>
+<button class="relative w-full py-6 bg-green-600 hover:bg-green-500 active:bg-green-700 active:scale-95 text-3xl font-bold rounded-xl shadow-lg transition-all duration-150 pointer-events-auto z-50" data-restart="" onclick="restartGame()">
+                Jugar de Nuevo
+            </button>
+</div>
+</div>
+<script>
+        // Data
+        const quizData = {
+            questions: [
+                {
+                    question: "¿En qué año cayó el Muro de Berlín?",
+                    options: ["1985", "1989", "1991", "1993"],
+                    correct: 1
+                },
+                {
+                    question: "¿Quién fue el líder de la Unión Soviética durante la mayor parte de la Segunda Guerra Mundial?",
+                    options: ["Vladímir Lenin", "Nikita Jrushchov", "Iósif Stalin", "Mijaíl Gorbachov"],
+                    correct: 2
+                },
+                {
+                    question: "¿Qué civilización antigua construyó las pirámides de Giza?",
+                    options: ["Los romanos", "Los griegos", "Los egipcios", "Los mayas"],
+                    correct: 2
+                },
+                {
+                    question: "¿En qué año comenzó la Revolución Francesa?",
+                    options: ["1776", "1789", "1804", "1812"],
+                    correct: 1
+                },
+                {
+                    question: "¿Quién fue el primer emperador de Roma?",
+                    options: ["Julio César", "Nerón", "Augusto", "Calígula"],
+                    correct: 2
+                }
+            ]
+        };
+
+        // State
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let timerInterval;
+        let timeLeft = 15;
+        let isAnswering = false;
+
+        // DOM Elements
+        const startScreen = document.getElementById('start-screen');
+        const gameContainer = document.getElementById('game-container');
+        const endScreen = document.getElementById('end-screen');
+        const questionText = document.getElementById('question-text');
+        const optionsGrid = document.getElementById('options-grid');
+        const scoreDisplay = document.getElementById('score-display');
+        const questionCounter = document.getElementById('question-counter');
+        const timerText = document.getElementById('timer-text');
+        const timerCircle = document.getElementById('timer-circle');
+        const feedbackOverlay = document.getElementById('feedback-overlay');
+        const feedbackContent = document.getElementById('feedback-content');
+        const feedbackIcon = document.getElementById('feedback-icon');
+        const feedbackTitle = document.getElementById('feedback-title');
+        const feedbackMessage = document.getElementById('feedback-message');
+
+        // Constants
+        const FULL_DASH_ARRAY = 351.86;
+        const TIME_LIMIT = 15;
+
+        function startGame() {
+            startScreen.classList.add('hidden');
+            gameContainer.classList.remove('hidden');
+            // Small delay to allow display:block to apply before opacity transition
+            setTimeout(() => {
+                gameContainer.classList.remove('opacity-0');
+            }, 50);
+            
+            currentQuestionIndex = 0;
+            score = 0;
+            updateScore();
+            loadQuestion();
+        }
+
+        function loadQuestion() {
+            if (currentQuestionIndex >= quizData.questions.length) {
+                endGame();
+                return;
+            }
+
+            const currentQ = quizData.questions[currentQuestionIndex];
+            
+            // Update UI
+            questionText.textContent = currentQ.question;
+            questionCounter.textContent = `${currentQuestionIndex + 1} / ${quizData.questions.length}`;
+            
+            // Clear and rebuild options
+            optionsGrid.innerHTML = '';
+            currentQ.options.forEach((opt, index) => {
+                const btn = document.createElement('button');
+                btn.className = `relative z-10 w-full p-8 text-2xl font-semibold text-left rounded-xl 
+                               border-2 border-gray-700 bg-gray-800 hover:bg-gray-700 hover:border-blue-500 
+                               active:bg-gray-600 active:scale-95 active:border-blue-400
+                               transition-all duration-150 flex items-center group`;
+                btn.setAttribute('data-option', index);
+                btn.onclick = () => handleAnswer(index);
+                
+                const letter = String.fromCharCode(65 + index); // A, B, C, D
+                btn.innerHTML = `
+                    <span class="flex items-center justify-center w-12 h-12 rounded-full bg-gray-700 text-blue-400 font-bold mr-6 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                        ${letter}
+                    </span>
+                    <span>${opt}</span>
+                `;
+                optionsGrid.appendChild(btn);
+            });
+
+            // Reset Timer
+            resetTimer();
+            isAnswering = false;
+        }
+
+        function resetTimer() {
+            clearInterval(timerInterval);
+            timeLeft = TIME_LIMIT;
+            updateTimerUI();
+            
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                updateTimerUI();
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    handleTimeOut();
+                }
+            }, 1000);
+        }
+
+        function updateTimerUI() {
+            timerText.textContent = timeLeft;
+            const rawTimeFraction = timeLeft / TIME_LIMIT;
+            const circleDashoffset = FULL_DASH_ARRAY - (rawTimeFraction * FULL_DASH_ARRAY);
+            timerCircle.style.strokeDashoffset = circleDashoffset;
+            
+            // Color change based on time
+            if (timeLeft <= 5) {
+                timerCircle.classList.remove('text-blue-500', 'text-yellow-500');
+                timerCircle.classList.add('text-red-500');
+            } else if (timeLeft <= 10) {
+                timerCircle.classList.remove('text-blue-500', 'text-red-500');
+                timerCircle.classList.add('text-yellow-500');
+            } else {
+                timerCircle.classList.remove('text-yellow-500', 'text-red-500');
+                timerCircle.classList.add('text-blue-500');
+            }
+        }
+
+        function handleAnswer(selectedIndex) {
+            if (isAnswering) return;
+            isAnswering = true;
+            clearInterval(timerInterval);
+
+            const currentQ = quizData.questions[currentQuestionIndex];
+            const isCorrect = selectedIndex === currentQ.correct;
+
+            // Highlight selected button
+            const buttons = optionsGrid.querySelectorAll('button');
+            const selectedBtn = buttons[selectedIndex];
+            
+            // Show Feedback Overlay
+            showFeedback(isCorrect, currentQ.options[currentQ.correct]);
+
+            if (isCorrect) {
+                score += 100 + (timeLeft * 10); // Base points + time bonus
+                updateScore();
+                selectedBtn.classList.remove('bg-gray-800', 'border-gray-700');
+                selectedBtn.classList.add('bg-green-900', 'border-green-500');
+            } else {
+                selectedBtn.classList.remove('bg-gray-800', 'border-gray-700');
+                selectedBtn.classList.add('bg-red-900', 'border-red-500');
+                
+                // Highlight correct answer
+                if (selectedIndex !== -1) { // If not timeout
+                    buttons[currentQ.correct].classList.add('bg-green-900', 'border-green-500');
+                }
+            }
+
+            // Wait and go to next
+            setTimeout(() => {
+                hideFeedback();
+                currentQuestionIndex++;
+                loadQuestion();
+            }, 2000);
+        }
+
+        function handleTimeOut() {
+            handleAnswer(-1); // -1 indicates no selection/timeout
+        }
+
+        function showFeedback(isCorrect, correctText) {
+            feedbackOverlay.classList.remove('pointer-events-none', 'opacity-0');
+            feedbackContent.classList.remove('scale-90');
+            feedbackContent.classList.add('scale-100');
+
+            if (isCorrect) {
+                feedbackIcon.textContent = '🎉';
+                feedbackTitle.textContent = '¡Correcto!';
+                feedbackTitle.className = 'text-6xl font-bold text-center mb-4 text-green-400';
+                feedbackMessage.textContent = `+${100 + (timeLeft * 10)} Puntos`;
+            } else {
+                feedbackIcon.textContent = '❌';
+                feedbackTitle.textContent = 'Incorrecto';
+                feedbackTitle.className = 'text-6xl font-bold text-center mb-4 text-red-400';
+                feedbackMessage.textContent = `La respuesta era: ${correctText}`;
+            }
+        }
+
+        function hideFeedback() {
+            feedbackOverlay.classList.add('pointer-events-none', 'opacity-0');
+            feedbackContent.classList.remove('scale-100');
+            feedbackContent.classList.add('scale-90');
+        }
+
+        function updateScore() {
+            scoreDisplay.textContent = score;
+        }
+
+        function endGame() {
+            gameContainer.classList.add('hidden');
+            endScreen.classList.remove('hidden');
+            document.getElementById('final-score').textContent = score;
+            
+            const finalMsg = document.getElementById('final-message');
+            if (score >= 500) finalMsg.textContent = "¡Increíble! Eres un experto en historia.";
+            else if (score >= 300) finalMsg.textContent = "¡Buen trabajo! Tienes buenos conocimientos.";
+            else finalMsg.textContent = "Sigue practicando para mejorar.";
+        }
+
+        function restartGame() {
+            endScreen.classList.add('hidden');
+            startGame();
+        }
+    </script>
+
+
+</body>
+</html>

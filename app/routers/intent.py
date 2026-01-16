@@ -84,6 +84,10 @@ class IntentRequest(BaseModel):
         default=None,
         description="Optional: Target a specific device by ID"
     )
+    require_feedback: bool = Field(
+        default=False,
+        description="If True, return generated HTML for human validation instead of sending to device"
+    )
 
 
 class IntentResponse(BaseModel):
@@ -189,8 +193,9 @@ async def process_intent(
             user_id=current_user.id,
             db=db,
             device_id=request.device_id,
+            require_feedback=request.require_feedback,
         )
-        
+
         # Sprint 4.2: Save conversation history for context-aware processing
         # This ensures conversation_history is populated for future requests
         from app.services.conversation_context_service import conversation_context_service
@@ -250,6 +255,7 @@ async def process_intent_agent(
             user_id=current_user.id,
             db=db,
             device_id=request.device_id,
+            require_feedback=request.require_feedback,
         )
 
         # Save conversation history for context-aware processing

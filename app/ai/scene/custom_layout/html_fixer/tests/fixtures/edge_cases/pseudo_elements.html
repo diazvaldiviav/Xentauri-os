@@ -1,0 +1,116 @@
+<!--
+  Fixture: pseudo_elements
+  Sprint: 8
+  Error Types: POINTER_BLOCKED
+  Description: Buttons blocked by ::before/::after pseudo-elements from parent containers.
+               The pseudo-elements create decorative overlays that intercept clicks.
+  Expected Fix: Add pointer-events-none to blocking overlay containers.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pseudo Element Blocking</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Pseudo-element that blocks clicks */
+        .card-with-overlay::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%);
+            z-index: 10;
+            pointer-events: auto; /* This blocks clicks! */
+        }
+
+        .card-with-overlay::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #6366f1, #a855f7);
+            z-index: 11;
+        }
+
+        /* Another problematic pattern */
+        .shimmer-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            animation: shimmer 2s infinite;
+            z-index: 5;
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto space-y-8">
+        <h1 class="text-3xl font-bold text-gray-800">Pseudo Element Edge Cases</h1>
+
+        <!-- Card with ::before overlay blocking -->
+        <div class="card-with-overlay relative bg-white rounded-xl shadow-lg p-6 overflow-hidden">
+            <h2 class="text-xl font-semibold mb-4">Card with ::before Overlay</h2>
+            <p class="text-gray-600 mb-4">The decorative gradient overlay blocks button clicks.</p>
+
+            <button
+                id="pseudo-btn-1"
+                onclick="this.textContent = 'Success!'; this.classList.replace('bg-blue-500', 'bg-green-500')"
+                class="pseudo-blocked-btn px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 relative z-0"
+            >
+                Try to Click (Blocked by ::before)
+            </button>
+        </div>
+
+        <!-- Shimmer card with animated pseudo-element -->
+        <div class="shimmer-card relative bg-white rounded-xl shadow-lg p-6 overflow-hidden">
+            <h2 class="text-xl font-semibold mb-4">Shimmer Loading Card</h2>
+            <p class="text-gray-600 mb-4">Animated shimmer effect blocks interaction.</p>
+
+            <div class="flex gap-4">
+                <button
+                    id="pseudo-btn-2"
+                    onclick="this.textContent = 'Clicked!'; this.classList.add('ring-4', 'ring-green-500')"
+                    class="shimmer-blocked-btn px-6 py-3 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600"
+                >
+                    Action Button (Blocked)
+                </button>
+
+                <button
+                    id="pseudo-btn-3"
+                    onclick="alert('Secondary clicked!')"
+                    class="shimmer-blocked-btn-2 px-6 py-3 border-2 border-indigo-500 text-indigo-500 rounded-lg hover:bg-indigo-50"
+                >
+                    Secondary (Also Blocked)
+                </button>
+            </div>
+        </div>
+
+        <!-- Multiple pseudo-elements stacked -->
+        <div class="relative bg-gradient-to-br from-purple-600 to-indigo-600 rounded-xl shadow-lg p-6 overflow-hidden">
+            <!-- Manual overlay mimicking ::after behavior -->
+            <div class="pseudo-after-overlay absolute inset-0 bg-white/10 z-10"></div>
+
+            <div class="relative z-0">
+                <h2 class="text-xl font-semibold text-white mb-4">Stacked Overlays</h2>
+                <p class="text-white/80 mb-4">Multiple decorative layers block the button.</p>
+
+                <button
+                    id="pseudo-btn-4"
+                    onclick="this.textContent = 'It works!'"
+                    class="stacked-blocked-btn px-6 py-3 bg-white text-purple-600 font-semibold rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                    Submit Form (Blocked)
+                </button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

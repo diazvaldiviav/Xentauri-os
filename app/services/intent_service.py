@@ -203,24 +203,28 @@ class IntentService:
         user_id: UUID,
         db: Session,
         device_id: Optional[UUID] = None,
+        require_feedback: bool = False,
     ) -> IntentResult:
         """
         Process a natural language command.
-        
+
         This is the main entry point for intent processing. It:
         1. Analyzes complexity with AI Router
         2. Routes to appropriate handler
         3. Returns structured result
-        
+
         Args:
             text: Natural language command
             user_id: User's ID
             db: Database session
             device_id: Optional specific device to target
-            
+            require_feedback: If True, return HTML for human validation instead of sending to device
+
         Returns:
             IntentResult with processing outcome
         """
+        # Store require_feedback for use in child methods
+        self._require_feedback = require_feedback
         start_time = time.time()
         request_id = str(uuid_module.uuid4())
         
@@ -6308,19 +6312,65 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                             exc_info=True
                         )
             
-            # Send scene to device using the display_scene command
-            # Sprint 5.2: Include custom_layout if generated successfully
+            # Build response metadata
+            # Sprint 6.1: Handle both direct flow (no scene) and SceneGraph flow
+            is_direct_flow = scene_dict.get("direct_flow", False)
+
+            if is_direct_flow and content_data:
+                # Direct flow: use content_data for response
+                content_type = content_data.get("content_type", "content")
+                content_title = content_data.get("title", "interactive content")
+                scene_id = request_id
+                layout_intent = content_type
+                components_list = [content_type]
+            else:
+                # SceneGraph flow: use scene object
+                scene_id = scene.scene_id
+                layout_intent = scene.layout.intent.value
+                components_list = [c.type for c in scene.components]
+                content_type = layout_intent
+                content_title = "layout"
+
+            processing_time = (time.time() - start_time) * 1000
+
+            # =====================================================================
+            # HUMAN FEEDBACK MODE: Return HTML for validation instead of sending
+            # =====================================================================
+            if getattr(self, '_require_feedback', False) and custom_layout:
+                logger.info(f"[{request_id}] Feedback mode: returning HTML for validation (not sending to device)")
+
+                return IntentResult(
+                    success=True,
+                    intent_type=IntentResultType.DISPLAY_CONTENT,
+                    confidence=intent.confidence,
+                    device=target_device,
+                    message=f"HTML generated for {content_type}: {content_title}. Awaiting human feedback before display.",
+                    data={
+                        "scene_id": scene_id,
+                        "scene": scene_dict,
+                        "target_device": str(target_device.id),
+                        "layout_intent": layout_intent,
+                        "require_feedback": True,
+                        "generated_html": custom_layout,  # HTML for feedback validation
+                    },
+                    command_sent=False,  # NOT sent to device
+                    command_id=None,
+                    processing_time_ms=processing_time,
+                    request_id=request_id,
+                )
+
+            # =====================================================================
+            # NORMAL MODE: Send to device immediately
+            # =====================================================================
             result = await command_service.display_scene(
                 device_id=target_device.id,
                 scene=scene_dict,
                 custom_layout=custom_layout,
             )
-            
+
             if not result.success:
                 raise Exception(f"Failed to send scene to device: {result.error}")
-            
-            processing_time = (time.time() - start_time) * 1000
-            
+
             # Track command for monitoring (same as _execute_content_action)
             ai_monitor.track_command(
                 request_id=request_id,
@@ -6331,30 +6381,17 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                 success=result.success,
                 error=result.error,
             )
-            
-            # Build user-friendly response
-            # Sprint 6.1: Handle both direct flow (no scene) and SceneGraph flow
-            is_direct_flow = scene_dict.get("direct_flow", False)
 
+            # Build response message
             if is_direct_flow and content_data:
-                # Direct flow: use content_data for response
-                content_type = content_data.get("content_type", "content")
-                content_title = content_data.get("title", "interactive content")
                 response_message = f"I've updated {target_device.name} with {content_type}: {content_title}."
-                scene_id = request_id
-                layout_intent = content_type
-                components_list = [content_type]
             else:
-                # SceneGraph flow: use scene object
                 component_summary = ", ".join(
                     [c.type for c in scene.components[:3]]
                 )
                 if len(scene.components) > 3:
                     component_summary += f" and {len(scene.components) - 3} more"
                 response_message = f"I've updated {target_device.name} with {component_summary}."
-                scene_id = scene.scene_id
-                layout_intent = scene.layout.intent.value
-                components_list = [c.type for c in scene.components]
 
             # Sprint 4.3.0: Save display content response to conversation context
             conversation_context_service.add_conversation_turn(

@@ -6,8 +6,8 @@ Unlike CSS injection, this modifies the class attribute directly,
 which is more predictable and easier to rollback.
 
 Usage:
-    from html_fixer.fixers import TailwindInjector
-    from html_fixer.contracts.patches import TailwindPatch, PatchSet
+    from ..fixers import TailwindInjector
+    from ..contracts.patches import TailwindPatch, PatchSet
 
     injector = TailwindInjector()
     result = injector.inject(html, patch_set)
@@ -24,7 +24,7 @@ from bs4 import BeautifulSoup, Tag
 from ..contracts.patches import TailwindPatch, PatchSet
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("jarvis.ai.html_fixer.injector")
 
 
 @dataclass

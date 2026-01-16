@@ -1,0 +1,198 @@
+<!--
+  Fixture: sticky_elements
+  Sprint: 8
+  Error Types: ZINDEX_MISSING
+  Description: Sticky headers and navigation bars that block content below them.
+               Interactive elements scroll under sticky elements without proper z-index.
+  Expected Fix: Add z-index classes to blocked elements or adjust sticky element stacking.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sticky Elements Edge Case</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <!-- Sticky header blocking content -->
+    <header class="sticky top-0 bg-white shadow-md z-50">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
+            <h1 class="text-xl font-bold text-gray-800">Sticky Header Demo</h1>
+            <nav class="flex gap-4">
+                <button
+                    id="nav-home"
+                    onclick="this.classList.add('text-blue-500')"
+                    class="nav-link text-gray-600 hover:text-blue-500"
+                >
+                    Home
+                </button>
+                <button
+                    id="nav-about"
+                    onclick="this.classList.add('text-blue-500')"
+                    class="nav-link text-gray-600 hover:text-blue-500"
+                >
+                    About
+                </button>
+                <button
+                    id="nav-contact"
+                    onclick="this.classList.add('text-blue-500')"
+                    class="nav-link text-gray-600 hover:text-blue-500"
+                >
+                    Contact
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+        <!-- Card with button that gets blocked by sticky header on scroll -->
+        <section class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-2xl font-semibold mb-4">Section 1</h2>
+            <p class="text-gray-600 mb-4">This section has buttons that may be blocked by sticky elements.</p>
+
+            <div class="flex gap-4">
+                <button
+                    id="section1-btn-1"
+                    onclick="this.textContent = 'Clicked!'; this.classList.replace('bg-blue-500', 'bg-green-500')"
+                    class="section-btn px-6 py-2 bg-blue-500 text-white rounded-lg"
+                >
+                    Action 1
+                </button>
+                <button
+                    id="section1-btn-2"
+                    onclick="this.textContent = 'Clicked!'; this.classList.replace('bg-purple-500', 'bg-green-500')"
+                    class="section-btn px-6 py-2 bg-purple-500 text-white rounded-lg"
+                >
+                    Action 2
+                </button>
+            </div>
+        </section>
+
+        <!-- Sticky sidebar with content that gets blocked -->
+        <div class="flex gap-8">
+            <!-- Main content -->
+            <div class="flex-1 space-y-6">
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4">Main Content</h2>
+                    <p class="text-gray-600 mb-4">Content area with interactive elements.</p>
+
+                    <!-- Buttons near sticky sidebar edge -->
+                    <div class="flex justify-end gap-2">
+                        <button
+                            id="main-btn-edit"
+                            onclick="this.textContent = 'Editing...'"
+                            class="main-action px-4 py-2 bg-yellow-500 text-white rounded-lg"
+                        >
+                            Edit
+                        </button>
+                        <button
+                            id="main-btn-delete"
+                            onclick="this.textContent = 'Deleted!'"
+                            class="main-action px-4 py-2 bg-red-500 text-white rounded-lg"
+                        >
+                            Delete
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4">Another Section</h2>
+                    <p class="text-gray-600 mb-4">More content that scrolls under sticky elements.</p>
+
+                    <button
+                        id="main-btn-submit"
+                        onclick="this.textContent = 'Submitted!'; this.classList.replace('bg-blue-500', 'bg-green-500')"
+                        class="submit-btn w-full py-3 bg-blue-500 text-white rounded-lg font-semibold"
+                    >
+                        Submit Form
+                    </button>
+                </div>
+            </div>
+
+            <!-- Sticky sidebar -->
+            <aside class="w-64 flex-shrink-0">
+                <div class="sticky top-20 bg-white rounded-xl shadow-lg p-4 space-y-4">
+                    <h3 class="font-semibold text-gray-800">Quick Actions</h3>
+
+                    <!-- Sidebar buttons that may block main content -->
+                    <button
+                        id="sidebar-btn-1"
+                        onclick="this.classList.add('bg-blue-100')"
+                        class="sidebar-action w-full p-3 text-left rounded-lg hover:bg-gray-50 border"
+                    >
+                        📊 View Stats
+                    </button>
+                    <button
+                        id="sidebar-btn-2"
+                        onclick="this.classList.add('bg-blue-100')"
+                        class="sidebar-action w-full p-3 text-left rounded-lg hover:bg-gray-50 border"
+                    >
+                        📝 New Entry
+                    </button>
+                    <button
+                        id="sidebar-btn-3"
+                        onclick="this.classList.add('bg-blue-100')"
+                        class="sidebar-action w-full p-3 text-left rounded-lg hover:bg-gray-50 border"
+                    >
+                        ⚙️ Settings
+                    </button>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Sticky bottom bar blocking content -->
+        <section class="bg-white rounded-xl shadow-lg p-6 mb-24">
+            <h2 class="text-xl font-semibold mb-4">Content Above Sticky Footer</h2>
+            <p class="text-gray-600 mb-4">These buttons may be blocked by the sticky footer bar.</p>
+
+            <div class="grid grid-cols-3 gap-4">
+                <button
+                    id="grid-btn-1"
+                    onclick="this.textContent = 'Selected'"
+                    class="grid-action p-4 bg-indigo-500 text-white rounded-lg"
+                >
+                    Option A
+                </button>
+                <button
+                    id="grid-btn-2"
+                    onclick="this.textContent = 'Selected'"
+                    class="grid-action p-4 bg-indigo-500 text-white rounded-lg"
+                >
+                    Option B
+                </button>
+                <button
+                    id="grid-btn-3"
+                    onclick="this.textContent = 'Selected'"
+                    class="grid-action p-4 bg-indigo-500 text-white rounded-lg"
+                >
+                    Option C
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Sticky bottom bar -->
+    <footer class="sticky bottom-0 bg-white border-t shadow-lg">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
+            <span class="text-gray-600">Ready to continue?</span>
+            <div class="flex gap-2">
+                <button
+                    id="footer-cancel"
+                    onclick="this.textContent = 'Cancelled'"
+                    class="footer-btn px-6 py-2 border-2 border-gray-300 text-gray-600 rounded-lg"
+                >
+                    Cancel
+                </button>
+                <button
+                    id="footer-continue"
+                    onclick="this.textContent = 'Continuing...'; this.classList.replace('bg-green-500', 'bg-blue-500')"
+                    class="footer-btn px-6 py-2 bg-green-500 text-white rounded-lg"
+                >
+                    Continue
+                </button>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

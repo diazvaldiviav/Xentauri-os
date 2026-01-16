@@ -25,10 +25,10 @@ Example Scene Graph:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -135,9 +135,17 @@ class ComponentPosition(BaseModel):
     grid_area: Optional[str] = Field(default=None, description="CSS grid-area name")
     
     # Flex positioning (Flexbox)
-    flex: Optional[str] = Field(default=None, description="CSS flex value (e.g., '1', '0 1 auto')")
+    flex: Optional[Union[str, int]] = Field(default=None, description="CSS flex value (e.g., '1', '0 1 auto')")
     align_self: Optional[str] = Field(default=None, description="CSS align-self value")
     order: Optional[int] = Field(default=None, description="CSS order value")
+
+    @field_validator('flex', mode='before')
+    @classmethod
+    def coerce_flex_to_string(cls, v):
+        """Convert integer flex values to strings for CSS compatibility."""
+        if v is None:
+            return v
+        return str(v)
     
     # Absolute positioning
     top: Optional[str] = Field(default=None, description="CSS top value (e.g., '10px', '5%')")

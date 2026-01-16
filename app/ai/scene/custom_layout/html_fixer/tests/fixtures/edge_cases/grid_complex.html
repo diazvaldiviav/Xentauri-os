@@ -1,0 +1,326 @@
+<!--
+  Fixture: grid_complex
+  Sprint: 8
+  Error Types: POINTER_INTERCEPTED
+  Description: Complex CSS Grid layouts with overlapping grid items.
+               Grid areas overlap causing click interception between cells.
+  Expected Fix: Add pointer-events-auto to blocked elements, pointer-events-none to overlays.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complex Grid Layout Edge Case</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .grid-overlap {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(3, 150px);
+        }
+        .feature-card {
+            grid-column: span 2;
+            grid-row: span 2;
+        }
+        .overlap-item {
+            grid-column: 2 / 4;
+            grid-row: 2 / 3;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-6xl mx-auto space-y-8">
+        <h1 class="text-3xl font-bold text-gray-800">Complex Grid Layout</h1>
+        <p class="text-gray-600">Grid items with overlapping areas causing click interception.</p>
+
+        <!-- Overlapping grid layout -->
+        <div class="grid-overlap gap-4">
+            <!-- Large feature card spanning 2x2 -->
+            <div class="feature-card bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl p-6 text-white relative">
+                <h2 class="text-2xl font-bold mb-2">Featured Item</h2>
+                <p class="mb-4 opacity-90">This card spans multiple grid cells.</p>
+                <button
+                    id="feature-btn"
+                    onclick="this.textContent = 'Activated!'; this.classList.replace('bg-white/20', 'bg-green-500')"
+                    class="feature-action px-6 py-2 bg-white/20 rounded-lg backdrop-blur"
+                >
+                    Activate Feature
+                </button>
+            </div>
+
+            <!-- Regular grid items -->
+            <div class="bg-white rounded-xl shadow-lg p-4 flex flex-col justify-between">
+                <h3 class="font-semibold">Item 1</h3>
+                <button
+                    id="grid-item-1"
+                    onclick="this.textContent = '✓'"
+                    class="grid-btn mt-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm"
+                >
+                    Select
+                </button>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg p-4 flex flex-col justify-between">
+                <h3 class="font-semibold">Item 2</h3>
+                <button
+                    id="grid-item-2"
+                    onclick="this.textContent = '✓'"
+                    class="grid-btn mt-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm"
+                >
+                    Select
+                </button>
+            </div>
+
+            <!-- Overlapping promotional banner -->
+            <div class="overlap-item bg-gradient-to-r from-yellow-400 to-orange-500 rounded-xl p-4 flex items-center justify-between shadow-xl z-10">
+                <span class="font-bold text-white">🎉 Special Offer!</span>
+                <button
+                    id="promo-btn"
+                    onclick="this.textContent = 'Claimed!'; this.classList.replace('bg-white', 'bg-green-500'); this.classList.replace('text-orange-500', 'text-white')"
+                    class="promo-action px-4 py-2 bg-white text-orange-500 rounded-lg font-semibold"
+                >
+                    Claim Now
+                </button>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg p-4 flex flex-col justify-between">
+                <h3 class="font-semibold">Item 3</h3>
+                <button
+                    id="grid-item-3"
+                    onclick="this.textContent = '✓'"
+                    class="grid-btn mt-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm"
+                >
+                    Select
+                </button>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-lg p-4 flex flex-col justify-between">
+                <h3 class="font-semibold">Item 4</h3>
+                <button
+                    id="grid-item-4"
+                    onclick="this.textContent = '✓'"
+                    class="grid-btn mt-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm"
+                >
+                    Select
+                </button>
+            </div>
+        </div>
+
+        <!-- Grid with absolute positioned overlays -->
+        <div class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Dashboard Grid</h2>
+
+            <div class="relative">
+                <div class="grid grid-cols-3 gap-4">
+                    <!-- Stat cards with buttons -->
+                    <div class="bg-blue-50 rounded-lg p-4">
+                        <h3 class="text-sm text-gray-500">Total Users</h3>
+                        <p class="text-2xl font-bold text-blue-600">1,234</p>
+                        <button
+                            id="stat-users-btn"
+                            onclick="this.textContent = 'Viewing...'"
+                            class="stat-action mt-2 text-sm text-blue-500 hover:underline"
+                        >
+                            View Details →
+                        </button>
+                    </div>
+
+                    <div class="bg-green-50 rounded-lg p-4">
+                        <h3 class="text-sm text-gray-500">Revenue</h3>
+                        <p class="text-2xl font-bold text-green-600">$45,678</p>
+                        <button
+                            id="stat-revenue-btn"
+                            onclick="this.textContent = 'Viewing...'"
+                            class="stat-action mt-2 text-sm text-green-500 hover:underline"
+                        >
+                            View Details →
+                        </button>
+                    </div>
+
+                    <div class="bg-purple-50 rounded-lg p-4">
+                        <h3 class="text-sm text-gray-500">Orders</h3>
+                        <p class="text-2xl font-bold text-purple-600">890</p>
+                        <button
+                            id="stat-orders-btn"
+                            onclick="this.textContent = 'Viewing...'"
+                            class="stat-action mt-2 text-sm text-purple-500 hover:underline"
+                        >
+                            View Details →
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Overlay intercepting grid clicks -->
+                <div class="dashboard-overlay absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-white/50 z-10"></div>
+            </div>
+        </div>
+
+        <!-- Masonry-like grid with overlapping elements -->
+        <div class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Photo Gallery Grid</h2>
+
+            <div class="grid grid-cols-4 grid-rows-3 gap-2 h-96 relative">
+                <!-- Large image spanning multiple cells -->
+                <div class="col-span-2 row-span-2 bg-gradient-to-br from-pink-400 to-red-500 rounded-lg relative overflow-hidden">
+                    <div class="absolute inset-0 flex items-end p-4">
+                        <button
+                            id="gallery-main-btn"
+                            onclick="this.textContent = 'Liked! ❤️'"
+                            class="gallery-action px-4 py-2 bg-white/90 rounded-lg text-red-500 font-semibold"
+                        >
+                            ♡ Like
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Regular gallery items -->
+                <div class="bg-gradient-to-br from-cyan-400 to-blue-500 rounded-lg relative">
+                    <button
+                        id="gallery-1"
+                        onclick="this.textContent = '✓'"
+                        class="gallery-select absolute bottom-2 right-2 w-8 h-8 bg-white rounded-full text-blue-500"
+                    >
+                        +
+                    </button>
+                </div>
+
+                <div class="bg-gradient-to-br from-green-400 to-emerald-500 rounded-lg relative">
+                    <button
+                        id="gallery-2"
+                        onclick="this.textContent = '✓'"
+                        class="gallery-select absolute bottom-2 right-2 w-8 h-8 bg-white rounded-full text-green-500"
+                    >
+                        +
+                    </button>
+                </div>
+
+                <div class="bg-gradient-to-br from-yellow-400 to-amber-500 rounded-lg relative">
+                    <button
+                        id="gallery-3"
+                        onclick="this.textContent = '✓'"
+                        class="gallery-select absolute bottom-2 right-2 w-8 h-8 bg-white rounded-full text-amber-500"
+                    >
+                        +
+                    </button>
+                </div>
+
+                <div class="bg-gradient-to-br from-purple-400 to-indigo-500 rounded-lg relative">
+                    <button
+                        id="gallery-4"
+                        onclick="this.textContent = '✓'"
+                        class="gallery-select absolute bottom-2 right-2 w-8 h-8 bg-white rounded-full text-indigo-500"
+                    >
+                        +
+                    </button>
+                </div>
+
+                <!-- Wide image at bottom -->
+                <div class="col-span-2 bg-gradient-to-r from-gray-700 to-gray-900 rounded-lg relative">
+                    <div class="absolute inset-0 flex items-center justify-center gap-2">
+                        <button
+                            id="gallery-wide-1"
+                            onclick="this.classList.add('ring-2', 'ring-white')"
+                            class="gallery-action-wide px-3 py-1 bg-white/20 text-white rounded backdrop-blur"
+                        >
+                            Share
+                        </button>
+                        <button
+                            id="gallery-wide-2"
+                            onclick="this.classList.add('ring-2', 'ring-white')"
+                            class="gallery-action-wide px-3 py-1 bg-white/20 text-white rounded backdrop-blur"
+                        >
+                            Download
+                        </button>
+                    </div>
+                </div>
+
+                <div class="col-span-2 bg-gradient-to-r from-rose-400 to-pink-500 rounded-lg relative">
+                    <button
+                        id="gallery-5"
+                        onclick="this.textContent = 'Added!'"
+                        class="gallery-add absolute bottom-2 left-2 px-3 py-1 bg-white rounded text-pink-500 text-sm"
+                    >
+                        + Add to Album
+                    </button>
+                </div>
+
+                <!-- Floating action overlay -->
+                <div class="gallery-floating absolute top-4 right-4 bg-black/50 backdrop-blur rounded-lg p-2 z-20">
+                    <button
+                        id="gallery-select-all"
+                        onclick="this.textContent = 'Selected All'"
+                        class="gallery-bulk text-white text-sm hover:bg-white/20 px-2 py-1 rounded"
+                    >
+                        Select All
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Auto-fit grid with dynamic sizing -->
+        <div class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Product Grid</h2>
+
+            <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-4">
+                <div class="bg-gray-50 rounded-lg p-4 text-center relative group">
+                    <div class="w-20 h-20 mx-auto bg-gray-200 rounded-lg mb-2"></div>
+                    <p class="font-medium">Product 1</p>
+                    <p class="text-sm text-gray-500">$29.99</p>
+                    <button
+                        id="product-1"
+                        onclick="this.textContent = 'Added'"
+                        class="product-add mt-2 w-full py-2 bg-blue-500 text-white rounded-lg text-sm"
+                    >
+                        Add to Cart
+                    </button>
+                    <!-- Hover overlay that may intercept -->
+                    <div class="product-overlay absolute inset-0 bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg"></div>
+                </div>
+
+                <div class="bg-gray-50 rounded-lg p-4 text-center relative group">
+                    <div class="w-20 h-20 mx-auto bg-gray-200 rounded-lg mb-2"></div>
+                    <p class="font-medium">Product 2</p>
+                    <p class="text-sm text-gray-500">$39.99</p>
+                    <button
+                        id="product-2"
+                        onclick="this.textContent = 'Added'"
+                        class="product-add mt-2 w-full py-2 bg-blue-500 text-white rounded-lg text-sm"
+                    >
+                        Add to Cart
+                    </button>
+                    <div class="product-overlay absolute inset-0 bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg"></div>
+                </div>
+
+                <div class="bg-gray-50 rounded-lg p-4 text-center relative group">
+                    <div class="w-20 h-20 mx-auto bg-gray-200 rounded-lg mb-2"></div>
+                    <p class="font-medium">Product 3</p>
+                    <p class="text-sm text-gray-500">$49.99</p>
+                    <button
+                        id="product-3"
+                        onclick="this.textContent = 'Added'"
+                        class="product-add mt-2 w-full py-2 bg-blue-500 text-white rounded-lg text-sm"
+                    >
+                        Add to Cart
+                    </button>
+                    <div class="product-overlay absolute inset-0 bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg"></div>
+                </div>
+
+                <div class="bg-gray-50 rounded-lg p-4 text-center relative group">
+                    <div class="w-20 h-20 mx-auto bg-gray-200 rounded-lg mb-2"></div>
+                    <p class="font-medium">Product 4</p>
+                    <p class="text-sm text-gray-500">$59.99</p>
+                    <button
+                        id="product-4"
+                        onclick="this.textContent = 'Added'"
+                        class="product-add mt-2 w-full py-2 bg-blue-500 text-white rounded-lg text-sm"
+                    >
+                        Add to Cart
+                    </button>
+                    <div class="product-overlay absolute inset-0 bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

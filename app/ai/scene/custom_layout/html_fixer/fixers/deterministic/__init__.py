@@ -23,6 +23,7 @@ from .zindex_rule import ZIndexFixRule
 from .pointer_events_rule import PointerEventsFixRule
 from .passthrough_rule import PassthroughRule
 from .transform_3d_rule import Transform3DFixRule
+from .visual_feedback_rule import VisualFeedbackAmplifierRule
 
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "PointerEventsFixRule",
     "PassthroughRule",
     "Transform3DFixRule",
+    "VisualFeedbackAmplifierRule",
 ]

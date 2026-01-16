@@ -243,7 +243,9 @@ class PlaywrightDiagnostic:
         from .js_evaluators import JSEvaluators
 
         # Get all diagnosis data via JavaScript
-        result = await page.evaluate(JSEvaluators.DIAGNOSE_ELEMENT, selector)
+        # Use with_helpers() to inject SelectorService helpers for proper escaping
+        code = JSEvaluators.with_helpers(JSEvaluators.DIAGNOSE_ELEMENT)
+        result = await page.evaluate(code, selector)
 
         if not result.get("found"):
             return ElementDiagnosis(
@@ -292,7 +294,9 @@ class PlaywrightDiagnostic:
         """
         from .js_evaluators import JSEvaluators
 
-        result = await page.evaluate(JSEvaluators.ELEMENT_FROM_POINT, {"x": x, "y": y})
+        # Use with_helpers() for proper selector escaping
+        code = JSEvaluators.with_helpers(JSEvaluators.ELEMENT_FROM_POINT)
+        result = await page.evaluate(code, {"x": x, "y": y})
 
         if not result:
             return None

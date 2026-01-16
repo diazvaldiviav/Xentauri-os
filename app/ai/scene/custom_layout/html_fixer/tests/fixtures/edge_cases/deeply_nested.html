@@ -1,0 +1,65 @@
+<!--
+  Fixture: deeply_nested
+  Sprint: 8
+  Error Types: ZINDEX_CONFLICT
+  Description: Deeply nested elements (10+ levels) with z-index conflicts at various levels.
+               Inner button is blocked by overlays at multiple nesting levels.
+  Expected Fix: Elevate z-index of the blocked button above all overlays.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deeply Nested Z-Index</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="level-1 relative z-10">
+        <div class="level-2 relative z-10">
+            <div class="level-3 relative z-10">
+                <div class="level-4 relative z-10">
+                    <div class="level-5 relative z-10">
+                        <div class="level-6 relative z-10">
+                            <div class="level-7 relative z-10">
+                                <div class="level-8 relative z-10">
+                                    <div class="level-9 relative z-10">
+                                        <div class="level-10 relative z-10">
+                                            <!-- Main content container -->
+                                            <div class="bg-white rounded-lg shadow-lg p-6 relative">
+                                                <h1 class="text-2xl font-bold mb-4">Deeply Nested Component</h1>
+                                                <p class="text-gray-600 mb-4">This button is buried under 10+ z-index layers.</p>
+
+                                                <!-- Target button - blocked by multiple overlays -->
+                                                <button
+                                                    id="deep-btn"
+                                                    onclick="this.textContent = 'Clicked!'; this.classList.add('bg-green-500')"
+                                                    class="deep-button px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors relative z-10"
+                                                >
+                                                    Click Me (Blocked)
+                                                </button>
+
+                                                <!-- Overlay at this level -->
+                                                <div class="inner-overlay absolute inset-0 bg-gradient-to-r from-purple-500/20 to-pink-500/20 z-20"></div>
+                                            </div>
+
+                                            <!-- Overlay at level 10 -->
+                                            <div class="level-10-overlay absolute inset-0 bg-black/5 z-20"></div>
+                                        </div>
+
+                                        <!-- Overlay at level 9 -->
+                                        <div class="level-9-overlay absolute inset-0 bg-black/5 z-20"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Global decorative overlay -->
+    <div class="fixed inset-0 pointer-events-none bg-gradient-to-br from-blue-500/5 to-purple-500/5 z-0"></div>
+</body>
+</html>

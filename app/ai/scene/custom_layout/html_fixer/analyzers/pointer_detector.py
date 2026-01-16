@@ -21,7 +21,7 @@ Usage:
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Tuple
 
 from bs4 import Tag
 
@@ -215,6 +215,9 @@ class PointerBlockageDetector:
         element_info = self._analyzer.analyze_element(element)
         element_z = element_info.z_index or 0
 
+        best: Optional[Tuple[Tag, str, int, Optional[int]]] = None
+        # Tuple: (blocker_tag, blocker_selector, line_number, blocker_z)
+
         for blocker in potential_blockers:
             # Skip self
             if blocker == element:
@@ -226,6 +229,13 @@ class PointerBlockageDetector:
             if not self._is_blocking_overlay(blocker):
                 continue
 
+            # Overlay scope: absolute inset-0 overlays only cover their containing block.
+            # Avoid false positives where an overlay in one section "blocks" buttons in another.
+            if not blocker_info.has_fixed:
+                container = self._find_containing_block(blocker)
+                if container is not None and not self._is_descendant_of(element, container):
+                    continue
+
             # Check z-index relationship
             blocker_z = blocker_info.z_index or 0
 
@@ -233,19 +243,34 @@ class PointerBlockageDetector:
             if blocker_z >= element_z:
                 # Check if they share context (same container)
                 if self._share_stacking_context(element, blocker):
-                    return BlockageInfo(
-                        blocked_element=element,
-                        blocking_element=blocker,
-                        reason=BlockageReason.OVERLAY_BLOCKING,
-                        blocked_selector=parser.generate_selector(element),
-                        blocking_selector=parser.generate_selector(blocker),
-                        suggested_fix=(
-                            f"Add 'pointer-events-none' to {parser.generate_selector(blocker)} "
-                            f"or increase z-index on {parser.generate_selector(element)}"
-                        ),
-                    )
+                    selector = parser.generate_selector(blocker)
+                    line = parser.get_source_line(blocker) or 0
+                    if best is None:
+                        best = (blocker, selector, line, blocker_z)
+                    else:
+                        _, _, best_line, best_z = best
+                        best_z_val = best_z or 0
+                        # Prefer highest z-index; tie-break by later appearance in DOM (line number)
+                        if (blocker_z, line) > (best_z_val, best_line):
+                            best = (blocker, selector, line, blocker_z)
 
-        return None
+        if best is None:
+            return None
+
+        best_blocker, best_selector, _, _ = best
+        blocked_selector = parser.generate_selector(element)
+
+        return BlockageInfo(
+            blocked_element=element,
+            blocking_element=best_blocker,
+            reason=BlockageReason.OVERLAY_BLOCKING,
+            blocked_selector=blocked_selector,
+            blocking_selector=best_selector,
+            suggested_fix=(
+                f"Add 'pointer-events-none' to {best_selector} "
+                f"or increase z-index on {blocked_selector}"
+            ),
+        )
 
     def _check_zindex_blockage(
         self,
@@ -379,16 +404,42 @@ class PointerBlockageDetector:
         Returns:
             True if elements might be in same stacking context
         """
-        # Find common ancestor
-        el1_parents = self._get_parent_chain(el1)
-        el2_parents = self._get_parent_chain(el2)
+        info2 = self._analyzer.analyze_element(el2)
+        # Fixed overlays can block across the viewport
+        if info2.has_fixed:
+            return True
 
-        # Check for common positioned ancestor
-        for parent in el1_parents:
-            if parent in el2_parents:
+        # Absolute inset-0 overlays only cover their containing block
+        container = self._find_containing_block(el2)
+        if container is None:
+            return True
+
+        return self._is_descendant_of(el1, container)
+
+    def _find_containing_block(self, element: Tag) -> Optional[Tag]:
+        """
+        Find the nearest positioned ancestor that acts as the containing block.
+
+        For absolute positioned elements, this is the nearest ancestor with
+        position != static (relative/absolute/fixed in Tailwind terms).
+        Returns None if not found (treat as global scope).
+        """
+        current = element.parent
+        while current and isinstance(current, Tag):
+            info = self._analyzer.analyze_element(current)
+            if info.is_positioned:
+                return current
+            current = current.parent
+        return None
+
+    def _is_descendant_of(self, element: Tag, ancestor: Tag) -> bool:
+        """Return True if `ancestor` is in `element`'s parent chain."""
+        current = element
+        while current and isinstance(current, Tag):
+            if current == ancestor:
                 return True
-
-        return True  # Default to True (conservative)
+            current = current.parent
+        return False
 
     def _get_parent_chain(self, element: Tag) -> Set[Tag]:
         """

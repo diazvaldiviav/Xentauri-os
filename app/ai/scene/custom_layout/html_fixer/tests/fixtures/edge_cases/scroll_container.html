@@ -1,0 +1,247 @@
+<!--
+  Fixture: scroll_container
+  Sprint: 8
+  Error Types: INVISIBLE_VISIBILITY
+  Description: Scrollable containers with elements that are hidden due to overflow
+               or visibility issues. Elements outside viewport are incorrectly styled.
+  Expected Fix: Restore visibility with visible class, remove invisible/hidden states.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scroll Container Edge Case</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto space-y-8">
+        <h1 class="text-3xl font-bold text-gray-800">Scroll Container Edge Cases</h1>
+
+        <!-- Horizontal scroll with hidden items -->
+        <div class="bg-white rounded-xl shadow-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Horizontal Carousel</h2>
+            <p class="text-gray-600 mb-4">Some items are invisible due to incorrect styling.</p>
+
+            <div class="overflow-x-auto pb-4">
+                <div class="flex gap-4 min-w-max">
+                    <!-- Visible item -->
+                    <div class="w-64 flex-shrink-0 bg-blue-50 rounded-lg p-4">
+                        <h3 class="font-semibold mb-2">Card 1</h3>
+                        <button
+                            id="scroll-btn-1"
+                            onclick="this.textContent = 'Clicked!'"
+                            class="scroll-card-btn w-full py-2 bg-blue-500 text-white rounded-lg"
+                        >
+                            Action
+                        </button>
+                    </div>
+
+                    <!-- Item with visibility: hidden -->
+                    <div class="w-64 flex-shrink-0 bg-purple-50 rounded-lg p-4 invisible">
+                        <h3 class="font-semibold mb-2">Card 2 (Invisible)</h3>
+                        <button
+                            id="scroll-btn-2"
+                            onclick="this.textContent = 'Clicked!'"
+                            class="scroll-card-invisible w-full py-2 bg-purple-500 text-white rounded-lg"
+                        >
+                            Hidden Action
+                        </button>
+                    </div>
+
+                    <!-- Visible item -->
+                    <div class="w-64 flex-shrink-0 bg-green-50 rounded-lg p-4">
+                        <h3 class="font-semibold mb-2">Card 3</h3>
+                        <button
+                            id="scroll-btn-3"
+                            onclick="this.textContent = 'Clicked!'"
+                            class="scroll-card-btn w-full py-2 bg-green-500 text-white rounded-lg"
+                        >
+                            Action
+                        </button>
+                    </div>
+
+                    <!-- Item with opacity: 0 -->
+                    <div class="w-64 flex-shrink-0 bg-pink-50 rounded-lg p-4 opacity-0">
+                        <h3 class="font-semibold mb-2">Card 4 (Opacity 0)</h3>
+                        <button
+                            id="scroll-btn-4"
+                            onclick="this.textContent = 'Clicked!'"
+                            class="scroll-card-opacity w-full py-2 bg-pink-500 text-white rounded-lg"
+                        >
+                            Transparent Action
+                        </button>
+                    </div>
+
+                    <!-- Visible item -->
+                    <div class="w-64 flex-shrink-0 bg-yellow-50 rounded-lg p-4">
+                        <h3 class="font-semibold mb-2">Card 5</h3>
+                        <button
+                            id="scroll-btn-5"
+                            onclick="this.textContent = 'Clicked!'"
+                            class="scroll-card-btn w-full py-2 bg-yellow-500 text-white rounded-lg"
+                        >
+                            Action
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vertical infinite scroll simulation -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <h2 class="text-xl font-semibold p-4 border-b">Infinite Scroll List</h2>
+
+            <div class="h-80 overflow-y-auto">
+                <div class="divide-y">
+                    <!-- Visible items -->
+                    <div class="p-4 flex justify-between items-center">
+                        <span>Item 1</span>
+                        <button
+                            id="list-btn-1"
+                            onclick="this.textContent = '✓'"
+                            class="list-action px-4 py-1 bg-blue-500 text-white rounded"
+                        >
+                            Select
+                        </button>
+                    </div>
+
+                    <div class="p-4 flex justify-between items-center">
+                        <span>Item 2</span>
+                        <button
+                            id="list-btn-2"
+                            onclick="this.textContent = '✓'"
+                            class="list-action px-4 py-1 bg-blue-500 text-white rounded"
+                        >
+                            Select
+                        </button>
+                    </div>
+
+                    <!-- Hidden item in list -->
+                    <div class="p-4 flex justify-between items-center invisible">
+                        <span>Item 3 (Invisible)</span>
+                        <button
+                            id="list-btn-3"
+                            onclick="this.textContent = '✓'"
+                            class="list-action-hidden px-4 py-1 bg-blue-500 text-white rounded"
+                        >
+                            Select
+                        </button>
+                    </div>
+
+                    <div class="p-4 flex justify-between items-center">
+                        <span>Item 4</span>
+                        <button
+                            id="list-btn-4"
+                            onclick="this.textContent = '✓'"
+                            class="list-action px-4 py-1 bg-blue-500 text-white rounded"
+                        >
+                            Select
+                        </button>
+                    </div>
+
+                    <!-- Another hidden item -->
+                    <div class="p-4 flex justify-between items-center hidden">
+                        <span>Item 5 (Hidden)</span>
+                        <button
+                            id="list-btn-5"
+                            onclick="this.textContent = '✓'"
+                            class="list-action-display px-4 py-1 bg-blue-500 text-white rounded"
+                        >
+                            Select
+                        </button>
+                    </div>
+
+                    <div class="p-4 flex justify-between items-center">
+                        <span>Item 6</span>
+                        <button
+                            id="list-btn-6"
+                            onclick="this.textContent = '✓'"
+                            class="list-action px-4 py-1 bg-blue-500 text-white rounded"
+                        >
+                            Select
+                        </button>
+                    </div>
+
+                    <div class="p-4 flex justify-between items-center">
+                        <span>Item 7</span>
+                        <button
+                            id="list-btn-7"
+                            onclick="this.textContent = '✓'"
+                            class="list-action px-4 py-1 bg-blue-500 text-white rounded"
+                        >
+                            Select
+                        </button>
+                    </div>
+
+                    <div class="p-4 flex justify-between items-center">
+                        <span>Item 8</span>
+                        <button
+                            id="list-btn-8"
+                            onclick="this.textContent = '✓'"
+                            class="list-action px-4 py-1 bg-blue-500 text-white rounded"
+                        >
+                            Select
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat container with hidden messages -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <h2 class="text-xl font-semibold p-4 border-b">Chat Container</h2>
+
+            <div class="h-64 overflow-y-auto p-4 space-y-4 bg-gray-50">
+                <div class="flex justify-start">
+                    <div class="bg-white rounded-lg p-3 shadow max-w-xs">
+                        <p class="text-sm">Hello! How can I help?</p>
+                    </div>
+                </div>
+
+                <div class="flex justify-end">
+                    <div class="bg-blue-500 text-white rounded-lg p-3 max-w-xs">
+                        <p class="text-sm">I have a question.</p>
+                    </div>
+                </div>
+
+                <!-- Hidden message -->
+                <div class="flex justify-start invisible">
+                    <div class="bg-white rounded-lg p-3 shadow max-w-xs">
+                        <p class="text-sm">This message is invisible.</p>
+                        <button
+                            id="chat-btn-1"
+                            onclick="alert('Reply')"
+                            class="chat-reply mt-2 text-xs text-blue-500"
+                        >
+                            Reply
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex justify-end">
+                    <div class="bg-blue-500 text-white rounded-lg p-3 max-w-xs">
+                        <p class="text-sm">Can you see this?</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Message input -->
+            <div class="p-4 border-t flex gap-2">
+                <input
+                    type="text"
+                    class="flex-1 px-4 py-2 border rounded-lg"
+                    placeholder="Type a message..."
+                >
+                <button
+                    id="chat-send-btn"
+                    onclick="this.textContent = 'Sent!'"
+                    class="chat-send px-6 py-2 bg-blue-500 text-white rounded-lg"
+                >
+                    Send
+                </button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

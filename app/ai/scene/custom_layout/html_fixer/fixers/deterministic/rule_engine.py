@@ -5,7 +5,7 @@ Maintains a registry of rules and applies them to classified errors
 to generate a PatchSet.
 
 Usage:
-    from html_fixer.fixers.deterministic import RuleEngine, create_default_engine
+    from ...fixers.deterministic import RuleEngine, create_default_engine
 
     # Use default engine with all rules
     engine = create_default_engine()
@@ -28,7 +28,7 @@ from ...contracts.validation import ClassifiedError
 from .base_rule import FixRule
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("jarvis.ai.html_fixer.rule_engine")
 
 
 class RuleEngine:
@@ -219,14 +219,16 @@ def create_default_engine() -> RuleEngine:
     from .pointer_events_rule import PointerEventsFixRule
     from .passthrough_rule import PassthroughRule
     from .transform_3d_rule import Transform3DFixRule
+    from .visual_feedback_rule import VisualFeedbackAmplifierRule
 
     engine = RuleEngine()
     engine.register_all([
-        VisibilityRestoreRule(),   # Priority 5 - Fix visibility first
-        ZIndexFixRule(),           # Priority 15 - Then z-index
-        PointerEventsFixRule(),    # Priority 25 - Then pointer events
-        PassthroughRule(),         # Priority 26 - Related to pointer events
-        Transform3DFixRule(),      # Priority 35 - Transform fixes
+        VisibilityRestoreRule(),       # Priority 5 - Fix visibility first
+        ZIndexFixRule(),               # Priority 15 - Then z-index
+        PointerEventsFixRule(),        # Priority 25 - Then pointer events
+        PassthroughRule(),             # Priority 26 - Related to pointer events
+        Transform3DFixRule(),          # Priority 30 - Transform fixes (Sprint 4)
+        VisualFeedbackAmplifierRule(), # Priority 50 - Visual feedback (Sprint 4)
     ])
 
     logger.info(f"Created default engine with {len(engine)} rules")

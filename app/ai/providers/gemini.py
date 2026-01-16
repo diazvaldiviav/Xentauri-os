@@ -59,6 +59,7 @@ class GeminiProvider(AIProvider):
 
         # Use model_override if provided, otherwise use default
         model = model_override or self.model
+        logger.info(f"Gemini generate: model={model}, thinking={use_thinking}, level={thinking_level}")
 
         try:
             # Build config kwargs dynamically
