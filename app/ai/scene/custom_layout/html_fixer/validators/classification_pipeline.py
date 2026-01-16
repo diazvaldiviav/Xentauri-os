@@ -3,6 +3,11 @@ Classification Pipeline - End-to-end error classification.
 
 Orchestrates all analyzers and validators to produce a complete
 ErrorReport from raw HTML.
+
+Includes:
+- Sprint 1: Static CSS/HTML analysis
+- Sprint 2: Playwright dynamic analysis
+- Sprint 3.5: JavaScript validation
 """
 
 import time
@@ -20,13 +25,18 @@ from .error_aggregator import ErrorAggregator
 from .error_prioritizer import ErrorPrioritizer
 from .error_report import ErrorReport, ErrorReportGenerator
 
+# Sprint 3.5: JavaScript validation
+from .js_runtime_validator import JSRuntimeValidator
+from .js_error_classifier import JSErrorClassifier
+
 
 class ErrorClassificationPipeline:
     """
     Complete error classification pipeline.
 
     Combines Sprint 1 static analyzers with Sprint 2 Playwright
-    diagnostics to produce comprehensive error reports.
+    diagnostics and Sprint 3.5 JavaScript validation to produce
+    comprehensive error reports.
 
     Usage:
         pipeline = ErrorClassificationPipeline()
@@ -60,6 +70,10 @@ class ErrorClassificationPipeline:
         self.error_aggregator = ErrorAggregator()
         self.prioritizer = ErrorPrioritizer()
         self.report_generator = ErrorReportGenerator()
+
+        # Sprint 3.5: JavaScript validators
+        self.js_validator = JSRuntimeValidator()
+        self.js_classifier = JSErrorClassifier()
 
         # Config
         self._viewport_width = viewport_width
@@ -140,6 +154,17 @@ class ErrorClassificationPipeline:
                         )
                     )
 
+        # Phase 2.5: JavaScript validation (Sprint 3.5)
+        js_errors: List[ClassifiedError] = []
+        if page:
+            # Runtime validation with Playwright
+            js_result = await self.js_validator.validate(html, page)
+            js_errors = self.js_classifier.classify(js_result)
+        else:
+            # Static-only JavaScript validation
+            js_static_result = await self.js_validator.validate_static_only(html)
+            js_errors = self.js_classifier.classify_static(js_static_result)
+
         # Phase 3: Aggregate errors
         all_errors = self.error_aggregator.aggregate_all(
             elements=interactive,
@@ -150,6 +175,9 @@ class ErrorClassificationPipeline:
 
         # Add transform errors
         all_errors.extend(transform_errors)
+
+        # Add JavaScript errors (Sprint 3.5)
+        all_errors.extend(js_errors)
 
         # Phase 4: Prioritize
         prioritized_errors = self.prioritizer.prioritize(all_errors)

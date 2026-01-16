@@ -34,9 +34,14 @@ class ErrorPrioritizer:
         # Secondary issues (fix last)
         ErrorType.POINTER_INTERCEPTED: 8,
         ErrorType.ZINDEX_MISSING: 9,
-        # Feedback issues (lowest priority)
+        # Feedback issues (lowest priority for CSS)
         ErrorType.FEEDBACK_MISSING: 10,
         ErrorType.FEEDBACK_TOO_SUBTLE: 11,
+        # JavaScript issues (Sprint 3.5) - require LLM
+        ErrorType.JS_SYNTAX_ERROR: 12,
+        ErrorType.JS_MISSING_FUNCTION: 13,
+        ErrorType.JS_MISSING_DOM_ELEMENT: 14,
+        ErrorType.JS_UNDEFINED_VARIABLE: 15,
         # Unknown (last)
         ErrorType.UNKNOWN: 99,
     }
@@ -70,7 +75,8 @@ class ErrorPrioritizer:
         """
         Group errors by priority tier.
 
-        Returns dict with keys: 'critical', 'visibility', 'transform', 'secondary', 'feedback'
+        Returns dict with keys: 'critical', 'visibility', 'transform',
+        'secondary', 'feedback', 'javascript'
         """
         groups: Dict[str, List[ClassifiedError]] = {
             "critical": [],
@@ -78,6 +84,7 @@ class ErrorPrioritizer:
             "transform": [],
             "secondary": [],
             "feedback": [],
+            "javascript": [],
         }
 
         for error in errors:
@@ -91,6 +98,10 @@ class ErrorPrioritizer:
                 groups["transform"].append(error)
             elif priority <= 9:
                 groups["secondary"].append(error)
+            elif priority <= 11:
+                groups["feedback"].append(error)
+            elif priority <= 15:
+                groups["javascript"].append(error)
             else:
                 groups["feedback"].append(error)
 

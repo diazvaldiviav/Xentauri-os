@@ -9,6 +9,11 @@ Sprint 2 Implementation:
 - ErrorPrioritizer: Sort errors by severity
 - ErrorReport: Structured classification results
 - ErrorClassificationPipeline: End-to-end classification
+
+Sprint 3.5 Implementation:
+- JSValidator: Static JavaScript analysis
+- JSRuntimeValidator: Browser-based JS validation
+- JSErrorClassifier: Classify JS errors
 """
 
 from .playwright_diagnostic import (
@@ -44,6 +49,21 @@ from .classification_pipeline import (
     classify_html,
 )
 
+# Sprint 3.5: JavaScript Validation
+from .js_validator import (
+    JSValidator,
+    JSValidationResult,
+    ScriptInfo,
+)
+
+from .js_runtime_validator import (
+    JSRuntimeValidator,
+    JSRuntimeResult,
+    RuntimeError,
+)
+
+from .js_error_classifier import JSErrorClassifier
+
 __all__ = [
     # Playwright Diagnostic
     "PlaywrightDiagnostic",
@@ -70,4 +90,12 @@ __all__ = [
     # Pipeline
     "ErrorClassificationPipeline",
     "classify_html",
+    # Sprint 3.5: JavaScript Validation
+    "JSValidator",
+    "JSValidationResult",
+    "ScriptInfo",
+    "JSRuntimeValidator",
+    "JSRuntimeResult",
+    "RuntimeError",
+    "JSErrorClassifier",
 ]

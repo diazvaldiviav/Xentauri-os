@@ -1,12 +1,13 @@
 """
-Error Types - Classification of HTML/CSS interactivity errors.
+Error Types - Classification of HTML/CSS/JS interactivity errors.
 
-These error types map directly to Tailwind fix strategies:
+These error types map directly to fix strategies:
 - ZINDEX_* → Add z-* classes
 - POINTER_* → Add pointer-events-* classes
 - INVISIBLE_* → Add opacity-100, block, visible classes
 - TRANSFORM_* → Add [transform-style:preserve-3d], etc.
 - FEEDBACK_* → Add active:*, hover:* classes
+- JS_* → Require LLM to generate/fix JavaScript code
 """
 
 from enum import Enum
@@ -53,6 +54,19 @@ class ErrorType(Enum):
     FEEDBACK_MISSING = "feedback_missing"
     """No visual feedback on click/hover states."""
 
+    # JavaScript Issues (Sprint 3.5)
+    JS_SYNTAX_ERROR = "js_syntax_error"
+    """JavaScript syntax error in <script> tag."""
+
+    JS_MISSING_FUNCTION = "js_missing_function"
+    """Event handler calls function that is not defined."""
+
+    JS_MISSING_DOM_ELEMENT = "js_missing_dom_element"
+    """JavaScript references DOM element that doesn't exist."""
+
+    JS_UNDEFINED_VARIABLE = "js_undefined_variable"
+    """JavaScript uses undefined variable."""
+
     # Catch-all
     UNKNOWN = "unknown"
     """Error type could not be determined."""
@@ -95,8 +109,25 @@ class ErrorType(Enum):
         return self in (self.FEEDBACK_TOO_SUBTLE, self.FEEDBACK_MISSING)
 
     @property
+    def is_js_related(self) -> bool:
+        """Check if error is related to JavaScript."""
+        return self in (
+            self.JS_SYNTAX_ERROR,
+            self.JS_MISSING_FUNCTION,
+            self.JS_MISSING_DOM_ELEMENT,
+            self.JS_UNDEFINED_VARIABLE,
+        )
+
+    @property
     def requires_llm(self) -> bool:
         """Check if this error type typically requires LLM for repair."""
-        # Most errors can be fixed deterministically with Tailwind classes
-        # Only UNKNOWN and complex FEEDBACK issues may need LLM
-        return self in (self.UNKNOWN, self.FEEDBACK_MISSING)
+        # CSS errors can be fixed deterministically with Tailwind classes
+        # JS errors and complex FEEDBACK issues need LLM
+        return self in (
+            self.UNKNOWN,
+            self.FEEDBACK_MISSING,
+            self.JS_SYNTAX_ERROR,
+            self.JS_MISSING_FUNCTION,
+            self.JS_MISSING_DOM_ELEMENT,
+            self.JS_UNDEFINED_VARIABLE,
+        )

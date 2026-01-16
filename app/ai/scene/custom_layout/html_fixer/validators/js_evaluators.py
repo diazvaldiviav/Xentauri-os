@@ -492,3 +492,141 @@ class JSEvaluators:
         return { reachable: true };
     }
     """
+
+    # =========================================================================
+    # JAVASCRIPT VALIDATION (Sprint 3.5)
+    # =========================================================================
+
+    VALIDATE_JS_SYNTAX = """
+    (scriptContent) => {
+        try {
+            // Use Function constructor to validate syntax without executing
+            new Function(scriptContent);
+            return { valid: true };
+        } catch (e) {
+            return {
+                valid: false,
+                error: e.message,
+                name: e.name,
+                line: e.lineNumber || null,
+                column: e.columnNumber || null
+            };
+        }
+    }
+    """
+
+    CHECK_FUNCTION_EXISTS = """
+    (functionName) => {
+        try {
+            // Check if function exists in global scope
+            const exists = typeof window[functionName] === 'function';
+            return {
+                exists: exists,
+                type: typeof window[functionName],
+                isCallable: exists
+            };
+        } catch (e) {
+            return { exists: false, error: e.message };
+        }
+    }
+    """
+
+    CHECK_FUNCTIONS_BATCH = """
+    (functionNames) => {
+        const results = {};
+        for (const name of functionNames) {
+            try {
+                results[name] = {
+                    exists: typeof window[name] === 'function',
+                    type: typeof window[name]
+                };
+            } catch (e) {
+                results[name] = { exists: false, error: e.message };
+            }
+        }
+        return results;
+    }
+    """
+
+    CAPTURE_JS_ERRORS = """
+    () => {
+        // This sets up error capturing and returns a getter function
+        const errors = [];
+
+        // Capture console.error
+        const originalError = console.error;
+        console.error = (...args) => {
+            errors.push({
+                type: 'console_error',
+                message: args.map(a => String(a)).join(' '),
+                timestamp: Date.now()
+            });
+            originalError.apply(console, args);
+        };
+
+        // Capture uncaught exceptions
+        window.addEventListener('error', (e) => {
+            errors.push({
+                type: 'uncaught_error',
+                message: e.message,
+                filename: e.filename,
+                lineno: e.lineno,
+                colno: e.colno
+            });
+        });
+
+        // Capture unhandled promise rejections
+        window.addEventListener('unhandledrejection', (e) => {
+            errors.push({
+                type: 'unhandled_rejection',
+                message: String(e.reason),
+                timestamp: Date.now()
+            });
+        });
+
+        // Store getter in window for later retrieval
+        window.__capturedJSErrors = errors;
+        return true;
+    }
+    """
+
+    GET_CAPTURED_ERRORS = """
+    () => {
+        return window.__capturedJSErrors || [];
+    }
+    """
+
+    TEST_HANDLER_EXECUTION = """
+    (selector, eventType) => {
+        const element = document.querySelector(selector);
+        if (!element) {
+            return { success: false, reason: 'element_not_found' };
+        }
+
+        const handlerAttr = 'on' + eventType;
+        const handlerCode = element.getAttribute(handlerAttr);
+
+        if (!handlerCode) {
+            return { success: false, reason: 'no_handler' };
+        }
+
+        try {
+            // Try to compile the handler (syntax check)
+            new Function('event', handlerCode);
+
+            // Try to execute with a mock event
+            const mockEvent = new Event(eventType);
+            const fn = new Function('event', handlerCode);
+            fn.call(element, mockEvent);
+
+            return { success: true };
+        } catch (e) {
+            return {
+                success: false,
+                reason: 'execution_error',
+                error: e.message,
+                errorType: e.name
+            };
+        }
+    }
+    """
