@@ -1281,6 +1281,59 @@
         </div>
     </div>
 
+    <!-- Human Feedback Flow -->
+    <div class="section">
+        <h2 class="section-title">👤 Human Feedback Flow (Sprint 8)</h2>
+        <div class="flow-container">
+            <div class="flow">
+                <div class="flow-step start">
+                    <div class="flow-step-title">User Request</div>
+                    <div class="flow-step-desc">"Show quiz" + require_feedback=true</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">POST /intent</div>
+                    <div class="flow-step-desc">Generate HTML (no auto-send)</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">/feedback/prepare</div>
+                    <div class="flow-step-desc">Inject data-vid attributes</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step decision">
+                    <div class="flow-step-title">User Validates</div>
+                    <div class="flow-step-desc">Mark working/broken</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">/feedback/fix</div>
+                    <div class="flow-step-desc">LLM applies fixes</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step process">
+                    <div class="flow-step-title">/feedback/approve</div>
+                    <div class="flow-step-desc">Send via WebSocket</div>
+                </div>
+                <div class="flow-arrow">→</div>
+                <div class="flow-step end">
+                    <div class="flow-step-title">Display on Device</div>
+                    <div class="flow-step-desc">User approved!</div>
+                </div>
+            </div>
+        </div>
+        <div style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+            <strong>Key Components:</strong>
+            <ul style="margin-top: 10px; padding-left: 20px; color: #aaa;">
+                <li><code>ElementMapper</code> - Injects data-vid + postMessage script</li>
+                <li><code>AnnotationInjector</code> - Adds [ELEMENT #N] comments for LLM</li>
+                <li><code>FeedbackMerger</code> - Combines sandbox + user errors</li>
+                <li><code>FeedbackAwareLLMPrompt</code> - Builds targeted fix prompts</li>
+                <li><code>LLMFixer.fix_with_feedback()</code> - Applies Tailwind patches</li>
+            </ul>
+        </div>
+    </div>
+
     <!-- WebSocket Communication -->
     <div class="section">
         <h2 class="section-title">🔌 WebSocket Communication</h2>
@@ -1440,6 +1493,25 @@
                 <div class="endpoint">
                     <span class="method get">GET</span>
                     <span class="endpoint-path">/intent/stats</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+            </div>
+
+            <div class="endpoint-group">
+                <div class="endpoint-group-title">👤 Human Feedback</div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/feedback/prepare-validation</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/feedback/fix-with-feedback</span>
+                    <span class="endpoint-auth">🔒 auth</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="endpoint-path">/feedback/approve</span>
                     <span class="endpoint-auth">🔒 auth</span>
                 </div>
             </div>

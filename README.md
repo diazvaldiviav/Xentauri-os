@@ -46,6 +46,7 @@ Xentauri consists of three main components:
 - **Google Calendar Integration**: Full CRUD operations with smart search
 - **Google Docs Intelligence**: Read, analyze, and create events from documents
 - **Dynamic Layouts**: Scene Graph system for custom display arrangements
+- **Human Feedback System**: Validate and fix HTML layouts before displaying on devices
 - **Real-Time Communication**: WebSocket connections to Raspberry Pi devices
 
 ---
@@ -138,7 +139,8 @@ Xentauri_Cloud/
 │   ├── schemas/                # Pydantic request/response schemas
 │   │   ├── auth.py             # Auth schemas (login, register)
 │   │   ├── user.py             # User schemas
-│   │   └── device.py           # Device schemas
+│   │   ├── device.py           # Device schemas
+│   │   └── feedback.py         # Human Feedback API schemas
 │   │
 │   ├── routers/                # API route handlers
 │   │   ├── auth.py             # /auth/* endpoints
@@ -146,6 +148,7 @@ Xentauri_Cloud/
 │   │   ├── devices.py          # /devices/* endpoints
 │   │   ├── commands.py         # /commands/* endpoints
 │   │   ├── intent.py           # /intent endpoint (AI)
+│   │   ├── feedback.py         # /feedback/* Human Feedback endpoints
 │   │   ├── google_auth.py      # /auth/google/* endpoints
 │   │   ├── cloud.py            # /cloud/* content endpoints
 │   │   ├── simulator.py        # /simulator display emulator
@@ -353,7 +356,7 @@ curl -X POST http://localhost:8000/auth/login \
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/intent` | JWT | Process natural language command (iOS app) |
+| POST | `/intent` | JWT | Process natural language command. Supports `require_feedback` flag |
 | POST | `/intent/agent` | X-Agent-ID | Process intent from Pi devices (agent_id auth) |
 | GET | `/intent/stats` | JWT | Get AI usage statistics |
 
@@ -389,6 +392,46 @@ curl -X POST http://localhost:8000/intent/agent \
 | GET | `/cloud/calendar` | Token | Rendered HTML calendar |
 | GET | `/cloud/calendar/preview` | No | Demo calendar |
 | GET | `/cloud/calendar/status` | Yes | Integration status |
+
+### Human Feedback (Layout Validation)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/feedback/prepare-validation` | JWT | Inject data-vid attributes for element selection |
+| POST | `/feedback/fix-with-feedback` | JWT | Apply LLM fixes based on user feedback |
+| POST | `/feedback/approve` | JWT | Send approved HTML to device via WebSocket |
+| POST | `/feedback/generate-test` | JWT | (Debug) Generate test HTML |
+
+**Example: Human Feedback Flow**
+```bash
+# 1. Request HTML with feedback requirement
+curl -X POST http://localhost:8000/intent \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Show a quiz about history", "require_feedback": true}'
+
+# 2. Prepare HTML for validation (adds data-vid attributes)
+curl -X POST http://localhost:8000/feedback/prepare-validation \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"html": "<button>Click me</button>"}'
+
+# 3. Send feedback and get fixed HTML
+curl -X POST http://localhost:8000/feedback/fix-with-feedback \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "html": "<button data-vid=\"1\">Click me</button>",
+    "feedback": [{"vid": "1", "status": "broken", "message": "Button not visible"}],
+    "global_feedback": ["Make background darker"]
+  }'
+
+# 4. Approve and send to device
+curl -X POST http://localhost:8000/feedback/approve \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"html": "<button>Click me</button>", "device_id": "uuid-here"}'
+```
 
 ### WebSocket
 

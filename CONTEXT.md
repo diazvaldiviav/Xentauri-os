@@ -1,10 +1,10 @@
 # Xentauri Project Context
 
-> **Last Updated:** January 11, 2026
-> **Current Sprint:** Sprint 7 - Vision-Enhanced Visual Repair ✅ COMPLETE
-> **Previous Sprint:** Sprint 6.5 - CSS Diagnosis for Visual Fixer ✅ COMPLETE
+> **Last Updated:** January 16, 2026
+> **Current Sprint:** Sprint 8 - Human Feedback System ✅ COMPLETE
+> **Previous Sprint:** Sprint 7 - Vision-Enhanced Visual Repair ✅ COMPLETE
 > **Backend Status:** ✅ MVP COMPLETE - Deployed to Production
-> **Status:** 🚀 Backend deployed to fly.io, Visual validation pipeline active
+> **Status:** 🚀 Backend deployed to fly.io, Human Feedback loop active
 
 Xentauri is an intelligent screen control system that lets users operate multiple display devices (TVs, monitors) via voice or text commands from their phone. The system comprises three main components:
 
@@ -341,6 +341,39 @@ Xentauri is an intelligent screen control system that lets users operate multipl
 | `fixer.py`: Show JS errors in Phase 5 summary for Sonnet repair | ✅ Done |
 | Deployed to Fly.io production | ✅ Done |
 
+### Sprint 8: Human Feedback System ✅ COMPLETE (January 16, 2026)
+**Commit:** `e76ee3a` - Human Feedback System - Complete backend implementation
+
+| Task | Status |
+|------|--------|
+| **Feedback Module Architecture** | |
+| `html_fixer/feedback/__init__.py` - Module exports | ✅ Done |
+| `html_fixer/feedback/element_mapper.py` - Inject data-vid + postMessage script | ✅ Done |
+| `html_fixer/feedback/annotation_injector.py` - Inject feedback comments for LLM | ✅ Done |
+| `html_fixer/feedback/feedback_merger.py` - Combine sandbox + user errors | ✅ Done |
+| **Contracts & Schemas** | |
+| `html_fixer/contracts/feedback.py` - Internal dataclasses | ✅ Done |
+| `app/schemas/feedback.py` - Pydantic API schemas | ✅ Done |
+| **API Endpoints** | |
+| `POST /feedback/prepare-validation` - Inject data-vid for element selection | ✅ Done |
+| `POST /feedback/fix-with-feedback` - Apply LLM fixes based on user feedback | ✅ Done |
+| `POST /feedback/approve` - Send approved HTML to device via WebSocket | ✅ Done |
+| `POST /feedback/generate-test` - (DEBUG) Generate test HTML | ✅ Done |
+| **LLM Integration** | |
+| `html_fixer/prompts/fixer_prompt_v2.py` - FeedbackAwareLLMPrompt builder | ✅ Done |
+| `llm_fixer.py`: Added `fix_with_feedback()` method | ✅ Done |
+| LLM reads `[ELEMENT #N] status:broken` comments for targeted fixes | ✅ Done |
+| **Intent Integration** | |
+| `require_feedback` parameter in POST /intent | ✅ Done |
+| When true: Returns HTML without auto-sending to device | ✅ Done |
+| Frontend controls validation before display | ✅ Done |
+| **Device Display Integration** | |
+| `/feedback/approve` sends HTML via `command_service.display_scene()` | ✅ Done |
+| WebSocket delivery to connected devices | ✅ Done |
+| **Test Results** | |
+| Quiz Historia: LLM successfully changed button color + background | ✅ Done |
+| Full loop: /intent → prepare → feedback → fix → approve → device | ✅ Done |
+
 ### 🎉 BACKEND MVP COMPLETE
 All backend features for MVP are complete:
 - ✅ User authentication (JWT)
@@ -355,6 +388,7 @@ All backend features for MVP are complete:
 - ✅ Content memory system
 - ✅ Multilingual support (Spanish/English)
 - ✅ Pi Alexa agent_id authentication
+- ✅ Human Feedback System (layout validation before display)
 
 ### Sprint 5.0: Raspberry Pi Agent (NEXT)
 | Task | Status |
@@ -394,6 +428,7 @@ Jarvis_Cloud/
 │   │   ├── devices.py       # Device CRUD + pairing
 │   │   ├── commands.py      # Send commands to devices
 │   │   ├── intent.py        # AI intent processing (Sprint 3)
+│   │   ├── feedback.py      # Human Feedback endpoints (Sprint 8)
 │   │   ├── websocket.py     # WebSocket for Pi agents
 │   │   ├── google_auth.py   # Google OAuth endpoints (Sprint 3.5)
 │   │   ├── cloud.py         # Cloud content for displays (Sprint 3.5)
@@ -413,7 +448,8 @@ Jarvis_Cloud/
 │   ├── schemas/
 │   │   ├── auth.py          # Request/response schemas for auth
 │   │   ├── user.py          # UserOut schema
-│   │   └── device.py        # Device schemas
+│   │   ├── device.py        # Device schemas
+│   │   └── feedback.py      # Human Feedback API schemas (Sprint 8)
 │   ├── ai/                   # AI Module (Sprint 3) - The Brain
 │   │   ├── __init__.py      # Module exports
 │   │   ├── context.py       # UnifiedContext system (Sprint 3.6)
@@ -443,15 +479,29 @@ Jarvis_Cloud/
 │   │   │       ├── prompts.py       # HTML generation prompts
 │   │   │       ├── html_repair_prompts.py  # Repair prompt templates
 │   │   │       ├── validator.py     # Legacy validator (pre-Sprint 6)
-│   │   │       └── validation/      # Visual Validation Pipeline (Sprint 6)
+│   │   │       ├── validation/      # Visual Validation Pipeline (Sprint 6)
+│   │   │       │   ├── __init__.py  # Module exports
+│   │   │       │   ├── contracts.py # ValidationContract, SandboxResult, InteractionResult
+│   │   │       │   ├── aggregator.py    # Phase 6: Result aggregation
+│   │   │       │   ├── fixer.py         # DirectFixer (Codex-Max repair)
+│   │   │       │   ├── input_detector.py # Phase 4: Input candidate detection + EOR
+│   │   │       │   ├── interaction_validator.py # Phase 5: Click + screenshot comparison
+│   │   │       │   ├── scene_graph.py   # Phase 3: DOM inspection + findEventOwnerCandidate()
+│   │   │       │   └── visual_analyzer.py # Phase 2: Visual snapshot + blank detection
+│   │   │       └── html_fixer/      # HTML Fixer Module (Sprint 6+8)
 │   │   │           ├── __init__.py  # Module exports
-│   │   │           ├── contracts.py # ValidationContract, SandboxResult, InteractionResult
-│   │   │           ├── aggregator.py    # Phase 6: Result aggregation
-│   │   │           ├── fixer.py         # DirectFixer (Codex-Max repair)
-│   │   │           ├── input_detector.py # Phase 4: Input candidate detection + EOR
-│   │   │           ├── interaction_validator.py # Phase 5: Click + screenshot comparison
-│   │   │           ├── scene_graph.py   # Phase 3: DOM inspection + findEventOwnerCandidate()
-│   │   │           └── visual_analyzer.py # Phase 2: Visual snapshot + blank detection
+│   │   │           ├── contracts/   # Internal dataclasses
+│   │   │           │   └── feedback.py  # UserFeedback, MergedError, AnnotatedHTML
+│   │   │           ├── feedback/    # Human Feedback System (Sprint 8)
+│   │   │           │   ├── __init__.py
+│   │   │           │   ├── element_mapper.py    # Inject data-vid + postMessage script
+│   │   │           │   ├── annotation_injector.py # Inject [ELEMENT #N] comments for LLM
+│   │   │           │   └── feedback_merger.py   # Combine sandbox + user errors
+│   │   │           ├── fixers/      # Fixer implementations
+│   │   │           │   └── llm/
+│   │   │           │       └── llm_fixer.py     # LLMFixer with fix_with_feedback()
+│   │   │           └── prompts/
+│   │   │               └── fixer_prompt_v2.py   # FeedbackAwareLLMPrompt builder
 │   │   ├── prompts/         # Prompt Templates (Sprint 3.6)
 │   │   │   ├── base_prompt.py      # Shared templates for all models
 │   │   │   ├── execution_prompts.py # GPT-4o execution prompts
@@ -556,9 +606,17 @@ Jarvis_Cloud/
 ### Intent (AI - Sprint 3 + 5.1)
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | /intent | JWT | Process natural language command (iOS app) |
+| POST | /intent | JWT | Process natural language command (iOS app). Supports `require_feedback` flag |
 | POST | /intent/agent | X-Agent-ID | Process intent from Pi Alexa (agent_id auth) |
 | GET | /intent/stats | JWT | Get AI usage statistics |
+
+### Human Feedback (Sprint 8)
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | /feedback/prepare-validation | JWT | Inject data-vid attributes for element selection |
+| POST | /feedback/fix-with-feedback | JWT | Apply LLM fixes based on user feedback |
+| POST | /feedback/approve | JWT | Send approved HTML to device via WebSocket |
+| POST | /feedback/generate-test | JWT | (DEBUG) Generate test HTML for feedback flow |
 
 ### Google OAuth (Sprint 3.5)
 | Method | Endpoint | Auth | Description |
@@ -1170,6 +1228,43 @@ SVG Structural Rule: SVG graphic nodes (`<path>`, `<rect>`, `<circle>`) can NEVE
 - **Technical Debt TD-001:** Worker timeout during repair flow
   - Increased Gunicorn timeout from 120s to 300s as workaround
   - Proper fix: async/background job processing (future sprint)
+
+### January 2026 - Sprint 8 Complete (Human Feedback System)
+- **Human-in-the-Loop Validation:** Users can validate HTML layouts before displaying on devices
+- **New Flow:**
+  1. `POST /intent` with `require_feedback: true` → Returns HTML without auto-sending
+  2. Frontend displays HTML in preview iframe
+  3. `POST /feedback/prepare-validation` → Injects `data-vid` attributes for element selection
+  4. User clicks elements to mark as "working", "broken", or provides global feedback
+  5. `POST /feedback/fix-with-feedback` → LLM applies targeted fixes based on feedback
+  6. `POST /feedback/approve` → Sends approved HTML to device via WebSocket
+- **ElementMapper (`element_mapper.py`):**
+  - Injects `data-vid="N"` attributes on interactive elements (buttons, onclick, inputs)
+  - Adds postMessage script for frontend communication
+  - Returns `element_map` with metadata for each element (tag, classes, text, attributes)
+- **AnnotationInjector (`annotation_injector.py`):**
+  - Injects HTML comments like `<!-- [ELEMENT #N] status:broken message:X -->`
+  - Adds `<!-- [GLOBAL FEEDBACK] ... -->` header for general issues
+  - LLM reads these comments to understand what needs fixing
+- **FeedbackMerger (`feedback_merger.py`):**
+  - Combines sandbox errors (from Phase 5 interaction tests) with user feedback
+  - 4 cases: sandbox+broken, sandbox+working, no_sandbox+broken, no_sandbox+working
+  - Produces `MergedError` with `has_technical_cause` flag
+- **FeedbackAwareLLMPrompt (`fixer_prompt_v2.py`):**
+  - Builds prompt with annotated HTML + merged errors list
+  - Instructs LLM to only modify elements with feedback
+  - Returns `TailwindPatch` instructions (selector, add_classes, remove_classes)
+- **LLMFixer.fix_with_feedback():**
+  - Calls Gemini 3 Pro with `HIGH` thinking mode
+  - Applies TailwindPatch changes via `TailwindInjector`
+  - Returns cleaned HTML without data-vid or feedback comments
+- **Intent Integration:**
+  - New `require_feedback` field in `IntentRequest`
+  - When true: `command_sent=false`, HTML returned in response
+  - Frontend controls when to send to device
+- **Test Results:**
+  - Quiz Historia: Successfully changed button to green, background to black
+  - Full loop validated: intent → prepare → feedback → fix → approve → device
 
 ### January 2026 - Sprint 6.0 Complete (Visual-based Validation System)
 - **7-Phase Visual Validation Pipeline:**
