@@ -6103,15 +6103,15 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                 layout_hints=intent.layout_hints,
             )
 
-            # Sprint 6.1: Determine if we need real data or can use direct flow
-            # Real data types: calendar, weather, etc. - require SceneGraph for data fetching
-            # Creative types: trivia, games, visualizations - can skip SceneGraph
-            needs_real_data = bool(realtime_data and any(
+            # Sprint 6.1: Always try Direct Flow first, SceneGraph only as fallback
+            # Direct Flow handles ALL content types including weather, calendar
+            # SceneGraph is used only when Direct Flow fails
+            has_realtime_data = bool(realtime_data and any(
                 k in realtime_data for k in ['calendar', 'weather', 'events', 'documents']
             ))
 
             if realtime_data:
-                logger.info(f"[{request_id}] Fetched real-time data for: {list(realtime_data.keys())} (needs_real_data={needs_real_data})")
+                logger.info(f"[{request_id}] Fetched real-time data for: {list(realtime_data.keys())} (has_realtime={has_realtime_data})")
             
             # Sprint 4.2: Build conversation context for scene generation
             # This ensures Claude knows what was discussed/generated before
@@ -6188,18 +6188,19 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
             )
             logger.info(f"[{request_id}] Loading Phase 2: Analyzing")
 
-            # Sprint 6.1: Hybrid flow - direct data for creative content, SceneGraph for real data
+            # Sprint 6.1: Direct Flow first, SceneGraph only as fallback
+            # Direct Flow handles ALL content types including weather, calendar
             scene_dict = None
             custom_layout = None
             content_data = None  # Initialize for use in response building
 
-            if not needs_real_data and settings.CUSTOM_LAYOUT_ENABLED:
+            if settings.CUSTOM_LAYOUT_ENABLED:
                 # =====================================================================
-                # DIRECT FLOW: Creative content (trivia, games, visualizations)
+                # DIRECT FLOW: All content types (weather, calendar, trivia, games, etc.)
                 # Skip SceneGraph, generate content data directly → Opus HTML
-                # This saves ~10-15 seconds of latency
+                # SceneGraph is only used as fallback when Direct Flow fails
                 # =====================================================================
-                logger.info(f"[{request_id}] Using DIRECT flow (no SceneGraph) for creative content")
+                logger.info(f"[{request_id}] Using DIRECT flow (no SceneGraph) for content generation")
 
                 try:
                     from app.ai.scene.custom_layout import custom_layout_service
@@ -6255,11 +6256,11 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                     )
 
             # =====================================================================
-            # SCENOGRAPH FLOW: Real data (calendar, weather) or direct flow failed
+            # SCENOGRAPH FLOW: Fallback when Direct Flow fails or is disabled
             # Full SceneGraph generation with Gemini + Opus HTML
             # =====================================================================
             if scene_dict is None:
-                logger.info(f"[{request_id}] Using SCENOGRAPH flow (needs_real_data={needs_real_data})")
+                logger.info(f"[{request_id}] Using SCENOGRAPH flow (fallback, has_realtime={has_realtime_data})")
 
                 # Generate scene via SceneService (now with real-time data AND conversation context)
                 logger.info(f"[{request_id}] Generating scene with {len(normalized_hints)} layout hints")

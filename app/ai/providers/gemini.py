@@ -357,8 +357,9 @@ class GeminiProvider(AIProvider):
 
     def _extract_usage(self, response):
         # El SDK v2 a veces devuelve None si no hay uso reportado
-        prompt_t = response.usage_metadata.prompt_token_count if response.usage_metadata else 0
-        comp_t = response.usage_metadata.candidates_token_count if response.usage_metadata else 0
+        # Los campos individuales también pueden ser None incluso si usage_metadata existe
+        prompt_t = (response.usage_metadata.prompt_token_count or 0) if response.usage_metadata else 0
+        comp_t = (response.usage_metadata.candidates_token_count or 0) if response.usage_metadata else 0
         return TokenUsage(prompt_tokens=prompt_t, completion_tokens=comp_t)
 
     def _extract_grounding_metadata(self, response):

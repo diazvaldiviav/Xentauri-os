@@ -40,38 +40,57 @@ YOUR TASK:
 4. DO NOT modify elements marked as status:working
 5. Apply global feedback changes
 
+🚨 HTML-FIRST RULE (CRITICAL):
+ALL interactive elements MUST exist in the HTML. The validator CANNOT see elements created by JavaScript.
+
+FORBIDDEN JavaScript:
+- document.createElement()
+- el.innerHTML = '<button>...'
+- el.appendChild(node)
+- el.insertAdjacentHTML()
+
+ALLOWED JavaScript:
+- el.classList.add('hidden') / remove('hidden')  → Toggle visibility
+- el.textContent = 'New text'                    → Update text
+- el.style.display = 'none'                      → Hide element
+
+When adding new elements (e.g., "add a restart button"):
+- Add the element directly in the HTML
+- Use class="hidden" if it should start hidden
+- JS only toggles visibility with classList
+
 CRITICAL RULES:
-- Output ONLY JSON patches with Tailwind classes
-- NEVER output raw CSS (no <style> blocks with custom CSS)
-- NEVER remove elements or functionality
-- NEVER modify working elements
-- If user says "should open modal", check if onclick handler exists and modal element exists
-- If user says "should submit form", check if form action and submit handler exist
+- Output the COMPLETE FIXED HTML document
+- Remove ALL feedback annotation comments ([ELEMENT #N], [GLOBAL FEEDBACK])
+- Remove ALL data-vid attributes from elements
+- Use ONLY Tailwind CSS classes (no custom CSS)
+- NEVER modify elements marked as status:working
+- Only modify JavaScript when strictly necessary
+- User feedback is a direct instruction - follow it LITERALLY
+- Errors are for REFERENCE only
+- All buttons MUST have: relative z-10 active:scale-95
+- All overlays with inset-0 MUST have: pointer-events-none OR onclick handler
+
+⚠️ LAYOUT PRESERVATION (MANDATORY):
+- PRESERVE the entire HTML structure - do NOT remove, reorder, or restructure elements
+- Do NOT consolidate, merge, or simplify the layout for "cleanliness"
+- Do NOT remove buttons, components, or sections not explicitly targeted by user feedback
+- ALL other HTML elements must remain EXACTLY as provided (copy verbatim)
+- Keep styling, classes, and attributes on non-targeted elements unchanged
+- If user feedback requires NEW elements, ADD them without replacing existing ones
+
+🎯 USER FEEDBACK PRIORITY:
+- User feedback takes ABSOLUTE priority - if user wants to change an element, change it
+- User may request changes to ANY element, not just broken ones
+- Follow user instructions LITERALLY even if the element was marked as working
+- User feedback overrides all other considerations
 
 OUTPUT FORMAT:
-{
-  "analysis": "Brief description of issues found",
-  "patches": [
-    {
-      "vid": 3,
-      "selector": "[data-vid='3']",
-      "issue": "z-index too low, blocked by overlay",
-      "user_wanted": "should open payment modal",
-      "fix_type": "css",
-      "add_classes": ["relative", "z-50", "pointer-events-auto"],
-      "remove_classes": ["z-10"]
-    },
-    {
-      "vid": null,
-      "selector": "body > header",
-      "issue": "Missing navigation element",
-      "user_wanted": "Missing a back button",
-      "fix_type": "html",
-      "html_to_add": "<button class='...' onclick='history.back()'>Back</button>",
-      "insert_position": "prepend"
-    }
-  ]
-}
+Return ONLY the complete HTML document.
+- Start with <!DOCTYPE html>
+- NO markdown code blocks
+- NO explanations
+- Clean HTML ready for re-tagging
 
 COMMON FIXES:
 - "button doesn't work" + no technical error → Check onclick, add pointer-events-auto, z-index
@@ -132,13 +151,13 @@ REMEMBER: User feedback takes priority over sandbox errors. If user says it work
 
 ## INSTRUCTIONS
 
-1. Read the HTML comments to find broken elements ([ELEMENT #N] status:broken)
-2. Use user_feedback to understand expected behavior
-3. Generate JSON patches to fix each broken element
-4. Apply global feedback (missing elements, style changes)
-5. Respect working elements - do not modify them
+1. Find elements marked status:broken and fix them per user_feedback
+2. Apply global feedback as direct instructions
+3. DO NOT modify elements marked status:working
+4. REMOVE all [ELEMENT #N] and [GLOBAL FEEDBACK] comments
+5. REMOVE all data-vid attributes
 
-Output your fixes as JSON patches."""
+Output ONLY the complete, clean HTML document."""
 
         messages.append({"role": "user", "content": user_content})
         return messages

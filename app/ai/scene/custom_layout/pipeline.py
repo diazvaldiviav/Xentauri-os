@@ -86,7 +86,7 @@ class CustomLayoutPipeline:
 
             self._fixer = Orchestrator(
                 llm_fixer=llm_fixer,
-                max_llm_attempts=3,
+                max_llm_attempts=1,  # Single attempt, user feedback loop handles iterations
             )
             self._fixer_initialized = True
         return self._fixer
@@ -115,7 +115,7 @@ class CustomLayoutPipeline:
         Flow:
             1. Generate HTML with Gemini 3 Pro (thinking HIGH)
             2. Validate with Sandbox (Playwright)
-            3. Repair with html_fixer if needed (Gemini 3 Flash)
+            3. Repair with html_fixer if needed (Gemini 3 Flash, 1 attempt)
             4. Return best result
         """
         start_time = time.time()
@@ -176,8 +176,9 @@ class CustomLayoutPipeline:
             total_tokens += fix_result.metrics.llm_tokens_used
 
         # Determine success
-        # Success if: validation passed OR score > 0.5 (majority of elements work)
-        success = fix_result.validation_passed or fix_result.final_score > 0.5
+        # Success if: validation passed OR we have HTML (user can provide feedback)
+        # Changed: Always return HTML if generated, user feedback loop handles iterations
+        success = fix_result.fixed_html is not None
 
         result = PipelineResult(
             success=success,

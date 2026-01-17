@@ -10,6 +10,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union, TYPE_CHECKING
 
+from app.core.config import settings
+
 from bs4 import BeautifulSoup
 
 from ...contracts.errors import ErrorType
@@ -488,13 +490,13 @@ class LLMFixer:
         )
 
         try:
-            # Call LLM
+            # Call LLM with Gemini 3 Pro for better instruction following and layout preservation
             response = await self._provider.generate(
                 prompt=messages[1]["content"],  # User message
                 system_prompt=messages[0]["content"],  # System message
                 temperature=0.3,
-                max_tokens=8000,
-                response_mime_type="application/json",
+                max_tokens=16000,
+                model_override=settings.GEMINI_PRO_MODEL,  # Use Gemini 3 Pro
             )
 
             result.llm_calls_made = 1
@@ -506,60 +508,19 @@ class LLMFixer:
                 result.duration_ms = (time.time() - start_time) * 1000
                 return result
 
-            # Parse LLM response
-            llm_output = self._parse_feedback_response(response.content)
+            # LLM returns complete HTML directly
+            fixed_html = self._extract_html_from_response(response.content)
 
-            if not llm_output:
-                result.error_message = "Failed to parse LLM response"
+            if not fixed_html:
+                result.error_message = "Failed to extract HTML from LLM response"
                 result.duration_ms = (time.time() - start_time) * 1000
                 return result
 
-            logger.info(
-                f"[FEEDBACK_FIX] LLM analysis: {llm_output.get('analysis', 'N/A')}"
-            )
+            logger.info(f"[FEEDBACK_FIX] LLM returned HTML ({len(fixed_html)} chars)")
 
-            # Apply patches
-            patches = llm_output.get("patches", [])
-            current_html = annotated_html
-
-            tailwind_patches_applied = []
-            for patch in patches:
-                if patch.get("fix_type") == "css" or "add_classes" in patch:
-                    # Create TailwindPatch
-                    tw_patch = TailwindPatch(
-                        selector=patch.get("selector", ""),
-                        add_classes=patch.get("add_classes", []),
-                        remove_classes=patch.get("remove_classes", []),
-                        reason=patch.get("issue", "User feedback fix"),
-                    )
-
-                    # Apply using injector
-                    patch_set = PatchSet(patches=[tw_patch], source="feedback_llm")
-                    injection_result = self._tailwind_injector.inject(
-                        current_html, patch_set
-                    )
-
-                    if injection_result.success:
-                        current_html = injection_result.html
-                        tailwind_patches_applied.append(tw_patch)
-                        logger.info(
-                            f"[FEEDBACK_FIX] Applied patch to {patch.get('selector')}: "
-                            f"+{patch.get('add_classes', [])} -{patch.get('remove_classes', [])}"
-                        )
-
-                elif patch.get("fix_type") == "html" and patch.get("html_to_add"):
-                    # Handle HTML additions (new elements)
-                    current_html = self._apply_html_patch(current_html, patch)
-
-            result.fixed_html = current_html
-            result.tailwind_patches = tailwind_patches_applied
-            result.success = len(tailwind_patches_applied) > 0 or current_html != annotated_html
+            result.fixed_html = fixed_html
+            result.success = True
             result.duration_ms = (time.time() - start_time) * 1000
-
-            logger.info(
-                f"[FEEDBACK_FIX] Complete: {len(tailwind_patches_applied)} patches applied, "
-                f"{result.duration_ms:.0f}ms"
-            )
 
             return result
 
@@ -569,70 +530,28 @@ class LLMFixer:
             result.duration_ms = (time.time() - start_time) * 1000
             return result
 
-    def _parse_feedback_response(self, content: str) -> Optional[Dict]:
-        """Parse LLM response from feedback fix."""
-        import json
+    def _extract_html_from_response(self, content: str) -> Optional[str]:
+        """Extract HTML from LLM response."""
         import re
 
         if not content:
             return None
 
-        # Try direct JSON parse
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            pass
+        content_stripped = content.strip()
 
-        # Try to extract JSON from markdown code block
-        json_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", content)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1))
-            except json.JSONDecodeError:
-                pass
+        # Direct HTML (no wrapper)
+        if content_stripped.lower().startswith('<!doctype') or content_stripped.lower().startswith('<html'):
+            return content_stripped
 
-        # Try to find raw JSON object
-        json_match = re.search(r"\{[\s\S]*\"patches\"[\s\S]*\}", content)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0))
-            except json.JSONDecodeError:
-                pass
+        # HTML in markdown code block
+        html_match = re.search(r"```(?:html)?\s*(<!DOCTYPE[\s\S]*?</html>)\s*```", content, re.IGNORECASE)
+        if html_match:
+            return html_match.group(1).strip()
 
-        logger.warning(f"[FEEDBACK_FIX] Could not parse LLM response: {content[:200]}...")
+        # Fallback: find HTML anywhere
+        html_match = re.search(r"(<!DOCTYPE[\s\S]*?</html>)", content, re.IGNORECASE)
+        if html_match:
+            return html_match.group(1).strip()
+
+        logger.warning(f"[FEEDBACK_FIX] Could not extract HTML: {content[:200]}...")
         return None
-
-    def _apply_html_patch(self, html: str, patch: Dict) -> str:
-        """Apply HTML addition patch (for adding new elements)."""
-        selector = patch.get("selector", "body")
-        html_to_add = patch.get("html_to_add", "")
-        position = patch.get("insert_position", "append")
-
-        if not html_to_add:
-            return html
-
-        soup = BeautifulSoup(html, "html.parser")
-
-        try:
-            target = soup.select_one(selector)
-            if not target:
-                logger.warning(f"[FEEDBACK_FIX] Selector not found: {selector}")
-                return html
-
-            new_element = BeautifulSoup(html_to_add, "html.parser")
-
-            if position == "prepend":
-                target.insert(0, new_element)
-            elif position == "before":
-                target.insert_before(new_element)
-            elif position == "after":
-                target.insert_after(new_element)
-            else:  # append (default)
-                target.append(new_element)
-
-            logger.info(f"[FEEDBACK_FIX] Added HTML to {selector} ({position})")
-            return str(soup)
-
-        except Exception as e:
-            logger.error(f"[FEEDBACK_FIX] Failed to apply HTML patch: {e}")
-            return html

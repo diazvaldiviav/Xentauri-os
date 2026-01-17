@@ -384,7 +384,7 @@ class DisplayContentIntent(Intent):
     # Classification
     info_type: str = Field(
         default="calendar",
-        description="Primary content type: calendar, clock, weather, mixed"
+        description="Primary content type: calendar, clock, weather, mixed, creative, simulation, game, trivia, visualization"
     )
     output_type: str = Field(
         default="display",

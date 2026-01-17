@@ -43,6 +43,7 @@ from app.ai.scene.custom_layout.html_fixer.contracts.feedback import (
     FeedbackStatus,
 )
 from app.ai.scene.custom_layout.html_fixer.fixers.llm.llm_fixer import LLMFixer
+from app.ai.providers.gemini import GeminiProvider
 from app.services.commands import command_service
 from uuid import UUID
 
@@ -181,7 +182,9 @@ async def fix_with_feedback(
         fixed_html = annotated.html
 
         if merged_errors or request.global_feedback:
-            llm_fixer = LLMFixer()
+            # Usar Gemini 3 Flash para fixes con feedback
+            llm_provider = GeminiProvider(model="gemini-3-flash-preview")
+            llm_fixer = LLMFixer(provider=llm_provider)
             fix_result = await llm_fixer.fix_with_feedback(
                 annotated_html=annotated.html,
                 merged_errors=merged_errors,
@@ -266,7 +269,7 @@ async def approve_layout(
             # Try to get user's default/first device
             from app.models.device import Device
             device = db.query(Device).filter(
-                Device.owner_id == current_user.id
+                Device.user_id == current_user.id
             ).first()
 
             if not device:

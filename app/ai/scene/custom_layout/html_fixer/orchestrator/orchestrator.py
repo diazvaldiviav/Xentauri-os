@@ -61,7 +61,7 @@ class Orchestrator:
         sandbox: Optional[Sandbox] = None,
         decision_engine: Optional[DecisionEngine] = None,
         # Configuration
-        max_llm_attempts: int = 3,
+        max_llm_attempts: int = 1,  # Single attempt, user feedback loop handles iterations
         global_timeout_seconds: float = 120.0,
         validate_after_deterministic: bool = True,
         validate_after_llm: bool = True,
@@ -344,7 +344,7 @@ class Orchestrator:
                 report = await self._get_classifier().classify_static(current_html)
                 _, llm_errors = self._decision.partition_errors(report.errors)
 
-        # PHASE 3: LLM fixes
+        # PHASE 3: LLM fixes (single attempt, user provides feedback for iterations)
         time_remaining = self._global_timeout - (time.time() - start_time)
 
         if llm_errors and time_remaining > 30:

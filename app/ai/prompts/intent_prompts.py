@@ -287,12 +287,16 @@ D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
    Layout Keywords: layout, arrange, show X on the left, put X in the corner, split screen
    Dashboard Keywords: dashboard, dashboard view, show everything
    Creative Keywords: creative layout, custom layout, design a display
-   
+   Interactive Content Keywords: simulation, simulación, game, juego, trivia, quiz,
+      visualization, interactive, animation, diagram, infographic, chart
+
    Use display_content when user describes:
    - Spatial positioning: "on the left", "in the corner", "top right", "split screen"
    - Component arrangements: "calendar on the left, clock on the right"
    - Dashboard requests: "show me a dashboard with calendar and weather"
    - Creative layouts: "design a display", "create a layout"
+   - Interactive content: "show me a simulation", "create a game", "make a trivia"
+   - Visual content: "show me a visualization", "create a diagram", "make a chart"
    
    CRITICAL - DOCUMENT + POSITION = DISPLAY_CONTENT (NOT doc_query!):
    When user mentions a document WITH spatial positioning, they want a Scene Graph layout
@@ -330,6 +334,17 @@ D) pending_op_type = null (NO PENDING OPERATION - THIS IS CRITICAL!):
    - "Show calendar on the left side with clock in the corner" → display_content (custom layout)
    - "Put my agenda on the TV" → device_command (simple display)
    - "Split the screen with calendar and weather" → display_content (multi-component layout)
+
+   INTERACTIVE CONTENT = ALWAYS DISPLAY_CONTENT (CRITICAL!):
+   Any request for simulations, games, trivia, visualizations, interactive content
+   MUST use display_content with info_type="creative":
+   - "Show me a simulation of the solar system" → display_content, info_type="creative"
+   - "Muéstrame una simulación del sistema solar" → display_content, info_type="creative"
+   - "Create a trivia game about history" → display_content, info_type="creative"
+   - "Make a visualization of data" → display_content, info_type="creative"
+   - "Show me an interactive diagram" → display_content, info_type="creative"
+   - "Hazme un juego de preguntas" → display_content, info_type="creative"
+   These NEVER go to device_command! They require HTML generation via Scene Graph.
 
    SPECIFIC vs GENERIC events:
    - "Show event [X] on screen" / "Muestra el evento [X]" → display_content (needs meeting_detail search)

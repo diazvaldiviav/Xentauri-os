@@ -41,7 +41,7 @@ class DecisionEngine:
         self,
         llm_confidence_threshold: float = 0.7,
         min_improvement_threshold: float = 0.05,
-        max_llm_attempts: int = 3,
+        max_llm_attempts: int = 1,  # Single attempt, user feedback loop handles iterations
         rollback_threshold: float = 0.1,
     ):
         """

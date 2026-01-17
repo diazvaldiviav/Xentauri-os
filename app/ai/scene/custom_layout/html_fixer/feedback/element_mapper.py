@@ -69,8 +69,7 @@ class ElementMapper:
         var target = e.target.closest('[data-vid]');
 
         if (target) {
-            e.preventDefault();  // Evitar navegación o submit real
-            e.stopPropagation();
+            // Frontend maneja preventDefault si es necesario
 
             // 2. Obtener información del elemento
             var rect = target.getBoundingClientRect();
