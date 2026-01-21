@@ -123,12 +123,14 @@ class Sandbox:
 
         return self._playwright_available
 
-    async def validate(self, html: str) -> ValidationResult:
+    async def validate(self, html: str, js_only: bool = False) -> ValidationResult:
         """
         Validate HTML by rendering and testing interactions.
 
         Args:
             html: HTML content to validate
+            js_only: If True, only capture JS errors without testing interactive elements.
+                     This is much faster (~5s vs ~60s) for Human Feedback Mode.
 
         Returns:
             ValidationResult with test results for each element
@@ -167,6 +169,14 @@ class Sandbox:
 
                 # Take initial screenshot
                 result.initial_screenshot = await page.screenshot()
+
+                # js_only mode: skip element testing (Human Feedback Mode)
+                if js_only:
+                    logger.info("JS-only mode: skipping element interaction tests")
+                    await browser.close()
+                    result.validation_time_ms = (time.time() - start_time) * 1000
+                    logger.info(f"JS-only validation completed in {result.validation_time_ms:.0f}ms")
+                    return result
 
                 # Find interactive elements
                 interactive = await self._find_interactive_elements(page)

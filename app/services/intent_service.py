@@ -241,6 +241,10 @@ class IntentService:
             # Get user's devices for context
             devices = self._get_user_devices(db, user_id)
             device_context = device_mapper.to_device_context(devices)
+
+            # Close DB connection BEFORE long AI operations
+            # The session won't be used anymore - handlers will open their own session if needed
+            db.close()
             
             # Sprint 5.1.4: Unified context building with anaphoric resolution
             # Replaces 30+ lines of manual context assembly with single call
@@ -294,10 +298,10 @@ class IntentService:
                     context=context,
                     start_time=start_time,
                     provider="gemini",  # Sprint 9: Migrated from OpenAI to Gemini
-                    db=db,
                     user_id=user_id,
+                    devices=devices,  # Pass pre-loaded devices instead of db
                 )
-            
+
             if routing_decision.complexity == TaskComplexity.COMPLEX_REASONING:
                 return await self._handle_complex_task(
                     request_id=request_id,
@@ -306,10 +310,10 @@ class IntentService:
                     context=context,
                     start_time=start_time,
                     provider="gemini",  # Sprint 9: Migrated from Anthropic to Gemini
-                    db=db,
                     user_id=user_id,
+                    devices=devices,  # Pass pre-loaded devices instead of db
                 )
-            
+
             # Simple tasks → Gemini Intent Parser
             return await self._handle_simple_task(
                 request_id=request_id,
@@ -319,7 +323,6 @@ class IntentService:
                 device_id=device_id,
                 start_time=start_time,
                 user_id=user_id,
-                db=db,
             )
         
         except Exception as e:
@@ -352,10 +355,39 @@ class IntentService:
         device_id: Optional[UUID],
         start_time: float,
         user_id: UUID,
-        db: Session = None,
     ) -> IntentResult:
         """Handle simple tasks using Gemini Intent Parser."""
-        
+        # Open a fresh DB session for handlers that need it
+        # This is closed at the end of the method
+        from app.db.session import SessionLocal
+        db = SessionLocal()
+
+        try:
+            return await self._handle_simple_task_internal(
+                request_id=request_id,
+                text=text,
+                context=context,
+                devices=devices,
+                device_id=device_id,
+                start_time=start_time,
+                user_id=user_id,
+                db=db,
+            )
+        finally:
+            db.close()
+
+    async def _handle_simple_task_internal(
+        self,
+        request_id: str,
+        text: str,
+        context: Dict[str, Any],
+        devices: List[Device],
+        device_id: Optional[UUID],
+        start_time: float,
+        user_id: UUID,
+        db: Session,
+    ) -> IntentResult:
+        """Internal handler with DB session."""
         # Parse the intent
         parsed = await intent_parser.create_parsed_command(
             text=text,
@@ -1747,8 +1779,8 @@ IMPORTANT INSTRUCTIONS:
         context: Dict[str, Any],
         start_time: float,
         provider: str,  # Sprint 9: Deprecated - all tasks now use Gemini
-        db: Session,
         user_id: UUID,
+        devices: List[Device] = None,  # Pre-loaded devices from process()
     ) -> IntentResult:
         """Handle complex tasks using Gemini with thinking mode (Sprint 9)."""
         from app.ai.providers.gemini import gemini_provider
@@ -1782,14 +1814,19 @@ IMPORTANT INSTRUCTIONS:
             }
         )
         
-        # Build unified context
+        # Build unified context - open a fresh DB session for this operation
+        from app.db.session import SessionLocal
         unified_context = None
         try:
-            unified_context = await build_unified_context(
-                user_id=user_id,
-                db=db,
-                request_id=request_id,
-            )
+            db = SessionLocal()
+            try:
+                unified_context = await build_unified_context(
+                    user_id=user_id,
+                    db=db,
+                    request_id=request_id,
+                )
+            finally:
+                db.close()  # Close immediately after context building
         except Exception as e:
             logger.error(f"Failed to build unified context: {e}")
             processing_time = (time.time() - start_time) * 1000
@@ -1921,7 +1958,7 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                     action_response=action_response,
                     request_id=request_id,
                     user_id=user_id,
-                    db=db,
+                    devices=devices,  # Pass pre-loaded devices instead of db
                     processing_time=processing_time,
                     routing_confidence=routing_decision.confidence,
                 )
@@ -1935,7 +1972,7 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                 )
 
                 return result
-            
+
             elif isinstance(action_response, ActionSequenceResponse):
                 results = []
                 for action in action_response.actions:
@@ -1943,7 +1980,7 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                         action_response=action,
                         request_id=request_id,
                         user_id=user_id,
-                        db=db,
+                        devices=devices,  # Pass pre-loaded devices instead of db
                         processing_time=processing_time,
                         routing_confidence=routing_decision.confidence,
                     )
@@ -1999,14 +2036,14 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
         action_response,
         request_id: str,
         user_id: UUID,
-        db: Session,
+        devices: List[Device],  # Pre-loaded devices instead of db
         processing_time: float,
         routing_confidence: float,
     ) -> IntentResult:
         """Execute an action from GPT-4o response."""
-        
+
         target_device_name = action_response.get_target_device()
-        
+
         if not target_device_name:
             return IntentResult(
                 success=False,
@@ -2016,8 +2053,8 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                 processing_time_ms=processing_time,
                 request_id=request_id,
             )
-        
-        devices = self._get_user_devices(db, user_id)
+
+        # Use pre-loaded devices instead of querying DB
         device, _ = device_mapper.match(target_device_name, devices)
         
         if not device:
@@ -6231,6 +6268,8 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                             user_request=intent.original_text or "",
                             layout_hints=hints_str,
                             layout_type=content_data.get("content_type"),
+                            human_feedback_mode=getattr(self, '_require_feedback', False),
+                            conversation_context=conversation_context_dict,
                         )
 
                         if layout_result.success and layout_result.html:
@@ -6294,6 +6333,7 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                         layout_result = await custom_layout_service.generate_and_validate_html(
                             scene=scene_dict,
                             user_request=intent.original_text or "",
+                            human_feedback_mode=getattr(self, '_require_feedback', False),
                         )
 
                         if layout_result.success and layout_result.html:
@@ -6353,6 +6393,7 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                         "layout_intent": layout_intent,
                         "require_feedback": True,
                         "generated_html": custom_layout,  # HTML for feedback validation
+                        "js_errors": layout_result.js_errors if hasattr(layout_result, 'js_errors') else [],
                     },
                     command_sent=False,  # NOT sent to device
                     command_id=None,

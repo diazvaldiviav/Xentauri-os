@@ -98,6 +98,7 @@ class CustomLayoutPipeline:
         title: Optional[str] = None,
         data: Optional[Dict[str, Any]] = None,
         context: Optional[Dict[str, Any]] = None,
+        human_feedback_mode: bool = False,
     ) -> PipelineResult:
         """
         Execute the complete pipeline.
@@ -153,6 +154,22 @@ class CustomLayoutPipeline:
             )
 
         logger.info(f"Generated {len(gen_result.html)} chars in {gen_result.latency_ms:.0f}ms")
+
+        # Human Feedback Mode: JS-only validation + fix loop, skip CSS/Tailwind fixes
+        if human_feedback_mode:
+            logger.info("Human Feedback Mode: Running JS validation + fix loop (no CSS fixes)")
+            fixed_html, js_errors = await self._validate_and_fix_js_only(gen_result.html)
+
+            return PipelineResult(
+                success=True,
+                html=fixed_html,
+                generation_result=gen_result,
+                validation_result=None,
+                total_latency_ms=(time.time() - start_time) * 1000,
+                tokens_used=total_tokens,
+                final_score=1.0 if not js_errors else 0.8,  # Lower score if JS errors remain
+                js_errors=js_errors,
+            )
 
         # Skip validation if requested (for testing)
         if self._skip_validation:
@@ -260,6 +277,86 @@ class CustomLayoutPipeline:
 
     def __repr__(self) -> str:
         return f"CustomLayoutPipeline(max_cycles={self._max_cycles})"
+
+    async def _validate_and_fix_js_only(self, html: str, max_attempts: int = 2) -> tuple:
+        """
+        Validate JS and fix errors until they pass or max attempts reached.
+
+        Human Feedback Mode: Only fixes JS errors, skips CSS/visual fixes.
+        Returns (fixed_html, remaining_js_errors).
+        """
+        from .html_fixer.sandbox import Sandbox
+        from .html_fixer.fixers.llm import LLMFixer
+        from .html_fixer.contracts.errors import ErrorType
+        from .html_fixer.contracts.validation import ClassifiedError, TailwindInfo
+
+        sandbox = Sandbox()
+        current_html = html
+        js_errors = []
+
+        for attempt in range(max_attempts):
+            logger.info(f"JS validation attempt {attempt + 1}/{max_attempts}")
+
+            # Validate with Sandbox (js_only=True skips element testing)
+            try:
+                val_result = await sandbox.validate(current_html, js_only=True)
+            except Exception as e:
+                logger.warning(f"Sandbox validation failed: {e}")
+                return current_html, [{"type": "validation_error", "message": str(e)}]
+
+            # Check for JS errors
+            if not val_result.js_errors:
+                logger.info("No JS errors found, HTML passes validation")
+                return current_html, []
+
+            # Convert JS errors to ClassifiedError format for LLM fixer
+            classified_errors = []
+            for js_err in val_result.js_errors:
+                classified_errors.append(
+                    ClassifiedError(
+                        error_type=ErrorType.JS_RUNTIME_ERROR,
+                        selector="script",
+                        element_tag="script",
+                        tailwind_info=TailwindInfo(),
+                        confidence=1.0,
+                        raw_error={"message": js_err},
+                    )
+                )
+
+            js_errors = self._serialize_sandbox_js_errors(val_result.js_errors)
+            logger.info(f"Found {len(js_errors)} JS errors, attempting fix")
+
+            # Last attempt? Return errors without fixing
+            if attempt == max_attempts - 1:
+                logger.info("Max attempts reached, returning remaining errors")
+                return current_html, js_errors
+
+            # Fix with LLM
+            try:
+                llm_fixer = self._get_fixer()._get_llm_fixer()
+                fix_result = await llm_fixer.fix(classified_errors, current_html)
+
+                if fix_result.success and fix_result.fixed_html:
+                    current_html = fix_result.fixed_html
+                    logger.info("LLM fix applied, rechecking...")
+                else:
+                    logger.warning(f"LLM fix failed: {fix_result.error_message}")
+                    return current_html, js_errors
+            except Exception as e:
+                logger.warning(f"LLM fix error: {e}")
+                return current_html, js_errors
+
+        return current_html, js_errors
+
+    def _serialize_sandbox_js_errors(self, js_errors: list) -> list:
+        """Convert Sandbox JS errors to serializable format."""
+        return [
+            {
+                "type": "js_runtime_error",
+                "message": err if isinstance(err, str) else str(err),
+            }
+            for err in js_errors
+        ]
 
 
 # Singleton for easy import

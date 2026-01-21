@@ -4,7 +4,12 @@ Prompts for HTML Generation.
 System prompts and user prompt templates for Gemini 3 Pro with thinking.
 """
 
+import ast
+import logging
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # Load the generation rules from markdown file
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
@@ -60,12 +65,17 @@ def build_user_prompt(
         info_type: Type of content (trivia, dashboard, game, etc.)
         title: Optional title for the content
         data: Optional data to include in the layout
-        additional_context: Any additional context
+        additional_context: Any additional context (may include conversation context)
 
     Returns:
         Formatted user prompt string
     """
     lines = [f"Create an interactive HTML layout for: {user_request}"]
+
+    # Extract and format conversation context if present
+    conversation_section = _extract_conversation_context(additional_context)
+    if conversation_section:
+        lines.append(conversation_section)
 
     lines.append(f"\nContent type: {info_type}")
 
@@ -75,8 +85,10 @@ def build_user_prompt(
     if data:
         lines.append(f"\nData to display:\n```json\n{_format_data(data)}\n```")
 
-    if additional_context:
-        lines.append(f"\nAdditional context: {additional_context}")
+    # Add remaining context (layout hints, etc.) excluding conversation
+    remaining_context = _get_remaining_context(additional_context)
+    if remaining_context:
+        lines.append(f"\nAdditional context: {remaining_context}")
 
     lines.append("\nRemember:")
     lines.append("- All buttons must have `relative z-10` and visible `active:*` feedback")
@@ -92,6 +104,122 @@ def _format_data(data: dict) -> str:
     """Format data dict as pretty JSON string."""
     import json
     return json.dumps(data, indent=2, ensure_ascii=False, default=str)
+
+
+def _parse_context_string(additional_context: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Parse the additional_context string into a dict.
+
+    The context is passed as str(dict) from the pipeline, so we use ast.literal_eval
+    to safely parse it back into a dict.
+    """
+    if not additional_context:
+        return None
+
+    try:
+        # Try ast.literal_eval for Python dict repr
+        parsed = ast.literal_eval(additional_context)
+        if isinstance(parsed, dict):
+            return parsed
+    except (ValueError, SyntaxError):
+        pass
+
+    # Try JSON parsing as fallback
+    try:
+        import json
+        parsed = json.loads(additional_context)
+        if isinstance(parsed, dict):
+            return parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return None
+
+
+def _extract_conversation_context(additional_context: Optional[str]) -> Optional[str]:
+    """
+    Extract and format conversation context for the prompt.
+
+    This is critical for topic understanding - the HTML generator needs to know
+    what the user was discussing to create relevant content.
+
+    Returns:
+        Formatted conversation section or None
+    """
+    ctx = _parse_context_string(additional_context)
+    if not ctx or "conversation" not in ctx:
+        return None
+
+    conv = ctx["conversation"]
+    if not isinstance(conv, dict):
+        return None
+
+    lines = ["\n## CONVERSATION CONTEXT (Critical for understanding the topic)"]
+    lines.append("The user has been discussing the following topic. Your HTML MUST be relevant to this conversation:")
+
+    # Format conversation history
+    history = conv.get("history", [])
+    if history:
+        lines.append("\n### Recent conversation:")
+        # Take last 5 turns max
+        for turn in history[-5:]:
+            user_msg = turn.get("user", "")
+            if user_msg:
+                # Truncate long messages
+                user_msg = user_msg[:300] + "..." if len(user_msg) > 300 else user_msg
+                lines.append(f"User: {user_msg}")
+
+            assistant_msg = turn.get("assistant", "")
+            if assistant_msg:
+                # Truncate long messages
+                assistant_msg = assistant_msg[:400] + "..." if len(assistant_msg) > 400 else assistant_msg
+                lines.append(f"Assistant: {assistant_msg}")
+
+    # Include last response if available (summarized)
+    last_response = conv.get("last_response", "")
+    if last_response and not history:
+        lines.append(f"\n### Last assistant response:")
+        last_response = last_response[:500] + "..." if len(last_response) > 500 else last_response
+        lines.append(last_response)
+
+    # Include generated content topic if available
+    generated_content = conv.get("generated_content", {})
+    if generated_content:
+        content_type = generated_content.get("content_type", "")
+        content_title = generated_content.get("title", "")
+        if content_type or content_title:
+            lines.append(f"\n### Previously generated content:")
+            if content_title:
+                lines.append(f"Title: {content_title}")
+            if content_type:
+                lines.append(f"Type: {content_type}")
+
+    # Only return if we have meaningful content
+    if len(lines) > 2:  # More than just the header
+        lines.append("\n⚠️ IMPORTANT: Your HTML layout MUST be about the topic from the conversation above, NOT a generic/random topic.")
+        return "\n".join(lines)
+
+    return None
+
+
+def _get_remaining_context(additional_context: Optional[str]) -> Optional[str]:
+    """
+    Get remaining context (layout hints, etc.) excluding conversation.
+    """
+    ctx = _parse_context_string(additional_context)
+    if not ctx:
+        # Return original if we couldn't parse it
+        return additional_context
+
+    # Remove conversation key and return remaining
+    remaining = {k: v for k, v in ctx.items() if k != "conversation"}
+    if remaining:
+        # Return just the layout hints or other relevant info
+        if "layout_hints" in remaining:
+            return f"Layout hints: {remaining['layout_hints']}"
+        return str(remaining)
+
+    return None
 
 
 # Content-type specific prompts

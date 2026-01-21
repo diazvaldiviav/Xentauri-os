@@ -57,7 +57,7 @@ from app.ai.scene.custom_layout.html_fixer import (
 # CustomLayoutService - Adapter for intent_service.py compatibility
 # =============================================================================
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import logging
 
 _service_logger = logging.getLogger(__name__)
@@ -76,6 +76,7 @@ class CustomLayoutResult:
     latency_ms: float = 0.0
     tokens_used: int = 0
     final_score: float = 0.0
+    js_errors: Optional[List[Dict[str, Any]]] = None
 
     @classmethod
     def from_pipeline_result(cls, result: PipelineResult) -> "CustomLayoutResult":
@@ -87,6 +88,7 @@ class CustomLayoutResult:
             latency_ms=result.total_latency_ms,
             tokens_used=result.tokens_used,
             final_score=result.final_score,
+            js_errors=result.js_errors,
         )
 
 
@@ -125,6 +127,8 @@ class CustomLayoutService:
         user_request: str,
         layout_hints: Optional[str] = None,
         layout_type: Optional[str] = None,
+        human_feedback_mode: bool = False,
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> CustomLayoutResult:
         """
         Generate and validate HTML from content data.
@@ -136,6 +140,7 @@ class CustomLayoutService:
             user_request: Original user request string
             layout_hints: Optional layout hints string
             layout_type: Optional explicit layout type
+            human_feedback_mode: If True, skip CSS validation and return JS errors only
 
         Returns:
             CustomLayoutResult with success, html, error, latency_ms
@@ -149,9 +154,13 @@ class CustomLayoutService:
             data = content_data.get("data")
 
             # Build context dict if there's extra info
-            context = None
+            context = {}
             if layout_hints:
-                context = {"layout_hints": layout_hints}
+                context["layout_hints"] = layout_hints
+            if conversation_context:
+                context["conversation"] = conversation_context
+            # Only pass context if it has content
+            context = context if context else None
 
             # Call the pipeline
             pipeline_result = await self._get_pipeline().process(
@@ -160,6 +169,7 @@ class CustomLayoutService:
                 title=title,
                 data=data,
                 context=context,
+                human_feedback_mode=human_feedback_mode,
             )
 
             return CustomLayoutResult.from_pipeline_result(pipeline_result)
@@ -177,6 +187,7 @@ class CustomLayoutService:
         scene: Dict[str, Any],
         user_request: str,
         layout_type: Optional[str] = None,
+        human_feedback_mode: bool = False,
     ) -> CustomLayoutResult:
         """
         Generate and validate HTML from a SceneGraph dict.
@@ -187,6 +198,7 @@ class CustomLayoutService:
             scene: SceneGraph dictionary
             user_request: Original user request string
             layout_type: Optional explicit layout type
+            human_feedback_mode: If True, skip CSS validation and return JS errors only
 
         Returns:
             CustomLayoutResult with success, html, error, latency_ms
@@ -218,6 +230,7 @@ class CustomLayoutService:
                 info_type=info_type,
                 data=data,
                 context=context,
+                human_feedback_mode=human_feedback_mode,
             )
 
             return CustomLayoutResult.from_pipeline_result(pipeline_result)
