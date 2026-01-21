@@ -7,10 +7,26 @@ primary_region = "iad"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "suspend"
+  auto_stop_machines = false  # Disabled to avoid cold starts on WebSocket connections
   auto_start_machines = true
   min_machines_running = 1
   processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "10s"
+
+# Fly Proxy configuration for long-running requests
+[http_service.http_options]
+  idle_timeout = 600  # 10 minutes for LLM operations
 
 [[vm]]
   memory = "4gb"

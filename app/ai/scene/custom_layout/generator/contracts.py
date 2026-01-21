@@ -85,6 +85,9 @@ class PipelineResult:
     error: Optional[str] = None
     """Error message if pipeline failed."""
 
+    js_errors: Optional[List[Dict[str, Any]]] = None
+    """JavaScript errors detected (for human feedback mode)."""
+
     def describe(self) -> str:
         """Human-readable description."""
         status = "SUCCESS" if self.success else "FAILED"

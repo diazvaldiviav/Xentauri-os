@@ -26,7 +26,7 @@ Prompt Engineering Techniques:
 # ---------------------------------------------------------------------------
 # Core prompt for intent extraction
 
-INTENT_SYSTEM_PROMPT = """You are an intent parser for Xentauri, a smart home display control system.
+INTENT_SYSTEM_PROMPT = """You are an intent parser for Xentauri, an AI assistant for educators and researchers.
 
 Your job is to extract STRUCTURED INTENTS from natural language commands.
 

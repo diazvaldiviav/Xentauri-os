@@ -328,7 +328,7 @@ class LLMFixer:
             prompt=user_prompt,
             system_prompt=system_prompt,
             temperature=0.2,  # Low temperature for consistent, focused output
-            max_tokens=16500,  # Gemini 3 Flash needs more tokens for complex JS fixes
+            max_tokens=32000,  # Increased for complex JS fixes
             response_mime_type="application/json",  # Force JSON output
         )
 
@@ -486,16 +486,30 @@ class LLMFixer:
 
         logger.info(
             f"[FEEDBACK_FIX] Calling LLM with {len(merged_errors)} errors, "
-            f"{len(global_feedback)} global feedback items"
+            f"{len(global_feedback)} global feedback items, "
+            f"annotated_html_len={len(annotated_html)} chars"
         )
+
+        # DEBUG: Save annotated HTML for inspection
+        try:
+            import os
+            debug_dir = "/tmp/jarvis_feedback_debug"
+            os.makedirs(debug_dir, exist_ok=True)
+            debug_file = f"{debug_dir}/annotated_html_{int(time.time())}.html"
+            with open(debug_file, "w") as f:
+                f.write(annotated_html)
+            logger.info(f"[FEEDBACK_FIX] Saved annotated HTML to {debug_file}")
+        except Exception as debug_err:
+            logger.warning(f"[FEEDBACK_FIX] Failed to save debug HTML: {debug_err}")
 
         try:
             # Call LLM with Gemini 3 Pro for better instruction following and layout preservation
+            # max_tokens increased to 65536 to avoid truncation of large HTML documents
             response = await self._provider.generate(
                 prompt=messages[1]["content"],  # User message
                 system_prompt=messages[0]["content"],  # System message
                 temperature=0.3,
-                max_tokens=16000,
+                max_tokens=65536,  # Large enough for ~25KB+ HTML documents
                 model_override=settings.GEMINI_PRO_MODEL,  # Use Gemini 3 Pro
             )
 
@@ -517,6 +531,18 @@ class LLMFixer:
                 return result
 
             logger.info(f"[FEEDBACK_FIX] LLM returned HTML ({len(fixed_html)} chars)")
+
+            # DEBUG: Save fixed HTML for comparison
+            try:
+                import os
+                debug_dir = "/tmp/jarvis_feedback_debug"
+                os.makedirs(debug_dir, exist_ok=True)
+                fixed_debug_file = f"{debug_dir}/fixed_html_{int(time.time())}.html"
+                with open(fixed_debug_file, "w") as f:
+                    f.write(fixed_html)
+                logger.info(f"[FEEDBACK_FIX] Saved fixed HTML to {fixed_debug_file}")
+            except Exception as debug_err:
+                logger.warning(f"[FEEDBACK_FIX] Failed to save debug fixed HTML: {debug_err}")
 
             result.fixed_html = fixed_html
             result.success = True

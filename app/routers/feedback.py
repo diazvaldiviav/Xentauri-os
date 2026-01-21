@@ -52,6 +52,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
 
+def _convert_sandbox_js_errors(validation_result):
+    """Convert Sandbox ValidationResult JS errors to format compatible with FeedbackMerger."""
+    from dataclasses import dataclass as make_dataclass
+
+    @make_dataclass
+    class JSSandboxError:
+        selector: str
+        error_type: str
+        message: str
+
+    errors = []
+
+    for js_err in validation_result.js_errors:
+        errors.append(JSSandboxError(
+            selector="script",
+            error_type="js_runtime_error",
+            message=js_err if isinstance(js_err, str) else str(js_err),
+        ))
+
+    return errors
+
+
 @router.post(
     "/prepare-validation",
     response_model=PrepareValidationResponse,
@@ -164,17 +186,27 @@ async def fix_with_feedback(
             for k, v in prepared.element_map.items()
         }
 
-        # 3. Combinar errores (sandbox vacío por ahora, se puede integrar después)
+        # 3. Run JS validation to get technical errors using Sandbox
+        from app.ai.scene.custom_layout.html_fixer.sandbox import Sandbox
+
+        sandbox = Sandbox()
+        validation_result = await sandbox.validate(request.html)
+
+        # Convert JS errors to sandbox-compatible format for merger
+        js_sandbox_errors = _convert_sandbox_js_errors(validation_result)
+
+        # 4. Merge JS errors + user feedback (NO CSS errors)
         merger = FeedbackMerger()
         merged_errors = merger.merge(
-            sandbox_errors=[],  # TODO: Integrar con sandbox validation
+            sandbox_errors=js_sandbox_errors,  # Only JS errors
             user_feedback=user_feedback,
             element_map=element_map_dict,
         )
 
         logger.info(
             f"Merged errors: {len(merged_errors)} total, "
-            f"{len([e for e in merged_errors if e.has_technical_cause])} technical"
+            f"{len([e for e in merged_errors if e.has_technical_cause])} technical, "
+            f"Sandbox found {len(validation_result.js_errors)} JS errors"
         )
 
         # 4. Llamar al LLM para aplicar fixes basados en feedback

@@ -126,14 +126,12 @@ REMEMBER: User feedback takes priority over sandbox errors. If user says it work
         error_context = self._build_error_context(merged_errors or [])
         global_context = self._build_global_context(global_feedback or [])
 
-        # Truncar HTML si es muy largo (mantener inicio y fin)
+        # NOTE: Do NOT truncate HTML - the fixer needs the complete document
+        # to properly fix JavaScript functions and maintain code integrity.
+        # Previous truncation was causing:
+        # - SyntaxError: Unexpected end of input (JS cut in half)
+        # - ReferenceError: showInfo is not defined (function in truncated middle)
         html_display = annotated_html
-        if len(annotated_html) > 8000:
-            html_display = (
-                annotated_html[:4000] +
-                "\n\n<!-- ... HTML TRUNCATED FOR BREVITY ... -->\n\n" +
-                annotated_html[-3000:]
-            )
 
         user_content = f"""## ANNOTATED HTML
 

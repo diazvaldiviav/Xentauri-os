@@ -17,7 +17,7 @@ complex docs (Claude).
 # DOCUMENT SUMMARY PROMPT
 # ---------------------------------------------------------------------------
 
-DOC_SUMMARY_PROMPT = """You are a document analysis assistant for a smart home system.
+DOC_SUMMARY_PROMPT = """You are a document analysis assistant for educators and researchers using Xentauri.
 
 CRITICAL: Respond in the SAME LANGUAGE as the user's request.
 

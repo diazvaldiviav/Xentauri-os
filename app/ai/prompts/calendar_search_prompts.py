@@ -18,7 +18,7 @@ even when the exact words don't match.
 # SEMANTIC CALENDAR MATCHER PROMPT
 # ---------------------------------------------------------------------------
 
-CALENDAR_SEMANTIC_MATCHER_PROMPT = """You are a calendar event matcher for a smart home assistant.
+CALENDAR_SEMANTIC_MATCHER_PROMPT = """You are a calendar event matcher for Xentauri, an AI assistant for educators and researchers.
 
 Your task: Match a user's search query to calendar events, handling typos, translations, and synonyms.
 

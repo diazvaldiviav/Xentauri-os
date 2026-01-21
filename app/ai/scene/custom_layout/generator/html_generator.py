@@ -46,7 +46,7 @@ class HTMLGenerator:
         use_thinking: bool = True,
         thinking_level: str = "HIGH",
         temperature: float = 0.3,
-        max_tokens: int = 16000,
+        max_tokens: int = 65536,  # Increased to support large HTML documents
     ):
         """
         Initialize the HTML generator.

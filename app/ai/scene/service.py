@@ -259,7 +259,32 @@ class SceneService:
 
         context_str = ""
         if conversation_context:
-            # Extract relevant context
+            context_parts = []
+
+            # Include conversation history for topic context
+            if "history" in conversation_context and conversation_context["history"]:
+                history = conversation_context["history"]
+                # Format recent conversation turns (last 3-5 turns for context)
+                recent_turns = history[-5:] if len(history) > 5 else history
+                history_text = []
+                for turn in recent_turns:
+                    if isinstance(turn, dict):
+                        user_msg = turn.get("user", turn.get("user_message", ""))
+                        assistant_msg = turn.get("assistant", turn.get("assistant_response", ""))
+                        if user_msg:
+                            history_text.append(f"User: {user_msg[:200]}")
+                        if assistant_msg:
+                            history_text.append(f"Assistant: {assistant_msg[:300]}")
+                if history_text:
+                    context_parts.append(f"CONVERSATION CONTEXT (use this to understand the topic):\n" + "\n".join(history_text))
+
+            # Include last assistant response for immediate context
+            if "last_response" in conversation_context and conversation_context["last_response"]:
+                last_resp = conversation_context["last_response"]
+                if isinstance(last_resp, str) and last_resp.strip():
+                    context_parts.append(f"Last assistant message: {last_resp[:400]}")
+
+            # Include generated content if available
             if "generated_content" in conversation_context:
                 gen_content = conversation_context["generated_content"]
                 # generated_content is a Dict with 'content', 'type', 'title' keys
@@ -267,11 +292,14 @@ class SceneService:
                     content_text = gen_content.get("content", "")
                     content_type = gen_content.get("type", "")
                     content_title = gen_content.get("title", "")
-                    context_str = f"\n\nPrevious content ({content_type}): {content_title}\n{str(content_text)[:500]}"
+                    context_parts.append(f"Previous content ({content_type}): {content_title}\n{str(content_text)[:500]}")
                 elif isinstance(gen_content, str):
-                    context_str = f"\n\nPrevious generated content:\n{gen_content[:500]}"
+                    context_parts.append(f"Previous generated content:\n{gen_content[:500]}")
                 else:
-                    context_str = f"\n\nPrevious generated content:\n{str(gen_content)[:500]}"
+                    context_parts.append(f"Previous generated content:\n{str(gen_content)[:500]}")
+
+            if context_parts:
+                context_str = "\n\n" + "\n\n".join(context_parts)
 
         prompt = f"""Generate content data for this display request:
 

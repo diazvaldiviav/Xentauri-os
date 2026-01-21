@@ -18,7 +18,7 @@ Prompt Engineering Best Practices Used:
 # ---------------------------------------------------------------------------
 # This prompt defines the router's role and decision criteria
 
-ROUTING_SYSTEM_PROMPT = """You are an AI request router for Xentauri, a smart home display control system.
+ROUTING_SYSTEM_PROMPT = """You are an AI request router for Xentauri, an AI assistant for educators and researchers.
 
 Your job is to ANALYZE incoming requests and decide:
 1. How complex is this request?
