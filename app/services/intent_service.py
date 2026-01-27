@@ -462,9 +462,9 @@ class IntentService:
         request_id: str,
         text: str,
         routing_decision,
-        _context: Dict[str, Any],  # Reserved for future use
+        context: Dict[str, Any],  # noqa: ARG002 - Reserved for future use
         start_time: float,
-        _provider: str,  # Sprint 9: Deprecated - all tasks now use Gemini
+        provider: str,  # noqa: ARG002 - Deprecated, all tasks use Gemini
         user_id: UUID,
         devices: List[Device] = None,  # Pre-loaded devices from process()
     ) -> IntentResult:
@@ -896,7 +896,7 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
         self,
         request_id: str,
         device: Device,
-        _user_id: UUID,  # Reserved for future user-specific layouts
+        user_id: UUID,  # noqa: ARG002 - Reserved for future user-specific layouts
         parameters: Optional[Dict],
         confidence: float,
         start_time: float,
