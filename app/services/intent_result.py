@@ -22,6 +22,7 @@ class IntentResultType(str, Enum):
     CALENDAR_EDIT = "calendar_edit"  # Sprint 3.9
     DOC_QUERY = "doc_query"          # Sprint 3.9
     DISPLAY_CONTENT = "display_content"  # Sprint 4.0: Scene Graph
+    PENDING_APPROVAL = "pending_approval"  # Human feedback mode - HTML returned for preview
     CONVERSATION = "conversation"
     COMPLEX_EXECUTION = "complex_execution"
     COMPLEX_REASONING = "complex_reasoning"

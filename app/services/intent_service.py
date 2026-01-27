@@ -987,6 +987,66 @@ ALWAYS return valid JSON. For visual/interactive requests, use show_content with
                     )
 
                     custom_layout = layout_result.html
+
+                    # ---------------------------------------------------------------
+                    # HUMAN FEEDBACK MODE: Return HTML for preview instead of sending
+                    # ---------------------------------------------------------------
+                    if getattr(self, '_require_feedback', False):
+                        from app.ai.scene.custom_layout.html_fixer.feedback.element_mapper import ElementMapper
+
+                        # Prepare HTML with data-vid for feedback UI
+                        mapper = ElementMapper()
+                        prepared = mapper.prepare(custom_layout)
+
+                        # Build element_map for response
+                        element_map = {
+                            vid: {
+                                "vid": info.vid,
+                                "tag": info.tag,
+                                "classes": info.classes,
+                                "element_id": info.element_id,
+                                "text": info.text[:100] if info.text else None,  # Truncate for response size
+                            }
+                            for vid, info in prepared.element_map.items()
+                        }
+
+                        processing_time = (time.time() - start_time) * 1000
+
+                        logger.info(
+                            f"[{request_id}] Human Feedback Mode: Returning HTML for preview "
+                            f"({len(prepared.html)} chars, {prepared.total_elements} elements)"
+                        )
+
+                        # Clear loading indicator
+                        await connection_manager.send_command(
+                            device_id=device.id,
+                            command_type="loading_stop",
+                            parameters={},
+                        )
+
+                        return IntentResult(
+                            success=True,
+                            intent_type=IntentResultType.PENDING_APPROVAL,
+                            confidence=confidence,
+                            device=device,
+                            action="pending_approval",
+                            parameters=parameters,
+                            data={
+                                "html": prepared.html,  # HTML with data-vid annotations
+                                "element_map": element_map,
+                                "total_elements": prepared.total_elements,
+                                "content_type": content_data.get("content_type"),
+                                "title": content_data.get("title"),
+                            },
+                            command_sent=False,  # NOT sent to device yet
+                            message="Content generated. Review and approve to display on device.",
+                            processing_time_ms=processing_time,
+                            request_id=request_id,
+                        )
+
+                    # ---------------------------------------------------------------
+                    # NORMAL MODE: Send directly to device
+                    # ---------------------------------------------------------------
                     scene_dict = {"scene_id": request_id, "direct_flow": True}
 
                     # Send to device
