@@ -254,20 +254,20 @@ class TestHelperMethods:
         msg = service._build_success_message("unknown_action", "TV", None)
         assert "TV" in msg
     
-    def test_build_content_message_calendar(self, service):
-        """Test building show_calendar message."""
-        msg = service._build_content_message("show_calendar", "Living Room TV")
-        assert "calendar" in msg.lower()
+    def test_build_content_action_response_show(self, service):
+        """Test building show_content message."""
+        msg = service._build_content_action_response("show_content", "Living Room TV")
         assert "Living Room TV" in msg
-    
-    def test_build_content_message_calendar_with_date(self, service):
-        """Test building show_calendar message with date."""
-        msg = service._build_content_message("show_calendar", "TV", "2025-12-25")
-        assert "2025-12-25" in msg
-    
-    def test_build_content_message_clear(self, service):
+        assert "content" in msg.lower()
+
+    def test_build_content_action_response_with_search(self, service):
+        """Test building show_content message with search."""
+        msg = service._build_content_action_response("show_content", "TV", search="weather")
+        assert "weather" in msg.lower()
+
+    def test_build_content_action_response_clear(self, service):
         """Test building clear_content message."""
-        msg = service._build_content_message("clear_content", "TV")
+        msg = service._build_content_action_response("clear_content", "TV")
         assert "Cleared" in msg
 
 
@@ -285,9 +285,20 @@ class TestSingletonInstance:
     
     def test_singleton_has_methods(self):
         """Test that singleton has expected methods."""
+        # Core orchestration methods
         assert hasattr(intent_service, "process")
-        assert hasattr(intent_service, "_handle_device_command")
+        assert hasattr(intent_service, "_handle_simple_task")
+        assert hasattr(intent_service, "_handle_complex_task")
+        # Helper methods
         assert hasattr(intent_service, "_build_success_message")
+        assert hasattr(intent_service, "_build_content_action_response")
+        # Handler references
+        assert hasattr(intent_service, "_device_handler")
+        assert hasattr(intent_service, "_system_handler")
+        assert hasattr(intent_service, "_conversation_handler")
+        assert hasattr(intent_service, "_calendar_handler")
+        assert hasattr(intent_service, "_display_content_handler")
+        assert hasattr(intent_service, "_document_handler")
 
 
 # ===========================================================================
@@ -337,239 +348,7 @@ class TestProcessWithMocks:
 
 
 # ===========================================================================
-# DEVICE QUERY HANDLER TESTS
+# NOTE: Device, System, and Conversation handler tests moved to respective
+# handler test files (test_device_handler.py, test_system_handler.py,
+# test_conversation_handler.py) as part of Sprint 3.4 refactoring.
 # ===========================================================================
-
-class TestDeviceQueryHandler:
-    """Tests for _handle_device_query."""
-    
-    @pytest.mark.asyncio
-    async def test_handle_device_query_not_found(self, service, mock_devices):
-        """Test handling query for non-existent device."""
-        from app.ai.intent.schemas import DeviceQuery, ActionType
-        
-        intent = DeviceQuery(
-            device_name="Nonexistent TV",
-            action=ActionType.STATUS,
-            confidence=0.9,
-            original_text="Is the nonexistent TV on?",
-        )
-        
-        result = await service._handle_device_query(
-            request_id="test-123",
-            intent=intent,
-            devices=mock_devices,
-            start_time=0,
-        )
-        
-        assert result.success is False
-        assert "couldn't find" in result.message.lower()
-
-
-# ===========================================================================
-# SYSTEM QUERY HANDLER TESTS
-# ===========================================================================
-
-class TestSystemQueryHandler:
-    """Tests for _handle_system_query."""
-    
-    @pytest.mark.asyncio
-    async def test_handle_system_query_list_devices_empty(self, service):
-        """Test listing devices when none exist."""
-        from app.ai.intent.schemas import SystemQuery, ActionType
-        
-        intent = SystemQuery(
-            action=ActionType.LIST_DEVICES,
-            confidence=0.95,
-            original_text="What devices do I have?",
-        )
-        
-        from uuid import uuid4
-        from unittest.mock import patch, AsyncMock, MagicMock
-        
-        # Mock gemini_provider and build_unified_context for multilingual tests
-        mock_response = MagicMock()
-        mock_response.success = True
-        mock_response.content = "You don't have any devices yet. Add one to get started!"
-        
-        mock_context = MagicMock()
-        mock_context.user_name = "Test User"
-        mock_context.device_count = 0
-        mock_context.online_devices = []
-        mock_context.has_google_calendar = False
-        mock_context.has_google_docs = False
-        
-        with patch('app.ai.providers.gemini.gemini_provider.generate', new_callable=AsyncMock, return_value=mock_response), \
-             patch('app.ai.context.build_unified_context', new_callable=AsyncMock, return_value=mock_context):
-            result = await service._handle_system_query(
-                request_id="test-123",
-                intent=intent,
-                devices=[],
-                user_id=uuid4(),
-                original_text="What devices do I have?",
-                start_time=0,
-            )
-        
-        assert result.success is True
-        assert "device" in result.message.lower()
-    
-    @pytest.mark.asyncio
-    async def test_handle_system_query_list_devices(self, service, mock_devices):
-        """Test listing devices."""
-        from app.ai.intent.schemas import SystemQuery, ActionType
-        from uuid import uuid4
-        from unittest.mock import patch, AsyncMock, MagicMock
-        
-        intent = SystemQuery(
-            action=ActionType.LIST_DEVICES,
-            confidence=0.95,
-            original_text="What devices do I have?",
-        )
-        
-        mock_response = MagicMock()
-        mock_response.success = True
-        mock_response.content = "🟢 Living Room TV (online)\n🔴 Bedroom Monitor (offline)"
-        
-        mock_context = MagicMock()
-        mock_context.user_name = "Test User"
-        mock_context.device_count = 2
-        mock_context.online_devices = [MagicMock(device_name="Living Room TV")]
-        mock_context.has_google_calendar = False
-        mock_context.has_google_docs = False
-        
-        with patch('app.ai.providers.gemini.gemini_provider.generate', new_callable=AsyncMock, return_value=mock_response), \
-             patch('app.ai.context.build_unified_context', new_callable=AsyncMock, return_value=mock_context):
-            result = await service._handle_system_query(
-                request_id="test-123",
-                intent=intent,
-                devices=mock_devices,
-                user_id=uuid4(),
-                original_text="What devices do I have?",
-                start_time=0,
-            )
-        
-        assert result.success is True
-        assert "Living Room TV" in result.message or "device" in result.message.lower()
-    
-    @pytest.mark.asyncio
-    async def test_handle_system_query_help(self, service, mock_devices):
-        """Test help query."""
-        from app.ai.intent.schemas import SystemQuery, ActionType
-        from uuid import uuid4
-        from unittest.mock import patch, AsyncMock, MagicMock
-        
-        intent = SystemQuery(
-            action=ActionType.HELP,
-            confidence=0.95,
-            original_text="Help",
-        )
-        
-        mock_response = MagicMock()
-        mock_response.success = True
-        mock_response.content = "I can help you! Try: 'Turn on the TV', 'Show my calendar'"
-        
-        mock_context = MagicMock()
-        mock_context.user_name = "Test User"
-        mock_context.device_count = 2
-        mock_context.online_devices = [MagicMock(device_name="Living Room TV")]
-        mock_context.has_google_calendar = True
-        mock_context.has_google_docs = False
-        
-        with patch('app.ai.providers.gemini.gemini_provider.generate', new_callable=AsyncMock, return_value=mock_response), \
-             patch('app.ai.context.build_unified_context', new_callable=AsyncMock, return_value=mock_context):
-            result = await service._handle_system_query(
-                request_id="test-123",
-                intent=intent,
-                devices=mock_devices,
-                user_id=uuid4(),
-                original_text="Help",
-                start_time=0,
-            )
-        
-        assert result.success is True
-        assert "help" in result.message.lower() or "can" in result.message.lower()
-
-
-# ===========================================================================
-# CONVERSATION HANDLER TESTS
-# ===========================================================================
-
-class TestConversationHandler:
-    """Tests for _handle_conversation."""
-    
-    @pytest.mark.asyncio
-    async def test_handle_conversation_greeting(self, service):
-        """Test greeting conversation."""
-        from app.ai.intent.schemas import ConversationIntent, ActionType
-        from uuid import uuid4
-        from unittest.mock import patch, AsyncMock, MagicMock
-        
-        intent = ConversationIntent(
-            action=ActionType.GREETING,
-            confidence=0.9,
-            original_text="Hello!",
-        )
-        
-        mock_response = MagicMock()
-        mock_response.success = True
-        mock_response.content = "Hello! I'm Jarvis, your AI assistant. How can I help you today?"
-        mock_response.metadata = {}
-        
-        mock_context = MagicMock()
-        mock_context.user_name = "Test User"
-        mock_context.device_count = 2
-        mock_context.online_devices = [MagicMock(device_name="Living Room TV")]
-        mock_context.has_google_calendar = True
-        mock_context.has_google_docs = False
-        
-        with patch('app.ai.providers.gemini.gemini_provider.generate', new_callable=AsyncMock, return_value=mock_response), \
-             patch('app.ai.context.build_unified_context', new_callable=AsyncMock, return_value=mock_context):
-            result = await service._handle_conversation(
-                request_id="test-123",
-                intent=intent,
-                user_id=uuid4(),
-                original_text="Hello!",
-                start_time=0,
-            )
-        
-        assert result.success is True
-        assert result.intent_type == IntentResultType.CONVERSATION
-        assert "hello" in result.message.lower() or "jarvis" in result.message.lower()
-    
-    @pytest.mark.asyncio
-    async def test_handle_conversation_thanks(self, service):
-        """Test thanks conversation."""
-        from app.ai.intent.schemas import ConversationIntent, ActionType
-        from uuid import uuid4
-        from unittest.mock import patch, AsyncMock, MagicMock
-        
-        intent = ConversationIntent(
-            action=ActionType.THANKS,
-            confidence=0.9,
-            original_text="Thank you!",
-        )
-        
-        mock_response = MagicMock()
-        mock_response.success = True
-        mock_response.content = "You're welcome! Let me know if you need anything else."
-        mock_response.metadata = {}
-        
-        mock_context = MagicMock()
-        mock_context.user_name = "Test User"
-        mock_context.device_count = 2
-        mock_context.online_devices = [MagicMock(device_name="Living Room TV")]
-        mock_context.has_google_calendar = True
-        mock_context.has_google_docs = False
-        
-        with patch('app.ai.providers.gemini.gemini_provider.generate', new_callable=AsyncMock, return_value=mock_response), \
-             patch('app.ai.context.build_unified_context', new_callable=AsyncMock, return_value=mock_context):
-            result = await service._handle_conversation(
-                request_id="test-123",
-                intent=intent,
-                user_id=uuid4(),
-                original_text="Thank you!",
-                start_time=0,
-            )
-        
-        assert result.success is True
-        assert "welcome" in result.message.lower()
