@@ -425,6 +425,7 @@ class ConversationContextService:
             "id": context.last_doc_id,
             "url": context.last_doc_url,
             "title": context.last_doc_title,
+            "content": context.last_doc_content,
         }
     
     def get_last_search(self, user_id: str) -> Optional[Dict]:

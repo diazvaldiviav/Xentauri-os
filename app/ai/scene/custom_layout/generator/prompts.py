@@ -110,27 +110,27 @@ def _parse_context_string(additional_context: Optional[str]) -> Optional[Dict[st
     """
     Parse the additional_context string into a dict.
 
-    The context is passed as str(dict) from the pipeline, so we use ast.literal_eval
-    to safely parse it back into a dict.
+    The context is passed as JSON from the pipeline (json.dumps with default=str).
+    Falls back to ast.literal_eval for legacy str(dict) format.
     """
     if not additional_context:
         return None
 
-    try:
-        # Try ast.literal_eval for Python dict repr
-        parsed = ast.literal_eval(additional_context)
-        if isinstance(parsed, dict):
-            return parsed
-    except (ValueError, SyntaxError):
-        pass
-
-    # Try JSON parsing as fallback
+    # Try JSON first (primary format after fix)
     try:
         import json
         parsed = json.loads(additional_context)
         if isinstance(parsed, dict):
             return parsed
     except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Fallback: ast.literal_eval for legacy str(dict) format
+    try:
+        parsed = ast.literal_eval(additional_context)
+        if isinstance(parsed, dict):
+            return parsed
+    except (ValueError, SyntaxError):
         pass
 
     return None
@@ -175,24 +175,41 @@ def _extract_conversation_context(additional_context: Optional[str]) -> Optional
                 assistant_msg = assistant_msg[:400] + "..." if len(assistant_msg) > 400 else assistant_msg
                 lines.append(f"Assistant: {assistant_msg}")
 
-    # Include last response if available (summarized)
+    # Include last response always (not just when no history) - critical for topic continuity
     last_response = conv.get("last_response", "")
-    if last_response and not history:
+    if last_response:
         lines.append(f"\n### Last assistant response:")
         last_response = last_response[:500] + "..." if len(last_response) > 500 else last_response
         lines.append(last_response)
 
-    # Include generated content topic if available
+    # Include generated content with actual content (not just title/type)
     generated_content = conv.get("generated_content", {})
     if generated_content:
-        content_type = generated_content.get("content_type", "")
+        content_type = generated_content.get("content_type", "") or generated_content.get("type", "")
         content_title = generated_content.get("title", "")
-        if content_type or content_title:
+        content_body = generated_content.get("content", "")
+        if content_type or content_title or content_body:
             lines.append(f"\n### Previously generated content:")
             if content_title:
                 lines.append(f"Title: {content_title}")
             if content_type:
                 lines.append(f"Type: {content_type}")
+            if content_body:
+                content_body = content_body[:800] + "..." if len(content_body) > 800 else content_body
+                lines.append(f"Content: {content_body}")
+
+    # Include content memory items for richer context
+    content_memory = conv.get("content_memory", [])
+    if content_memory:
+        lines.append(f"\n### Recent content memory ({len(content_memory)} items):")
+        for item in content_memory[-3:]:  # Last 3 items
+            item_title = item.get("title", "untitled")
+            item_type = item.get("type", "unknown")
+            item_content = item.get("content", "")
+            lines.append(f"- [{item_type}] {item_title}")
+            if item_content:
+                item_content = item_content[:300] + "..." if len(item_content) > 300 else item_content
+                lines.append(f"  {item_content}")
 
     # Only return if we have meaningful content
     if len(lines) > 2:  # More than just the header

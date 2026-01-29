@@ -11,6 +11,7 @@ primary_region = "iad"
   auto_start_machines = true
   min_machines_running = 1
   processes = ["app"]
+  sticky = true  # Session affinity: same client always hits same machine (in-memory context)
 
   [http_service.concurrency]
     type = "requests"
