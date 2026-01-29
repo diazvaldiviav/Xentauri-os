@@ -279,15 +279,32 @@ class SceneService:
                         if user_msg:
                             history_text.append(f"User: {user_msg[:200]}")
                         if assistant_msg:
-                            history_text.append(f"Assistant: {assistant_msg[:300]}")
+                            history_text.append(f"Assistant: {assistant_msg[:400]}")
                 if history_text:
-                    context_parts.append(f"CONVERSATION CONTEXT (use this to understand the topic):\n" + "\n".join(history_text))
+                    context_parts.append(
+                        "⚠️ CONVERSATION CONTEXT — Your content MUST be about THIS topic:\n"
+                        + "\n".join(history_text)
+                    )
 
             # Include last assistant response for immediate context
             if "last_response" in conversation_context and conversation_context["last_response"]:
                 last_resp = conversation_context["last_response"]
                 if isinstance(last_resp, str) and last_resp.strip():
-                    context_parts.append(f"Last assistant message: {last_resp[:400]}")
+                    context_parts.append(f"Last assistant response (use this for topic details):\n{last_resp[:500]}")
+
+            # Include last doc content if available
+            if "last_doc" in conversation_context:
+                last_doc = conversation_context["last_doc"]
+                if isinstance(last_doc, dict):
+                    doc_title = last_doc.get("title", "")
+                    doc_content = last_doc.get("content", "")
+                    if doc_title or doc_content:
+                        doc_parts = []
+                        if doc_title:
+                            doc_parts.append(f"Document title: {doc_title}")
+                        if doc_content:
+                            doc_parts.append(f"Document content:\n{doc_content[:800]}")
+                        context_parts.append("Referenced document:\n" + "\n".join(doc_parts))
 
             # Include generated content if available
             if "generated_content" in conversation_context:
@@ -328,7 +345,8 @@ IMPORTANT:
 - For trivia/quiz: include 5-10 real questions with answers
 - For visualizations: include all elements needed
 - For games: include game state and rules
-- Be creative and engaging"""
+- ⚠️ CRITICAL: If CONVERSATION CONTEXT is provided above, your content MUST be about that specific topic. Do NOT generate content about a different or random topic. The user is referring to what was discussed in the conversation. Use the actual data, dates, events, and details from the conversation context.
+- Match the language of the user request"""
 
         logger.info(f"Generating content data (skip SceneGraph) for: {user_request[:50]}...")
         logger.info(
