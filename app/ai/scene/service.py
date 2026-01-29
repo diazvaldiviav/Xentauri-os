@@ -255,7 +255,12 @@ class SceneService:
 
         realtime_str = ""
         if realtime_data:
-            realtime_str = f"\n\nReal-time data available:\n{json.dumps(realtime_data, ensure_ascii=False, indent=2, default=str)}"
+            # Sanitize external real-time data before embedding in LLM prompt
+            from app.services.external_data_sanitizer import external_data_sanitizer
+            sanitized_realtime = external_data_sanitizer.sanitize_dict(
+                realtime_data, source="scene_service.realtime_data"
+            )
+            realtime_str = f"\n\nReal-time data available:\n{json.dumps(sanitized_realtime, ensure_ascii=False, indent=2, default=str)}"
 
         context_str = ""
         if conversation_context:
@@ -326,6 +331,13 @@ IMPORTANT:
 - Be creative and engaging"""
 
         logger.info(f"Generating content data (skip SceneGraph) for: {user_request[:50]}...")
+        logger.info(
+            f"[CONTEXT_DEBUG] generate_content_data: "
+            f"conversation_context keys={list(conversation_context.keys()) if conversation_context else 'None'}, "
+            f"context_str_len={len(context_str)}"
+        )
+        if context_str:
+            logger.info(f"[CONTEXT_DEBUG] context_str preview: {context_str[:300]}...")
 
         response = await gemini_provider.generate(
             prompt=prompt,

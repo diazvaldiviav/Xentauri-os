@@ -147,12 +147,33 @@ def _extract_conversation_context(additional_context: Optional[str]) -> Optional
         Formatted conversation section or None
     """
     ctx = _parse_context_string(additional_context)
+    logger.info(
+        f"[CONTEXT_DEBUG] _extract_conversation_context: "
+        f"parsed ctx keys={list(ctx.keys()) if ctx else 'None'}, "
+        f"has_conversation={'conversation' in ctx if ctx else False}"
+    )
+    if ctx:
+        logger.info(f"[CONTEXT_DEBUG] ctx top-level keys: {list(ctx.keys())}")
     if not ctx or "conversation" not in ctx:
+        logger.warning(
+            f"[CONTEXT_DEBUG] No 'conversation' key in context! "
+            f"ctx={'None' if not ctx else list(ctx.keys())}. "
+            f"raw additional_context[:200]={additional_context[:200] if additional_context else 'None'}"
+        )
         return None
 
     conv = ctx["conversation"]
     if not isinstance(conv, dict):
+        logger.warning(f"[CONTEXT_DEBUG] 'conversation' is not a dict: {type(conv)}")
         return None
+
+    logger.info(
+        f"[CONTEXT_DEBUG] conversation keys: {list(conv.keys())}, "
+        f"history_len={len(conv.get('history', []))}, "
+        f"has_last_response={bool(conv.get('last_response'))}, "
+        f"has_generated_content={bool(conv.get('generated_content'))}, "
+        f"has_content_memory={bool(conv.get('content_memory'))}"
+    )
 
     lines = ["\n## CONVERSATION CONTEXT (Critical for understanding the topic)"]
     lines.append("The user has been discussing the following topic. Your HTML MUST be relevant to this conversation:")

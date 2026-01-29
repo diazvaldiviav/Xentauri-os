@@ -146,6 +146,10 @@ class CustomLayoutService:
             CustomLayoutResult with success, html, error, latency_ms
         """
         _service_logger.info(f"generate_and_validate_html_from_data: {user_request[:50]}...")
+        _service_logger.info(
+            f"[CONTEXT_DEBUG] service adapter: conversation_context keys="
+            f"{list(conversation_context.keys()) if conversation_context else 'None'}"
+        )
 
         try:
             # Extract info from content_data

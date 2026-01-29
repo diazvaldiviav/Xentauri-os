@@ -728,6 +728,47 @@ class DisplayContentHandler(IntentHandler):
                 f"{len(content_memory)} items"
             )
 
+        # DEBUG: Log full conversation context for tracing context loss
+        logger.info(
+            f"[{request_id}] [CONTEXT_DEBUG] conversation_context_dict keys: {list(conversation_context_dict.keys())}"
+        )
+        if "history" in conversation_context_dict:
+            for i, turn in enumerate(conversation_context_dict["history"]):
+                logger.info(
+                    f"[{request_id}] [CONTEXT_DEBUG] history[{i}]: "
+                    f"user={turn.get('user', '')[:80]}... | "
+                    f"assistant={turn.get('assistant', '')[:80]}... | "
+                    f"intent={turn.get('intent')}"
+                )
+        if "last_response" in conversation_context_dict:
+            logger.info(
+                f"[{request_id}] [CONTEXT_DEBUG] last_response: "
+                f"{conversation_context_dict['last_response'][:150]}..."
+            )
+        if "generated_content" in conversation_context_dict:
+            gc = conversation_context_dict["generated_content"]
+            logger.info(
+                f"[{request_id}] [CONTEXT_DEBUG] generated_content: "
+                f"type={gc.get('type')}, title={gc.get('title')}, "
+                f"content_len={len(gc.get('content', '') or '')}"
+            )
+        if "last_doc" in conversation_context_dict:
+            ld = conversation_context_dict["last_doc"]
+            logger.info(
+                f"[{request_id}] [CONTEXT_DEBUG] last_doc: "
+                f"title={ld.get('title')}, content_len={len(ld.get('content', '') or '')}"
+            )
+        if "content_memory" in conversation_context_dict:
+            logger.info(
+                f"[{request_id}] [CONTEXT_DEBUG] content_memory: "
+                f"{len(conversation_context_dict['content_memory'])} items"
+            )
+        if not conversation_context_dict:
+            logger.warning(
+                f"[{request_id}] [CONTEXT_DEBUG] conversation_context_dict is EMPTY! "
+                f"Context may be lost (different machine?)"
+            )
+
         return conversation_context_dict
 
     async def _generate_scene_and_layout(

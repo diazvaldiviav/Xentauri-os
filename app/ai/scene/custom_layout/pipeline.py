@@ -8,6 +8,7 @@ Coordinates:
 This is the main entry point for the custom layout system.
 """
 
+import json
 import logging
 import time
 from typing import Any, Dict, Optional, TYPE_CHECKING
@@ -15,6 +16,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from .generator import HTMLGenerator, PipelineResult, GenerationContext
 from .html_fixer.orchestrator import Orchestrator
 from .html_fixer.fixers.llm import LLMFixer
+from app.services.csp_injector import csp_injector
 
 if TYPE_CHECKING:
     from app.ai.providers.gemini import GeminiProvider
@@ -125,12 +127,20 @@ class CustomLayoutPipeline:
         logger.info(f"Pipeline started: {user_request[:50]}...")
 
         # Build generation context
+        additional_context_json = json.dumps(context, default=str, ensure_ascii=False) if context else None
+        logger.info(
+            f"[CONTEXT_DEBUG] pipeline.process: context keys={list(context.keys()) if context else 'None'}, "
+            f"additional_context_json len={len(additional_context_json) if additional_context_json else 0}"
+        )
+        if additional_context_json:
+            logger.info(f"[CONTEXT_DEBUG] pipeline additional_context preview: {additional_context_json[:400]}...")
+
         gen_context = GenerationContext(
             user_request=user_request,
             info_type=info_type,
             title=title,
             data=data,
-            additional_context=str(context) if context else None,
+            additional_context=additional_context_json,
         )
 
         # ===== PHASE 1: Generate HTML =====
@@ -162,7 +172,7 @@ class CustomLayoutPipeline:
 
             return PipelineResult(
                 success=True,
-                html=fixed_html,
+                html=csp_injector.inject(fixed_html) if fixed_html else fixed_html,
                 generation_result=gen_result,
                 validation_result=None,
                 total_latency_ms=(time.time() - start_time) * 1000,
@@ -175,7 +185,7 @@ class CustomLayoutPipeline:
         if self._skip_validation:
             return PipelineResult(
                 success=True,
-                html=gen_result.html,
+                html=csp_injector.inject(gen_result.html) if gen_result.html else gen_result.html,
                 generation_result=gen_result,
                 validation_result=None,
                 total_latency_ms=(time.time() - start_time) * 1000,
@@ -199,7 +209,7 @@ class CustomLayoutPipeline:
 
         result = PipelineResult(
             success=success,
-            html=fix_result.fixed_html,
+            html=csp_injector.inject(fix_result.fixed_html) if fix_result.fixed_html else fix_result.fixed_html,
             generation_result=gen_result,
             validation_result=fix_result,
             total_latency_ms=(time.time() - start_time) * 1000,
@@ -237,7 +247,7 @@ class CustomLayoutPipeline:
 
         return PipelineResult(
             success=gen_result.success,
-            html=gen_result.html,
+            html=csp_injector.inject(gen_result.html) if gen_result.html else gen_result.html,
             generation_result=gen_result,
             validation_result=None,
             total_latency_ms=(time.time() - start_time) * 1000,
@@ -267,7 +277,7 @@ class CustomLayoutPipeline:
 
         return PipelineResult(
             success=fix_result.validation_passed or fix_result.final_score > 0.5,
-            html=fix_result.fixed_html,
+            html=csp_injector.inject(fix_result.fixed_html) if fix_result.fixed_html else fix_result.fixed_html,
             generation_result=None,
             validation_result=fix_result,
             total_latency_ms=(time.time() - start_time) * 1000,
